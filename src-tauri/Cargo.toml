@@ -17,8 +17,8 @@ rand = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
-qaqh-client = { path = "../../crates/qaqh-client" }
-qaqh-types = { path = "../../crates/qaqh-types" }
+qaqh-client = { path = "../../qaqh-backend/crates/qaqh-client" }
+qaqh-types = { path = "../../qaqh-backend/crates/qaqh-types" }
 # 设备配对(pairing.rs)直连 daemon 的 ringing v2 HTTPS 面;特性集与
 # qaqh-client 保持一致(rustls-no-provider + 进程内 ring provider),
 # 避免拖第二套 TLS 栈进产物。

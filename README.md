@@ -1,9 +1,25 @@
-# QAQ-Harness WebUI(Tauri 桌面壳)
+# QAQ-Harness 桌面客户端（qaqh-desktop-app）
 
 按 `agent-webui-phase1-spec.md`(v1.0)实现的对话页:SolidJS 2.0 rc + Vite +
-TypeScript strict,运行在 **Tauri 2 桌面壳**(`webui/src-tauri`,crate
+TypeScript strict,运行在 **Tauri 2 桌面壳**(`src-tauri/`,crate
 `qaqh-webui-app`)内。webui 浏览器 gateway 部署形态已随 Tauri 化移除
 (plan-webui-tauri C3/D1)。
+
+## 与后端仓的关系（重要）
+
+本仓于 **2026-10-07** 从后端仓 `qaqh-backend` 的 `webui/` 抽出（含完整 git 历史）。
+
+它**不是**可独立分发的产物，必须与后端仓同级共存：
+
+- `src-tauri/Cargo.toml` 经 **path 依赖**吃后端仓的 `qaqh-client` / `qaqh-types`
+  （`../../qaqh-backend/crates/...`，相对 `src-tauri/`）；
+- `src/api/qaqh/*.ts` 是**生成物**，由后端仓 crate 的 `derive(TS)` 导出——
+  生成动作在后端仓跑（`just ts-export`，见 justfile），本仓只提供落地目录。
+
+后端仓不在同级时设 `QAQH_BACKEND_ROOT`（`place-sidecar.ps1` 与 justfile 都读它）。
+
+daemon 的**权威构建在后端仓**；本仓只搬运它的产物为 Tauri sidecar。
+
 
 ## 构建
 
