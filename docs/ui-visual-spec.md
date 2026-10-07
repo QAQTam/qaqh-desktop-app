@@ -2,11 +2,11 @@
 
 版本：1.1 · 日期：2026-10-07 · 状态：分阶段实施中
 
-本文件记录 QAQH 的视觉目标与验收边界。Tauri/Electron 桌面壳使用左侧全局导航、顶部 session tabs；窄屏全局导航移到底部。未来 WinUI 由 XAML 呈现窗口、全局导航与 session list，WebView 承载会话正文和工具页面。尺寸、配色和动效需经真实页面截图与性能测试验证。
+本文件记录 QAQH 的视觉目标与验收边界。Tauri/Electron 桌面壳使用左侧全局导航、消息页工作区／会话栏、内容区顶部 session capsule；窄屏全局导航移到底部。未来 WinUI 由 XAML 呈现窗口、全局导航与 session list，WebView 承载会话正文和工具页面。尺寸、配色和动效需经真实页面截图与性能测试验证。
 
 ## 1. 目标、范围与优先级
 
-目标：建立清晰统一的 UI 原语，把全局页面导航与会话切换分层，以小面积玻璃材质强调 session tabs，保持高速流式文本、工作过程和最终回答的稳定呈现。
+目标：建立清晰统一的 UI 原语，把全局页面导航与会话切换分层；session tabs 保持主要的轻玻璃强调，Tauri 桌面壳可在原生 Mica 窗口底材上为导航与输入区使用克制的透显表层，同时保持高速流式文本、工作过程和最终回答的稳定呈现。
 
 优先级：内容正确与交互可用 > 流式性能与 DOM 稳定 > 视觉一致性 > 装饰效果。
 
@@ -14,21 +14,23 @@
 
 功能与数据契约沿用现有实现：会话创建／关闭／切换、草稿、快捷键、审批、设置保存、宿主连接与时间线归约。新增视觉不得改写后端状态，不根据文案猜测消息类型。
 
-首版不包含：真实光学折射、鼠标跟随光效、持续动画背景、整屏模糊、新导航业务入口、重做消息协议。这里的 Liquid Glass 是视觉语言的近似实现，不承诺复制系统原生材质。
+首版不包含：真实光学折射、鼠标跟随光效、持续动画背景、整屏模糊、Skills 商店等新工具业务及其后台数据契约、重做消息协议。全局导航与工具页框架属于当前 UI 壳范围。这里的 Liquid Glass 是视觉语言的近似实现，不承诺复制系统原生材质。
 
 ### 未来嵌入宿主的兼容约束
 
-WinUI/XAML 的窗口和 sidebar/session list 集成由宿主团队负责，不属于当前 Tauri/Web UI 实施范围。Web UI 保持内容组件边界清晰：正文、工具时间线、审批、输入不依赖自绘 sidebar；宽度、滚动和内容最大宽度以 WebView 自身视口为准。避免硬编码整窗 `100vw`、假定左侧没有宿主栏、或让正文绘制外层窗口边框。若将来启动 WinUI 迁移，再单独定义主题与活动会话的宿主消息契约；当前不预设或实现 XAML 桥接。
+WinUI/XAML 的窗口和 sidebar/session list 集成由宿主团队协调，本轮不实现 WinUI 桥接。当前 Tauri/Web UI 提供独立应用壳；正文、工具时间线、审批、输入等内容组件不依赖自绘 sidebar。宽度、滚动和内容最大宽度以 WebView 自身视口为准；避免硬编码整窗 `100vw`、假定左侧没有宿主栏、或让正文绘制外层窗口边框。未来嵌入宿主时，由宿主承载导航与 session list，WebView 渲染选中的主内容，并另行定义主题与活动会话的消息契约。
 
 规范用语：**必须**为验收条件；**建议**可在提供截图与理由后调整。遇到装饰与性能冲突时，降低装饰强度。
 
 ## 2. 已确定的设计方向
 
 - 全局页面导航与 session 切换是两个层级：全局为「消息 / 工具 / 设置」，session tabs 表示具体会话。
-- Tauri/Electron 桌面壳左侧显示全局导航，当前 session tabs 固定在内容区顶部；窄屏把全局导航移至底部，session tabs 仍位于顶部。
+- Tauri/Electron 桌面壳左侧显示全局导航；消息页在其右侧按 workspace 分组列出会话。内容区顶部的 capsule 保留为当前打开会话的快速切换入口。
+- 顶部 capsule 先保持现有会话切换用途；后续可评估改为当前 todo／goal 进度展示，不与本轮侧栏同时改动。
+- 窄屏把全局导航移至底部；消息侧栏暂不显示，避免挤压消息正文，顶部 capsule 仍然保留。
 - WinUI/XAML 宿主未来可以同时提供全局导航与 session list；WebView 只展示宿主选中的内容，不绘制第二份外层导航。
 - 正文用排版、留白和表面层级区分内容，模型回答不套大型卡片。
-- 玻璃仅用于 session tabs 背后的轻量表面。输入区、工具、设置使用统一的普通表面。
+- Web 视觉夹具中，玻璃仅用于 session tabs 背后的轻量表面。Tauri 使用原生窗口 Mica 作底材，导航与输入区可透显 Mica；工具、设置、菜单、审批和右侧待办面板保持实色。这里的 CSS 半透明与 backdrop-filter 是 WebView 表层近似，不等同于给单个 HTML 元素施加系统 Mica。
 - 工作期间展开当前过程；开始中途回复或最终回答时收起前一个工作段；后续工作进入新段。
 
 早期概念稿「底部会话胶囊」作为 session tabs 的外观参考；本节的全局导航与 session tabs 分层方案为当前实现决策。会话行为以本 spec 和项目代码为准，概念稿中的示例文案、图标数量不构成功能要求。
@@ -52,7 +54,7 @@ WinUI/XAML 的窗口和 sidebar/session list 集成由宿主团队负责，不�
 窄屏：标题栏 / session tabs / 内容 / 输入区 / [消息  工具  设置]
 ```
 
-桌面应用壳使用明确的布局：`titlebar / (global-nav + workspace)`；workspace 内为 `session-tabs / minmax(0, 1fr) content`。窄屏使用 `titlebar / workspace / bottom-global-nav`。视觉上导航悬浮时，布局上仍要预留真实高度。禁止用 fixed 导航覆盖输入框，再靠猜测 padding 修补。
+桌面应用壳使用明确的布局：`titlebar / (global-nav + workspace)`；消息 workspace 内为 `workspace-session-sidebar + (session-capsule / minmax(0, 1fr) content)`，工具页不显示消息侧栏。窄屏使用 `titlebar / workspace / bottom-global-nav`，并收起消息侧栏。视觉上导航悬浮时，布局上仍要预留真实高度。禁止用 fixed 导航覆盖输入框，再靠猜测 padding 修补。
 
 以上是当前 Electron/Tauri Web 独立壳布局。未来 WinUI 宿主可由 XAML 承载左侧全局导航与 session list，WebView 只承载当前会话、工具面板和设置等主内容；宿主向 WebView 分配客户区，并通过稳定接口传递当前页面／会话。WebUI 不依赖 XAML 控件，独立运行时继续提供自己的导航与 session tabs。该集成需另行定义接口并验收。
 
@@ -143,7 +145,7 @@ WinUI/XAML 的窗口和 sidebar/session list 集成由宿主团队负责，不�
 
 `backdrop-filter` 不支持时自动使用 solid。`forced-colors` 使用系统颜色并移除滤镜和阴影。减少动态效果设置负责关闭动画，不擅自把用户的减少动画偏好等同于减少透明度。
 
-首版只有顶部 session tabs 使用 backdrop blur。全局导航、设置、菜单、审批面板保持实色。禁止正文 blur、嵌套 blur、SVG displacement、动态噪声、动画 blur 半径、持续渐变动画。
+Web 首版只有顶部 session tabs 使用 backdrop blur。Tauri 壳另外允许导航栏与输入区透显原生窗口 Mica，需保持低强度、清晰可读，不能把它扩展到消息正文、工具、设置、菜单、审批面板或右侧待办面板。禁止正文 blur、嵌套 blur、SVG displacement、动态噪声、动画 blur 半径、持续渐变动画。
 
 ### 5.2 动画
 
@@ -248,7 +250,7 @@ WinUI/XAML 的窗口和 sidebar/session list 集成由宿主团队负责，不�
 
 每阶段先完成可运行结果再进入下一阶段。视觉修改如改变滚动容器结构，必须同步更新 stress fixture，使其布局与真实 App 一致；只改夹具、只测无胶囊页面不算完成性能验收。
 
-视觉夹具支持 `/stress.html?view=settings|tools|approval&theme=light|dark&material=glass|solid`；settings 使用本地确定性 `ConfigDto`，approval 使用合成高风险授权，不调用 daemon。启动 Vite 后运行 `pnpm run visual:capture`，会把 1280×900 桌面与 480×820 窄屏截图写入 `artifacts/ui-visual-review/`。这套截图只作布局回归；真实 WebView2 的 GPU／合成验收仍需单独测量。
+视觉夹具支持 `/stress.html?view=settings|tools|approval&theme=light|dark&material=glass|solid`；settings 使用本地确定性 `ConfigDto`，approval 使用合成高风险授权，不调用 daemon。启动 Vite 后运行 `pnpm run visual:capture`，截图写入 `artifacts/ui-visual-review/`，覆盖 1280×900、1024×768、800×600、640×480、480×820 与 480×640。当前矩阵重点覆盖设置、工具页和审批卡；这套截图只作布局回归，真实 WebView2 的 GPU／合成验收仍需单独测量。
 
 ## 10. 验收清单
 

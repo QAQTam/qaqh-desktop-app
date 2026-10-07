@@ -15,7 +15,7 @@ use std::sync::Mutex as StdMutex;
 use qaqh_client::{Client, ClientOptions, StopStatus, read_discovery};
 use qaqh_types::discovery::CONTROL_PROTOCOL_VERSION;
 use serde_json::{Value, json};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 use crate::challenge::ChallengeStore;
 use crate::events;
@@ -26,14 +26,18 @@ pub struct HostState {
     /// 当前持有流的 active seed(单活动标签持流,plan D4)。
     pub active_seed: StdMutex<Option<String>>,
     pub approvals: ChallengeStore,
+    /// Dev-only event mirror for the same-origin browser preview bridge.
+    pub preview_events: tokio::sync::broadcast::Sender<(String, Value)>,
 }
 
 impl HostState {
     pub fn new() -> Self {
+        let (preview_events, _) = tokio::sync::broadcast::channel(256);
         Self {
             client: StdMutex::new(None),
             active_seed: StdMutex::new(None),
             approvals: ChallengeStore::default(),
+            preview_events,
         }
     }
 }
@@ -126,7 +130,7 @@ pub async fn ensure_connected(app: &AppHandle) -> Result<Client, String> {
         return Ok(client);
     }
     if let Some(problem) = compat_problem() {
-        let _ = app.emit("conn://incompatible", problem);
+        events::emit(app, "conn://incompatible", problem);
         return Err("daemon_incompatible".into());
     }
     let client = Client::connect_async(ClientOptions {
@@ -138,7 +142,7 @@ pub async fn ensure_connected(app: &AppHandle) -> Result<Client, String> {
     .await
     .map_err(|error| {
         let message = format!("daemon connect failed: {error}");
-        let _ = app.emit("conn://error", json!({ "message": message }));
+        events::emit(app, "conn://error", json!({ "message": message }));
         message
     })?;
     *state.lock_client() = Some(client.clone());

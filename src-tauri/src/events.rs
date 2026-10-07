@@ -22,7 +22,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use qaqh_client::ClientHandlers;
 use serde_json::{Value, json};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
+
+use crate::daemon::HostState;
 
 /// conn://liveness 的最小发射间隔:回调按 SSE 字节触发,webview 只需要
 /// 低频「活着」信号。
@@ -30,7 +32,9 @@ const LIVENESS_MIN_INTERVAL_MS: u64 = 5_000;
 
 static LAST_LIVENESS_MS: AtomicU64 = AtomicU64::new(0);
 
-fn emit(app: &AppHandle, event: &str, payload: Value) {
+pub fn emit(app: &AppHandle, event: &str, payload: Value) {
+    let state = app.state::<HostState>();
+    let _ = state.preview_events.send((event.to_string(), payload.clone()));
     if let Err(error) = app.emit(event, payload) {
         log::warn!("[qaqh-webui-app] emit {event} failed: {error}");
     }

@@ -73,13 +73,13 @@ export interface TransportBackend {
   attach(seed: string, limit?: number): Promise<void>;
 
   /** 待审批(challenge 由宿主签发,canonical id 不出宿主)。 */
-  approvals(): Promise<ApprovalView[]>;
+  approvals(sessionId: string): Promise<ApprovalView[]>;
 
-  respondApproval(challengeId: string, decision: string, payload?: Record<string, unknown>): Promise<null>;
+  respondApproval(sessionId: string, challengeId: string, decision: string, payload?: Record<string, unknown>): Promise<null>;
 
-  command(channel: "control" | "conversation", command: Record<string, unknown>): Promise<Ack>;
+  command(channel: "control" | "conversation", command: Record<string, unknown>, sessionId?: string): Promise<Ack>;
 
-  rpc<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T>;
+  rpc<T = unknown>(method: string, params?: Record<string, unknown>, sessionId?: string): Promise<T>;
 
   /** Timeline 快照/翻页;`query` 形如 `?limit=30&before_index=12`。 */
   timelinePage(seed: string, query?: string): Promise<TimelinePageResponse>;

@@ -24,11 +24,26 @@ const [activeId, setActiveId] = createSignal<string | null>(null);
 const [bootError, setBootErrorSignal] = createSignal<string | null>(null);
 // setBootError 由本模块内部与 App 兜底路径共用;导出名见文件底部。
 const [creating, setCreating] = createSignal(false);
+export type SidebarSession = {
+  session_id: string;
+  title?: string | null;
+  last_summary?: string | null;
+  cwd?: string | null;
+  updated_at?: number;
+  archived?: boolean;
+  running?: boolean;
+  workspace_id?: string | null;
+};
+export type SidebarWorkspace = { id: string; title: string; path: string; order: number; missing_dir?: boolean };
+const [sessionCatalog, setSessionCatalog] = createSignal<SidebarSession[]>([]);
+const [workspaceCatalog, setWorkspaceCatalog] = createSignal<SidebarWorkspace[]>([]);
 const drafts = new Map<string, string>();
 /** 焦点令牌:切标签/新建时 +1,Composer 响应后聚焦。 */
 const [focusToken, setFocusToken] = createSignal(0);
+/** Serialize singleton-host attach calls; rapid tab changes must settle on the latest tab. */
+let activationQueue: Promise<void> = Promise.resolve();
 
-export { tabs, activeId, bootError, creating, focusToken };
+export { tabs, activeId, bootError, creating, focusToken, sessionCatalog, workspaceCatalog };
 export const setBootError = (value: string | null): void => {
   setBootErrorSignal(value);
 };
@@ -53,12 +68,22 @@ export async function activateTab(tab: Tab): Promise<void> {
   for (const other of tabs()) {
     if (other.id !== tab.id) other.store.deactivate();
   }
-  try {
-    await tab.store.activate();
-    setBootError(null);
-  } catch (error) {
-    setBootError(String(error instanceof Error ? error.message : error));
-  }
+  const activation = activationQueue.catch(() => {}).then(async () => {
+    // A rapid later click supersedes queued work before it can attach.
+    if (activeId() !== tab.id) return;
+    try {
+      await tab.store.activate();
+      if (activeId() !== tab.id) {
+        tab.store.deactivate();
+        return;
+      }
+      setBootError(null);
+    } catch (error) {
+      if (activeId() === tab.id) setBootError(String(error instanceof Error ? error.message : error));
+    }
+  });
+  activationQueue = activation;
+  await activation;
 }
 
 export async function openSession(seed: string): Promise<void> {
@@ -94,6 +119,7 @@ export async function createSession(): Promise<void> {
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 300));
       const list = await transport.sessions();
+      setSessionCatalog(list as SidebarSession[]);
       const fresh = list.map((item) => String(item.session_id)).find((id) => !before.has(id));
       if (fresh != null) {
         await openSession(fresh);
@@ -111,7 +137,12 @@ export async function createSession(): Promise<void> {
 /** 轮询 sessions 列表:标题/turn_count 驱动后台状态点(§5.2)。 */
 export async function pollSessions(): Promise<void> {
   try {
-    const list = await transport.sessions();
+    const [list, workspaces] = await Promise.all([
+      transport.sessions() as Promise<SidebarSession[]>,
+      transport.rpc<SidebarWorkspace[]>("workspace.list").catch(() => []),
+    ]);
+    setSessionCatalog(list);
+    setWorkspaceCatalog(workspaces);
     for (const item of list) {
       const tab = tabs().find((candidate) => candidate.seed === String(item.session_id));
       if (tab == null) continue;
@@ -128,7 +159,12 @@ export async function pollSessions(): Promise<void> {
 
 /** 启动:选一个非归档会话(优先运行中)作为第一个标签。 */
 export async function boot(): Promise<void> {
-  const list = await transport.sessions();
+  const [list, workspaces] = await Promise.all([
+    transport.sessions() as Promise<SidebarSession[]>,
+    transport.rpc<SidebarWorkspace[]>("workspace.list").catch(() => []),
+  ]);
+  setSessionCatalog(list);
+  setWorkspaceCatalog(workspaces);
   const live = list.find((item) => !item.archived && item.running) ?? list.find((item) => !item.archived) ?? list[0];
   if (live?.session_id == null) {
     setBootError("没有可用会话");

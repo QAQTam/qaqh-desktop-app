@@ -117,7 +117,6 @@ pub async fn attach(
         let mut active = state.lock_active_seed();
         let previous = active.clone();
         if previous.as_deref() != Some(seed.as_str()) {
-            state.approvals.clear();
             *active = Some(seed.clone());
         }
         // 同 seed 重入不视为切换。
@@ -136,15 +135,13 @@ pub async fn attach(
     Ok(())
 }
 
-/// `() → Vec<ApprovalView>`(challenge 由宿主签发;无 active seed 时为空)。
+/// `(seed) → Vec<ApprovalView>`(challenge 由宿主签发并按 session 隔离)。
 #[tauri::command]
 pub async fn pending_approvals(
     app: AppHandle,
     state: State<'_, HostState>,
+    seed: String,
 ) -> Result<Vec<Value>, String> {
-    let Some(seed) = active_seed_of(&state) else {
-        return Ok(Vec::new());
-    };
     let client = daemon::ensure_connected(&app).await?;
     let pending = client.pending_approvals(&seed).await.map_err(string_of)?;
     state
@@ -153,19 +150,17 @@ pub async fn pending_approvals(
         .map_err(|code| format!("approval projection failed: {code}"))
 }
 
-/// `(challenge_id, decision, payload) → ()`。challenge 一次性消费 + scope 校验
-/// 先于任何 daemon 调用(失败的命令不能复用同一 challenge)。
+/// `(seed, challenge_id, decision, payload) → ()`。challenge 一次性消费 + scope
+/// 校验先于任何 daemon 调用(失败的命令不能复用同一 challenge)。
 #[tauri::command]
 pub async fn respond_approval(
     app: AppHandle,
     state: State<'_, HostState>,
+    seed: String,
     challenge_id: String,
     decision: String,
     payload: Value,
 ) -> Result<(), String> {
-    let Some(seed) = active_seed_of(&state) else {
-        return Err("no_active_seed".into());
-    };
     let challenge = state
         .approvals
         .consume(&challenge_id, &seed)
@@ -346,4 +341,33 @@ pub async fn stop_stale_daemon() -> Result<&'static str, String> {
         qaqh_client::StopStatus::Busy => "busy",
         qaqh_client::StopStatus::Unsupported => "unsupported",
     })
+}
+
+/// Exit the desktop shell, optionally asking the daemon to stop first.
+/// `stop_active_work` is only true after the user confirms that every connected
+/// session may be interrupted; the safe default uses stop-if-idle.
+#[tauri::command]
+pub async fn exit_app(
+    app: AppHandle,
+    stop_daemon: bool,
+    stop_active_work: bool,
+) -> Result<(), String> {
+    if stop_daemon {
+        let client = daemon::ensure_connected(&app).await?;
+        let status = client
+            .stop_daemon(!stop_active_work)
+            .await
+            .map_err(string_of)?;
+        match status {
+            qaqh_client::StopStatus::Stopping => {}
+            qaqh_client::StopStatus::Busy => {
+                return Err("后台任务状态刚刚变化；为保护任务，daemon 未停止".into());
+            }
+            qaqh_client::StopStatus::Unsupported => {
+                return Err("当前 daemon 不支持安全停止".into());
+            }
+        }
+    }
+    app.exit(0);
+    Ok(())
 }

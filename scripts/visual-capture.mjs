@@ -117,10 +117,16 @@ try {
     ["settings-dark-glass-narrow-pairing", { view: "settings", theme: "dark", material: "glass", width: 480, height: 820, section: "section-pairing" }],
     ["tools-light-solid-desktop", { view: "tools", theme: "light", material: "solid", width: 1280, height: 900 }],
     ["tools-dark-solid-narrow", { view: "tools", theme: "dark", material: "solid", width: 480, height: 820 }],
+    ["tools-light-solid-800x600", { view: "tools", theme: "light", material: "solid", width: 800, height: 600 }],
+    ["tools-dark-solid-480x640", { view: "tools", theme: "dark", material: "solid", width: 480, height: 640 }],
     ["approval-light-solid-desktop", { view: "approval", theme: "light", material: "solid", width: 1280, height: 900 }],
     ["approval-light-glass-desktop", { view: "approval", theme: "light", material: "glass", width: 1280, height: 900 }],
     ["approval-dark-glass-narrow", { view: "approval", theme: "dark", material: "glass", width: 480, height: 820 }],
     ["approval-dark-solid-narrow", { view: "approval", theme: "dark", material: "solid", width: 480, height: 820 }],
+    ["approval-light-solid-1024x768", { view: "approval", theme: "light", material: "solid", width: 1024, height: 768 }],
+    ["approval-dark-glass-800x600", { view: "approval", theme: "dark", material: "glass", width: 800, height: 600 }],
+    ["approval-light-solid-640x480", { view: "approval", theme: "light", material: "solid", width: 640, height: 480 }],
+    ["approval-dark-glass-480x640", { view: "approval", theme: "dark", material: "glass", width: 480, height: 640 }],
   ];
   for (const [name, options] of scenarios) await capture(name, options);
 } finally {

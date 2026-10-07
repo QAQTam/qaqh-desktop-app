@@ -14,6 +14,8 @@ import { ThinkingChain } from "./thinking/ThinkingChain";
 import { Composer } from "./composer/Composer";
 import { ApprovalStack } from "./approval/ApprovalCards";
 import { GlobalNav } from "./app/GlobalNav";
+import { MessageSidebar } from "./app/MessageSidebar";
+import IconArrowLeft from "~icons/lucide/arrow-left";
 import { ToolsPage } from "./app/ToolsPage";
 import { SettingsView } from "./settings/SettingsView";
 import { reload as reloadSettings } from "./settings/store";
@@ -24,12 +26,16 @@ import { transport } from "./lib/transport";
 import type { ConfigDto } from "./api/qaqh/ConfigDto";
 import type { ApprovalView } from "./lib/transport";
 import type { Tab } from "./tabs/store";
+import type { SidebarSession, SidebarWorkspace } from "./tabs/store";
 import "./styles/app.css";
 
 /** 会话总回合数(权威 total_turns)。 */
 const previewParams = new URLSearchParams(window.location.search);
 const previewView = previewParams.get("view");
-const isVisualPreview = previewView === "settings" || previewView === "approval" || previewView === "tools";
+const isVisualPreview = previewView === "messages" || previewView === "settings" || previewView === "approval" || previewView === "tools";
+const [currentView, setCurrentView] = createSignal<"messages" | "tools" | "settings">(
+  previewView === "settings" || previewView === "tools" ? previewView : "messages",
+);
 const TOTAL = isVisualPreview ? 4 : 200;
 /** 假页水位;实时条目序号从 liveSeq 往后走。 */
 let watermark = 2000;
@@ -256,9 +262,23 @@ for (let index = 2; index <= 20; index += 1) {
   if (index % 7 === 0) extraStore.activity[1]("working");
   fixtureTabs.push({ id: `tab-stress-${index}`, seed: `stress-${index}`, store: extraStore });
 }
+const previewWorkspaces: SidebarWorkspace[] = [
+  { id: "ws-web", title: "qaqh-desktop-app", path: "E:/qaqh-desktop-app", order: 0 },
+  { id: "ws-backend", title: "qaqh-backend", path: "E:/qaqh-backend", order: 1 },
+];
+const previewSessions: SidebarSession[] = fixtureTabs.map((item, index) => ({
+  session_id: item.seed,
+  title: item.store.title[0]() ?? `会话 ${index + 1}`,
+  cwd: index < 8 ? "E:/qaqh-desktop-app" : index < 14 ? "E:/qaqh-backend" : null,
+  workspace_id: index < 8 ? "ws-web" : index < 14 ? "ws-backend" : null,
+  running: item.store.activity[0]() === "working",
+  updated_at: 100 - index,
+}));
+const [previewActiveSeed, setPreviewActiveSeed] = createSignal(tab.seed);
+const previewActiveTab = (): Tab => fixtureTabs.find((item) => item.seed === previewActiveSeed()) ?? tab;
 const [draft, setDraft] = createSignal("");
 
-if (isVisualPreview && previewView === "settings") {
+if (isVisualPreview) {
   const previewConfig: ConfigDto = {
     model: "qaqh-visual-preview",
     baseUrl: "https://api.example.test/v1",
@@ -965,32 +985,48 @@ declare global {
 }
 
 const bootStart = performance.now();
+const navigatePreview = (next: "messages" | "tools" | "settings"): void => {
+  setCurrentView(next);
+  if (next === "settings") void reloadSettings();
+  if (next === "messages" && previewView === "settings") void store.resnapshot();
+};
 // 复刻 App 的标题栏、全局导航、顶部 session tabs 与消息／工具内容区。
 render(
   () => (
     <div id="app">
       <header id="top">
+        <Show when={currentView() !== "messages"}>
+          <button type="button" class="titlebar-back" aria-label="返回消息" title="返回消息" onClick={() => navigatePreview("messages")}>
+            <IconArrowLeft />
+          </button>
+        </Show>
         <span class="titlebar-brand">QAQH</span>
-        <span class="titlebar-session-title">{previewView === "settings" ? "设置" : previewView === "tools" ? "工具" : "消息"}</span>
+        <span class="titlebar-session-title">{currentView() === "settings" ? "设置" : currentView() === "tools" ? "工具" : "消息"}</span>
       </header>
-      <GlobalNav active={previewView === "settings" ? "settings" : previewView === "tools" ? "tools" : "messages"} onNavigate={() => {}} />
-      <div class="workspace">
+      <GlobalNav active={currentView()} onNavigate={navigatePreview} />
+      <div class={currentView() === "settings" ? "workspace workspace-settings" : currentView() === "messages" ? "workspace workspace-messages" : "workspace"}>
+        <Show when={currentView() === "settings"} fallback={
+          <>
+        <Show when={currentView() === "messages"}>
+          <MessageSidebar sessions={previewSessions} workspaces={previewWorkspaces} activeSeed={previewActiveSeed()} onSelect={setPreviewActiveSeed} />
+        </Show>
+        <div class="workspace-content">
         <div class="session-tabs-region">
-          <TabBar tabs={fixtureTabs} activeId={tab.id} creating={false} canCreate={false} onSelect={() => {}} onClose={() => {}} onCreate={() => {}} />
+          <TabBar tabs={fixtureTabs} activeId={previewActiveTab().id} creating={false} canCreate={false} onSelect={(id) => { const selected = fixtureTabs.find((item) => item.id === id); if (selected) setPreviewActiveSeed(selected.seed); }} onClose={() => {}} onCreate={() => {}} />
         </div>
         <main id="main">
-          <Show when={previewView === "tools"}>
+          <Show when={currentView() === "tools"}>
             <ToolsPage />
             {/* Keep the shared stress metrics target available in this shell-only fixture. */}
             <div id="messages" hidden />
           </Show>
-          <Show when={previewView !== "tools"}>
-            <div class="session-column" id="panel-tab-stress" role="tabpanel" aria-labelledby="tab-tab-stress">
-              <SessionView tab={tab} />
-              <Show when={store.pending[0]().length > 0}>
-                <ApprovalStack pending={store.pending[0]()} respond={async () => {}} />
+          <Show when={currentView() !== "tools"}>
+            <div class="session-column" id={`panel-${previewActiveTab().id}`} role="tabpanel" aria-labelledby={`tab-${previewActiveTab().id}`}>
+              <SessionView tab={previewActiveTab()} />
+              <Show when={previewActiveTab().store.pending[0]().length > 0}>
+                <ApprovalStack pending={previewActiveTab().store.pending[0]()} respond={async () => { previewActiveTab().store.pending[1]([]); }} />
               </Show>
-              <ThinkingChain store={store} />
+              <ThinkingChain store={previewActiveTab().store} />
               <Composer
                 draft={draft}
                 onDraft={setDraft}
@@ -999,22 +1035,30 @@ render(
                 onSend={() => setDraft("")}
                 onStop={() => {}}
                 focusToken={0}
+                showDesignControls
               />
             </div>
           </Show>
         </main>
+        </div>
+          </>
+        }>
+          <SettingsView />
+        </Show>
       </div>
-      <Show when={previewView === "settings"}><SettingsView /></Show>
     </div>
   ),
   document.getElementById("root") as HTMLElement,
 );
 
-churnReset();
+if (previewView !== "settings") churnReset();
 void (async () => {
+  if (previewView === "settings") {
+    await reloadSettings();
+    return;
+  }
   await store.resnapshot();
   if (previewView === "approval") store.todos[1]([]);
-  if (previewView === "settings") await reloadSettings();
   await frames(2);
   const mountMs = Math.round(performance.now() - bootStart);
   await frames(30);

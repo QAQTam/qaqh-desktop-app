@@ -2,21 +2,20 @@
  * 应用壳:标签栏 + 会话视图 + 授权卡 + 单行思考链 + 输入区(spec §4 布局);
  * 全局快捷键(§5.3)与后台会话轮询。
  *
- * Tauri 桌面壳新增(spec §2.2):
- *  - 标题栏拖拽区并入 `#top`(data-tauri-drag-region)+ 右侧窗口控制按钮,
- *    `--titlebar-inset-right` 预留其占位;
+ * Tauri 桌面壳:
+ *  - 使用系统标题栏与窗口控制,不让 WebView 内的 Ask 遮罩覆盖窗口按钮;
  *  - 外链经宿主 `open_external` 走系统浏览器(webview 内不导航外站);
  *  - daemon 兼容性失败(D1)渲染明确文案 + 「停止旧实例并连接」动作,
  *    不静默杀旧 daemon(可能正在跑 TUI 的 Turn);
- *  - 设置浮层(spec 第二阶段):Ctrl+, 开关,读写 daemon 全局配置
+ *  - 设置独立页(spec 第二阶段):Ctrl+, 开关,读写 daemon 全局配置
  *    (`config.load`/`config.save`/`profile.*` 经宿主白名单)。
  */
-import { createSignal, For, Match, onSettled, Show, Switch, type Component } from "solid-js";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import IconMinus from "~icons/lucide/minus";
-import IconSquare from "~icons/lucide/square";
-import IconX from "~icons/lucide/x";
+import { createEffect, createSignal, For, onSettled, Show, type Component } from "solid-js";
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import IconArrowLeft from "~icons/lucide/arrow-left";
 import { TabBar } from "../tabs/TabBar";
+import { MessageSidebar } from "./MessageSidebar";
 import { GlobalNav, type GlobalSection } from "./GlobalNav";
 import { ToolsPage } from "./ToolsPage";
 import {
@@ -30,10 +29,13 @@ import {
   creating,
   draftOf,
   focusToken,
+  openSession,
   pollSessions,
   setBootError,
   setDraftOf,
+  sessionCatalog,
   tabs,
+  type Tab,
 } from "../tabs/store";
 import { SessionView } from "../session/SessionView";
 import { ThinkingChain } from "../thinking/ThinkingChain";
@@ -57,6 +59,7 @@ const inTauri = isTauriRuntime();
 const [hostIncompatible, setHostIncompatible] = createSignal<Record<string, unknown> | null>(null);
 const [hostActionNote, setHostActionNote] = createSignal<string | null>(null);
 const [section, setSection] = createSignal<"messages" | "tools">("messages");
+const [emptyDraft, setEmptyDraft] = createSignal("");
 
 /** 一键停止旧 daemon(不静默杀:Busy 时给动作文案)→ 重启标签引导。 */
 async function stopStaleAndReconnect(): Promise<void> {
@@ -79,6 +82,12 @@ async function stopStaleAndReconnect(): Promise<void> {
 }
 
 const App: Component = () => {
+  const [quitPrompt, setQuitPrompt] = createSignal<number | null | undefined>(undefined);
+  const [quitConfirmStop, setQuitConfirmStop] = createSignal(false);
+  const [quitBusy, setQuitBusy] = createSignal(false);
+  const [quitError, setQuitError] = createSignal<string | null>(null);
+  let quitCancelButton: HTMLButtonElement | undefined;
+
   onSettled(() => {
     void bootTabs().catch((error: unknown) => {
       // boot() 只对「没有可用会话」写 bootError;bootstrap/网络异常在此兜底,
@@ -105,8 +114,28 @@ const App: Component = () => {
 
     // Tauri:外链一律走系统浏览器;宿主诊断事件(兼容性失败/宿主错误)。
     let unlistenHost: (() => void) | null = null;
+    let unlistenQuit: UnlistenFn | null = null;
     let onClickCleanup: (() => void) | null = null;
     if (inTauri) {
+      void listen<void>("app://quit-requested", () => {
+        setQuitConfirmStop(false);
+        setQuitError(null);
+        void transport.rpc<Array<{ state?: string }>>("session.activity")
+          .then((activities) => {
+            const activeCount = activities.filter((item) =>
+              item.state === "starting" || item.state === "working" || item.state === "waiting_user",
+            ).length;
+            setQuitPrompt(activeCount);
+            requestAnimationFrame(() => quitCancelButton?.focus());
+          })
+          .catch(() => {
+            setQuitPrompt(null);
+            requestAnimationFrame(() => quitCancelButton?.focus());
+          });
+      }).then((unlisten) => {
+        unlistenQuit = unlisten;
+      });
+
       const onClick = (event: MouseEvent): void => {
         const target = event.target instanceof Element ? event.target : null;
         const anchor = target?.closest("a[href]");
@@ -130,6 +159,12 @@ const App: Component = () => {
 
     // 全局快捷键(§5.3)。
     const onKey = (event: KeyboardEvent): void => {
+      if (quitPrompt() !== undefined && event.key === "Escape") {
+        event.preventDefault();
+        setQuitPrompt(undefined);
+        setQuitConfirmStop(false);
+        return;
+      }
       // 浮层开着时快捷键归浮层:Ctrl+T/W/Tab/1-9 不该在遮罩背后建会话、切标签。
       if (settingsOpen()) {
         const modKey = event.ctrlKey || event.metaKey;
@@ -187,13 +222,25 @@ const App: Component = () => {
       window.removeEventListener("keydown", onKey);
       onClickCleanup?.();
       unlistenHost?.();
+      unlistenQuit?.();
     };
   });
 
+  const finishExit = async (stopDaemon: boolean, stopActiveWork = false): Promise<void> => {
+    if (quitBusy()) return;
+    setQuitBusy(true);
+    setQuitError(null);
+    try {
+      await invoke("exit_app", { stopDaemon, stopActiveWork });
+    } catch (cause) {
+      setQuitError(cause instanceof Error ? cause.message : String(cause));
+      setQuitBusy(false);
+    }
+  };
+
   const active = (): ReturnType<typeof activeTab> => activeTab();
 
-  const blockedReason = (): SendBlockReason => {
-    const tab = active();
+  const blockedReason = (tab: Tab | null = active()): SendBlockReason => {
     if (tab == null) return "offline";
     if (tab.store.connection[0]() !== "connected") return "offline";
     if (tab.store.pending[0]().length > 0) return "pending";
@@ -203,15 +250,54 @@ const App: Component = () => {
     return null;
   };
 
-  const runningNow = (): boolean => {
-    const tab = active();
+  const runningNow = (tab: Tab | null = active()): boolean => {
     if (tab == null) return false;
     return tab.store.state[0].runningTurns > 0 || tab.store.activity[0]() === "working";
   };
 
-  const send = async (text: string): Promise<void> => {
-    const tab = active();
-    if (tab == null) return;
+  const connectionNotice = (): string | null => {
+    const error = bootError();
+    if (error != null) return error;
+    const tab = activeTab();
+    if (tab == null) return null;
+    const state = tab.store.connection[0]();
+    if (state === "reconnecting") return STR.reconnecting;
+    return state === "connected" ? null : STR.disconnected;
+  };
+
+  createEffect(
+    () => [activeTab(), emptyDraft()] as const,
+    ([tab, pendingDraft]) => {
+      if (tab != null && pendingDraft !== "") {
+        setDraftOf(tab.seed, pendingDraft);
+        setEmptyDraft("");
+      }
+    },
+  );
+
+  const retryConnection = (): void => {
+    setBootError(null);
+    const tab = activeTab();
+    if (tab != null) {
+      tab.store.retry();
+      return;
+    }
+    void bootTabs().catch((error: unknown) => {
+      setBootError(String(error instanceof Error ? error.message : error));
+    });
+  };
+
+  const navigateSection = (next: GlobalSection): void => {
+    if (next === "settings") {
+      if (settingsOpen()) requestSettingsClose();
+      else toggleSettings();
+      return;
+    }
+    if (settingsOpen()) requestSettingsClose();
+    setSection(next);
+  };
+
+  const send = async (tab: Tab, text: string): Promise<void> => {
     try {
       await tab.store.sendMessage(text);
       setDraftOf(tab.seed, "");
@@ -221,23 +307,35 @@ const App: Component = () => {
   };
 
   return (
-    <div id="app">
-      <header id="top" data-tauri-drag-region={inTauri ? true : undefined}>
-        <div class="titlebar-brand">QAQH</div>
-        <div class="titlebar-session-title">{settingsOpen() ? "设置" : section() === "tools" ? "工具" : "消息"}</div>
-        {inTauri && <div class="top-drag" data-tauri-drag-region />}
-        <ConnectionStatus />
-        {inTauri && <TitlebarControls />}
-      </header>
+    <div id="app" classList={{ "tauri-shell": inTauri, "has-topbar": !inTauri || settingsOpen() || section() !== "messages" }}>
+      <Show when={!inTauri || settingsOpen() || section() !== "messages"}>
+        <header id="top">
+          <Show when={settingsOpen() || section() !== "messages"}>
+            <button type="button" class="titlebar-back" aria-label="返回消息" title="返回消息" onClick={() => navigateSection("messages")}>
+              <IconArrowLeft />
+            </button>
+          </Show>
+          <Show when={!inTauri}><div class="titlebar-brand">QAQH</div></Show>
+          <div class="titlebar-session-title">{settingsOpen() ? "设置" : section() === "tools" ? "工具" : "消息"}</div>
+        </header>
+      </Show>
       <GlobalNav
         active={settingsOpen() ? "settings" : section()}
-        onNavigate={(next: GlobalSection) => {
-          if (next === "settings") toggleSettings();
-          else setSection(next);
-        }}
+        onNavigate={navigateSection}
       />
-      <div class="workspace">
+      <div class={settingsOpen() ? "workspace workspace-settings" : section() === "messages" ? "workspace workspace-messages" : "workspace"}>
+        <Show when={settingsOpen()} fallback={
+          <>
+        <Show when={section() === "messages"}>
+          <MessageSidebar
+            sessions={sessionCatalog()}
+            activeSeed={activeTab()?.seed ?? null}
+            onSelect={(seed) => { setSection("messages"); void openSession(seed); }}
+          />
+        </Show>
+        <div class="workspace-content">
         <div class="session-tabs-region">
+        <Show when={tabs().length > 0} fallback={<span class="session-empty-title">{STR.noSessionTitle}</span>}>
         <TabBar
           tabs={tabs()}
           activeId={activeId()}
@@ -254,6 +352,7 @@ const App: Component = () => {
             void createSession();
           }}
         />
+        </Show>
         </div>
         <main id="main">
           <Show when={hostIncompatible() != null}>
@@ -276,13 +375,28 @@ const App: Component = () => {
               </span>
             </div>
           </Show>
-          <Show when={bootError() != null}>
-            <div class="boot-error">
-              <span>{bootError()}</span>
-              <button type="button" class="ghost-mini" onClick={() => void bootTabs()}> {STR.retry}</button>
-            </div>
-          </Show>
           <Show when={section() === "messages"}>
+            <Show when={tabs().length > 0} fallback={
+              <div class="session-column">
+                <div id="messages" class="messages-empty">
+                  <div class="messages-empty-copy">
+                    <strong>QAQH</strong>
+                    <p>{STR.emptyMessages}</p>
+                  </div>
+                </div>
+                <Composer
+                  draft={() => emptyDraft()}
+                  onDraft={setEmptyDraft}
+                  blocked={() => "offline"}
+                  running={() => false}
+                  onSend={() => {}}
+                  onStop={() => {}}
+                  focusToken={0}
+                  autoFocus={false}
+                  placeholder={STR.emptyComposer}
+                />
+              </div>
+            }>
             <For each={tabs()}>
               {(tab) => (
                 // 非活动标签卸载 DOM(§5.3),store 数据保留。
@@ -304,9 +418,9 @@ const App: Component = () => {
                     <Composer
                       draft={() => draftOf(tab.seed)}
                       onDraft={(value) => setDraftOf(tab.seed, value)}
-                      blocked={blockedReason}
-                      running={runningNow}
-                      onSend={(text) => void send(text)}
+                      blocked={() => blockedReason(tab)}
+                      running={() => runningNow(tab)}
+                      onSend={(text) => void send(tab, text)}
                       onStop={() => void tab.store.cancelTurn().catch(() => {})}
                       focusToken={focusToken()}
                     />
@@ -314,8 +428,6 @@ const App: Component = () => {
                 </Show>
               )}
             </For>
-            <Show when={tabs().length === 0 && bootError() == null}>
-              <div class="no-tab" />
             </Show>
           </Show>
           {/* The session switcher remains available on the Tools page, so keep its
@@ -331,51 +443,77 @@ const App: Component = () => {
           </Show>
           <Show when={section() === "tools"}><ToolsPage /></Show>
         </main>
+        </div>
+          </>
+        }>
+          <SettingsView />
+        </Show>
       </div>
-      {/* 全局配置面,与标签/会话无关:零会话、引导失败时也要能打开。 */}
-      <Show when={settingsOpen()}>
-        <SettingsView />
+      <Show when={connectionNotice() != null}>
+        <div class="connection-notice" role="status" aria-live="polite">
+          <span>{connectionNotice()}</span>
+          <button type="button" class="ghost-mini" onClick={retryConnection}>{STR.retry}</button>
+        </div>
+      </Show>
+      <Show when={quitPrompt() !== undefined}>
+        <div class="quit-overlay" role="presentation">
+          <section class="quit-dialog" role="dialog" aria-modal="true" aria-labelledby="quit-dialog-title">
+            <header class="quit-dialog-head">
+              <strong id="quit-dialog-title">退出 QAQH</strong>
+              <button type="button" class="icon-btn" aria-label="取消退出" onClick={() => { setQuitPrompt(undefined); setQuitConfirmStop(false); }} disabled={quitBusy()}>
+                <IconX />
+              </button>
+            </header>
+            <div class="quit-dialog-body">
+              <Show when={quitPrompt() === null} fallback={
+                <Show when={(quitPrompt() ?? 0) > 0} fallback={
+                  <>
+                    <p>当前没有运行中或等待处理的会话。</p>
+                    <p class="quit-dialog-note">停止 daemon 会断开其他客户端；也可以退出 QAQH 并让服务留在后台。</p>
+                  </>
+                }>
+                  <p>有 <b>{quitPrompt()}</b> 个会话正在运行或等待处理。</p>
+                  <p class="quit-dialog-note">退出界面会让后台任务继续运行。停止 daemon 会中断所有客户端连接中的会话。</p>
+                </Show>
+              }>
+                <p>暂时无法确认 daemon 的活动状态。为保护后台任务，建议退出界面并让 daemon 继续运行。</p>
+                <p class="quit-dialog-note">停止服务选项会保持禁用，直到活动状态可查询。</p>
+              </Show>
+              <Show when={quitError() != null}><p class="quit-dialog-error" role="alert">{quitError()}</p></Show>
+              <Show when={quitConfirmStop()}>
+                <div class="quit-stop-confirm" role="alert">
+                  <b>确认停止所有后台任务？</b>
+                  <p>这会优雅关闭共享 daemon，并中断运行中或等待授权的会话。其他客户端也会断开。</p>
+                </div>
+              </Show>
+            </div>
+            <footer class="quit-dialog-actions">
+              <Show when={quitConfirmStop()} fallback={
+                <>
+                  <button ref={quitCancelButton} type="button" class="button-secondary" onClick={() => { setQuitPrompt(undefined); setQuitConfirmStop(false); }} disabled={quitBusy()}>取消</button>
+                  <button type="button" class="button-secondary" onClick={() => void finishExit(false)} disabled={quitBusy()}>
+                    退出并保留后台任务
+                  </button>
+                  <Show when={quitPrompt() !== null}>
+                    <button type="button" class="button-danger" onClick={() => {
+                      if ((quitPrompt() ?? 0) > 0) setQuitConfirmStop(true);
+                      else void finishExit(true);
+                    }} disabled={quitBusy()}>
+                      {(quitPrompt() ?? 0) > 0 ? "停止任务并退出…" : "退出并停止空闲服务"}
+                    </button>
+                  </Show>
+                </>
+              }>
+                <button ref={quitCancelButton} type="button" class="button-secondary" onClick={() => setQuitConfirmStop(false)} disabled={quitBusy()}>返回</button>
+                <button type="button" class="button-danger" onClick={() => void finishExit(true, true)} disabled={quitBusy()}>
+                  {quitBusy() ? "正在停止…" : "确认停止并退出"}
+                </button>
+              </Show>
+            </footer>
+          </section>
+        </div>
       </Show>
       <ToastHost />
-    </div>
-  );
-};
-
-/** 连接状态(§15.1):connected 不显示;重连中/已断开+重试,一行小字。 */
-const ConnectionStatus: Component = () => {
-  const tab = () => activeTab();
-  return (
-    <Show when={tab() != null && tab()!.store.connection[0]() !== "connected"}>
-      <div class="conn-status">
-        <Switch
-          fallback={
-            <button type="button" class="ghost-mini" onClick={() => tab()!.store.retry()}>
-              {STR.disconnected}
-              <span class="conn-retry">{STR.retry}</span>
-            </button>
-          }
-        >
-          <Match when={tab()!.store.connection[0]() === "reconnecting"}>{STR.reconnecting}</Match>
-        </Switch>
-      </div>
-    </Show>
-  );
-};
-
-/** Tauri 无边框窗口的窗口控制(最小化/最大化切换/关闭)。关闭 = detach(宿主退出不触 stop_daemon)。 */
-const TitlebarControls: Component = () => {
-  const win = getCurrentWindow();
-  return (
-    <div class="titlebar-controls">
-      <button type="button" aria-label="最小化" onClick={() => void win.minimize()}>
-        <IconMinus />
-      </button>
-      <button type="button" aria-label="最大化/还原" onClick={() => void win.toggleMaximize()}>
-        <IconSquare />
-      </button>
-      <button type="button" class="titlebar-close" aria-label="关闭" onClick={() => void win.close()}>
-        <IconX />
-      </button>
     </div>
   );
 };

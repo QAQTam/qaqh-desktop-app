@@ -23,6 +23,8 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
   const [pinned, setPinned] = createSignal(true);
   const [unseen, setUnseen] = createSignal(false);
   const [todoOpen, setTodoOpen] = createSignal(false);
+  const [activeNavKey, setActiveNavKey] = createSignal<string | null>(null);
+  const [hoveredNavKey, setHoveredNavKey] = createSignal<string | null>(null);
   const store = props.tab.store;
   const state = () => store.state[0];
   const slots = createMemo(() => {
@@ -33,6 +35,40 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
       : { kind: "gap", key: slot.key, spans: slot.spans }));
   }, { name: "session.slots" });
   const slotTable = createMemo(() => new Map(slots().map((slot) => [slot.key, slot])), { name: "session.slotTable" });
+  // 原型导航只列出当前窗口里仍有完整内容的用户回合。摘要是本地截断文本，
+  // 不触发额外请求；被窗口淘汰的轮次会从导航中消失，完整历史目录留待后端轻量接口。
+  const navItems = createMemo(() => {
+    const current = slots();
+    return untrack(() => current.flatMap((slot) => {
+      if (slot.kind !== "turn") return [];
+      const turn = state().turns[slot.key];
+      if (turn == null) return [];
+      return [{
+        key: turn.key,
+        index: turn.turnIndex,
+        question: turn.user.text,
+      }];
+    }));
+  }, { name: "session.turnNavigator" });
+  createEffect(() => navItems(), (items) => {
+    if (activeNavKey() == null && items.length > 0) setActiveNavKey(items[items.length - 1]!.key);
+    else if (activeNavKey() != null && !items.some((item) => item.key === activeNavKey())) {
+      setActiveNavKey(items[items.length - 1]?.key ?? null);
+    }
+  });
+  const hoverNavItem = createMemo(() => {
+    const key = hoveredNavKey();
+    return key == null ? null : state().turns[key] ?? null;
+  });
+  const excerpt = (value: string | undefined): string => (value ?? "").slice(0, 512).replace(/\s+/g, " ").trim().slice(0, 180);
+  const answerExcerpt = (turn: NonNullable<ReturnType<typeof hoverNavItem>>): string => {
+    if (turn.answer?.text) return excerpt(turn.answer.text);
+    for (let index = turn.steps.length - 1; index >= 0; index -= 1) {
+      const step = turn.steps[index];
+      if (step?.kind === "text" && step.text.length > 0) return excerpt(step.text);
+    }
+    return "尚无回复摘录";
+  };
   const buckets = new Map<string, string>();
   let nextLocalBucket = 0;
   const slotGroups = createMemo(() => {
@@ -62,8 +98,10 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
    * 启动后停在最早的消息上,且之后再也不跟随。
    */
   let userScrolled = false;
+  let userScrollVersion = 0;
   const markUserScrolled = (): void => {
     userScrolled = true;
+    userScrollVersion += 1;
   };
   /**
    * 我们自己写 scrollTop 也会触发 scroll 事件——那次要吞掉,不能当成「用户离开了
@@ -86,6 +124,16 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
     }
     if (!userScrolled) return;
     setPinned(nearBottom());
+    const nav = navItems();
+    let active: string | null = nav[0]?.key ?? null;
+    const anchor = scroller.scrollTop + Math.min(96, scroller.clientHeight * 0.16);
+    for (const item of nav) {
+      const node = scroller.querySelector<HTMLElement>(`[data-slot-key="${CSS.escape(item.key)}"]`);
+      const top = node == null ? undefined : node.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      if (top == null || top > anchor) break;
+      active = item.key;
+    }
+    setActiveNavKey(active);
     if (nearBottom()) setUnseen(false);
     if (shouldLoadOlder(scroller.scrollTop, scroller.clientHeight, state().hasMore, store.loadingOlder[0]())) {
       void loadOlder();
@@ -142,9 +190,13 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
     if (el == null) return;
     const prevTop = el.scrollTop;
     const prevHeight = el.scrollHeight;
+    const inputVersion = userScrollVersion;
     const loaded = await store.loadOlder();
     if (!loaded || scroller == null) return;
     refit();
+    // 请求期间用户可能继续滚动或反向滚动。此时不能用请求开始时的 prevTop
+    // 覆盖最新意图；#messages 保留浏览器原生 scroll anchoring 来承接顶部前插。
+    if (userScrollVersion !== inputVersion) return;
     anchoring = true;
     requestAnimationFrame(() => {
       if (scroller == null) return;
@@ -258,6 +310,38 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
           )}</For></div>}
         </For>
       </div>
+      <Show when={navItems().length > 1}>
+        <nav class="turn-navigator" aria-label="当前已加载的用户消息">
+          <For each={navItems()} keyed={(item) => item.key}>{(item, index) => (
+            <button
+              type="button"
+              class="turn-navigator-tick"
+              classList={{ active: activeNavKey() === item.key }}
+              aria-label={`跳转到第 ${item.index == null ? index() + 1 : item.index + 1} 条用户消息：${excerpt(item.question)}`}
+              aria-current={activeNavKey() === item.key ? "location" : undefined}
+              onMouseEnter={() => setHoveredNavKey(item.key)}
+              onMouseLeave={() => setHoveredNavKey((key) => key === item.key ? null : key)}
+              onFocus={() => setHoveredNavKey(item.key)}
+              onBlur={() => setHoveredNavKey((key) => key === item.key ? null : key)}
+              onClick={() => {
+                const target = scroller?.querySelector<HTMLElement>(`[data-slot-key="${CSS.escape(item.key)}"]`);
+                if (target == null) return;
+                markUserScrolled();
+                setActiveNavKey(item.key);
+                target.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+            >
+              <span class="turn-navigator-mark" />
+              <Show when={hoveredNavKey() === item.key && hoverNavItem()}>
+                {(turn) => <span class="turn-navigator-card" role="tooltip">
+                  <span class="turn-navigator-question">{excerpt(turn().user.text) || "（空消息）"}</span>
+                  <span class="turn-navigator-answer">{answerExcerpt(turn())}</span>
+                </span>}
+              </Show>
+            </button>
+          )}</For>
+        </nav>
+      </Show>
       <TodoPanel store={store} onOpenChange={setTodoOpen} />
       <Show when={!pinned() && unseen()}>
         <button

@@ -13,6 +13,12 @@ export default defineConfig({
   base: "/",
   server: {
     port: 5173,
+    proxy: {
+      "/__qaqh_preview": {
+        target: "http://127.0.0.1:5174",
+        changeOrigin: false,
+      },
+    },
   },
   build: {
     target: "esnext",

@@ -372,7 +372,7 @@ export class SessionStore {
   /** 待办清单:只读 service RPC;刷新由 dashboard_updated 事件/激活/重置驱动。 */
   async refreshTodos(): Promise<void> {
     try {
-      const result = await transport.rpc<Record<string, any>>("todo.list");
+      const result = await transport.rpc<Record<string, any>>("todo.list", {}, this.seed);
       const items = result?.items;
       writeStable(this.todos, Array.isArray(items) ? (items as TodoItemWire[]) : []);
     } catch {
@@ -385,7 +385,7 @@ export class SessionStore {
   async refreshApprovals(): Promise<void> {
     let list: ApprovalView[];
     try {
-      list = await transport.approvals();
+      list = await transport.approvals(this.seed);
     } catch {
       return; // best-effort:下一轮信号再取
     }
@@ -417,8 +417,13 @@ export class SessionStore {
   }
 
   async respondApproval(challengeId: string, decision: string, payload: Record<string, unknown> = {}): Promise<void> {
-    await transport.respondApproval(challengeId, decision, payload);
-    await this.refreshApprovals();
+    try {
+      await transport.respondApproval(this.seed, challengeId, decision, payload);
+    } finally {
+      // 宿主 challenge 一次性消费；daemon 拒绝或 IPC 短暂失败时也必须重取，
+      // 让仍然 pending 的交互获得新 challenge，避免界面卡在已消费的旧 ID 上。
+      await this.refreshApprovals();
+    }
   }
 
   // ── 动作 ────────────────────────────────────────────────────────────────────
@@ -430,11 +435,11 @@ export class SessionStore {
       text,
       images: [],
       as_system: false,
-    });
+    }, this.seed);
   }
 
   async cancelTurn(): Promise<void> {
-    await transport.command("conversation", { channel: "conversation", type: "conversation_cancel" });
+    await transport.command("conversation", { channel: "conversation", type: "conversation_cancel" }, this.seed);
   }
 
   async createSession(): Promise<void> {

@@ -10,18 +10,24 @@ type Tab = { id: string; seed: string; store: SessionStore };
 
 const Dot: Component<{ store: SessionStore; active: boolean }> = (props) => {
   const kind = (): { cls: string; label: string } | null => {
-    if (!props.active && props.store.hasNewReply[0]()) return { cls: "new", label: STR.hasNewReply };
     const activity = props.store.activity[0]();
-    if (activity === "failed" || activity === "interrupted" || props.store.state[0].failedTurns > 0) {
+    // 当前需要用户处理的状态优先于普通的新回复提示；历史失败轮次不代表 session 仍处于失败态。
+    if (activity === "waiting_user" || props.store.pending[0]().length > 0) return { cls: "warn", label: STR.waitingYou };
+    if (activity === "failed") {
       return { cls: "err", label: STR.error };
     }
-    if (activity === "waiting_user" || props.store.pending[0]().length > 0) return { cls: "warn", label: STR.waitingYou };
-    if (activity === "working") return { cls: "run", label: STR.running };
     if (activity === "disconnected") return { cls: "off", label: STR.disconnected };
+    if (activity === "working") return { cls: "run", label: STR.running };
+    if (!props.active && props.store.hasNewReply[0]()) return { cls: "new", label: STR.hasNewReply };
+    if (activity === "interrupted") return { cls: "paused", label: STR.interrupted };
     if (activity === "idle") return { cls: "done", label: STR.idle };
     return null;
   };
-  return <Show when={kind() != null}><span class={`tab-dot ${kind()!.cls}`} role="img" aria-label={kind()!.label} title={kind()!.label} /></Show>;
+  return <Show when={kind()}>{(status) => (
+    <span class={`tab-dot ${status().cls}`} role="img" aria-label={status().label} title={status().label}>
+      <Show when={status().cls === "err"}>!</Show>
+    </span>
+  )}</Show>;
 };
 
 export const TabBar: Component<{

@@ -7,6 +7,11 @@
  */
 import { TauriTransport, listenHostDiagnostics, openExternalUrl } from "./tauri";
 import {
+  BrowserPreviewTransport,
+  listenBrowserPreviewDiagnostics,
+  openBrowserPreviewUrl,
+} from "./browser-preview";
+import {
   type Ack,
   type ApprovalKind,
   type ApprovalView,
@@ -19,10 +24,20 @@ import {
   tauriHost,
 } from "./backend";
 
-export const transport: TransportBackend = new TauriTransport();
+const browserPreview = typeof window !== "undefined"
+  && new URLSearchParams(window.location.search).get("preview") === "tauri";
+
+export const transport: TransportBackend = browserPreview
+  ? new BrowserPreviewTransport()
+  : new TauriTransport();
+
+const hostDiagnostics = browserPreview ? listenBrowserPreviewDiagnostics : listenHostDiagnostics;
+const externalUrl = browserPreview ? openBrowserPreviewUrl : openExternalUrl;
+
+export { externalUrl as openExternalUrl, hostDiagnostics as listenHostDiagnostics };
 
 export { RINGING_SCHEMA, RINGING_VERSION } from "./backend";
-export { tauriHost, isTauriRuntime, openExternalUrl, listenHostDiagnostics };
+export { tauriHost, isTauriRuntime };
 export type {
   Ack,
   ApprovalKind,

@@ -1,5 +1,5 @@
 /**
- * 设置浮层:daemon 全局配置的读写面(spec 里的「第二阶段·设置页」)。
+ * 设置独立页面:daemon 全局配置的读写面(spec 里的「第二阶段·设置页」)。
  *
  * 只呈现 `ConfigDto` 里真实存在的字段,写路径只发差异 patch(见 `./patch`)。
  * 三条来自后端的硬约束在 UI 上有直接体现:
@@ -13,7 +13,6 @@
  * 左侧分区导航按 section id 跳转(长表单不再一滚到底)。
  */
 import { createEffect, createMemo, createSignal, For, onSettled, Show, type Component } from "solid-js";
-import IconX from "~icons/lucide/x";
 import IconRotate from "~icons/lucide/rotate-ccw";
 import { STR } from "../lib/strings";
 import { sessionMaterial, setSessionMaterial, type SessionMaterial } from "../lib/visual";
@@ -33,7 +32,6 @@ import {
   note,
   patch,
   reload,
-  requestClose,
   requireBypass,
   save,
   setBypassAck,
@@ -63,11 +61,11 @@ export const SettingsView: Component = () => {
   const [subKey, setSubKey] = createSignal("");
   const [toolsInput, setToolsInput] = createSignal("");
   const [activeSection, setActiveSection] = createSignal<string>(NAV[0].id);
-  let modal: HTMLDivElement | undefined;
+  let page: HTMLElement | undefined;
 
   onSettled(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    modal?.querySelector<HTMLElement>(".settings-close")?.focus();
+    page?.querySelector<HTMLElement>("#settings-title")?.focus();
     return () => previousFocus?.focus();
   });
 
@@ -86,7 +84,7 @@ export const SettingsView: Component = () => {
   const bypassPending = createMemo(() => requireBypass() && needsBypassConfirm(patch()));
 
   const revealNavItem = (id: string): void => {
-    modal?.querySelector<HTMLElement>(`.settings-nav-item[data-section-id="${id}"]`)
+    page?.querySelector<HTMLElement>(`.settings-nav-item[data-section-id="${id}"]`)
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
   };
 
@@ -116,46 +114,12 @@ export const SettingsView: Component = () => {
   };
 
   return (
-    <div
-      class="settings-overlay"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) requestClose();
-      }}
-    >
-      <div
-        class="settings-modal"
-        ref={(node) => { modal = node; }}
-        role="dialog"
-        aria-modal="true"
-        aria-label={STR.settings}
-        onKeyDown={(event) => {
-          if (event.key !== "Tab" || modal == null) return;
-          const nodes = Array.from(modal.querySelectorAll<HTMLElement>(
-            'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-          )).filter((node) => node.getClientRects().length > 0);
-          if (nodes.length === 0) {
-            event.preventDefault();
-            return;
-          }
-          const first = nodes[0]!;
-          const last = nodes[nodes.length - 1]!;
-          if (event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) {
-            event.preventDefault();
-            last.focus();
-          } else if (!event.shiftKey && (document.activeElement === last || !modal.contains(document.activeElement))) {
-            event.preventDefault();
-            first.focus();
-          }
-        }}
-      >
+    <main class="settings-page" ref={(node) => { page = node; }} aria-labelledby="settings-title">
         <header class="settings-head">
-          <h2>{STR.settings}</h2>
+          <h1 id="settings-title" tabindex={-1}>{STR.settings}</h1>
           <Show when={(draft()?.activeProfile ?? "") !== ""}>
             <span class="settings-sub">profile · {draft()?.activeProfile}</span>
           </Show>
-          <button type="button" class="settings-close" aria-label={STR.close} onClick={requestClose}>
-            <IconX />
-          </button>
         </header>
 
         <Show when={loading() && draft() == null}>
@@ -286,6 +250,10 @@ export const SettingsView: Component = () => {
                     <Field label="fontFamily" hint="空 = 系统默认字体。" wide>
                       <TextInput value={config().fontFamily} onInput={(value) => setField("fontFamily", value)} />
                     </Field>
+                    <p class="settings-section-desc">
+                      界面内嵌 HarmonyOS Sans SC 与 Cascadia Code；字体许可与来源见{" "}
+                      <a href="/fonts/THIRD-PARTY-NOTICES.txt">第三方字体说明</a>。
+                    </p>
                     <Switch
                       label="notificationsEnabled"
                       checked={config().notificationsEnabled}
@@ -482,7 +450,6 @@ export const SettingsView: Component = () => {
             </>
           )}
         </Show>
-      </div>
-    </div>
+    </main>
   );
 };

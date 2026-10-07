@@ -46,25 +46,25 @@ export class TauriTransport implements TransportBackend {
     this.activeSeed = seed;
   }
 
-  approvals(): Promise<ApprovalView[]> {
-    return invoke<ApprovalView[]>("pending_approvals");
+  approvals(sessionId: string): Promise<ApprovalView[]> {
+    return invoke<ApprovalView[]>("pending_approvals", { seed: sessionId });
   }
 
-  async respondApproval(challengeId: string, decision: string, payload: Record<string, unknown> = {}): Promise<null> {
-    await invoke("respond_approval", { challengeId, decision, payload });
+  async respondApproval(sessionId: string, challengeId: string, decision: string, payload: Record<string, unknown> = {}): Promise<null> {
+    await invoke("respond_approval", { seed: sessionId, challengeId, decision, payload });
     return null;
   }
 
-  async command(channel: "control" | "conversation", command: Record<string, unknown>): Promise<Ack> {
+  async command(channel: "control" | "conversation", command: Record<string, unknown>, sessionId?: string): Promise<Ack> {
     const type = typeof command.type === "string" ? command.type : "";
     if (channel === "conversation" && type === "conversation_send_message") {
       const text = typeof command.text === "string" ? command.text : "";
-      const ack = await invoke<Ack>("send_message", { seed: this.requireSeed("send_message"), text });
+      const ack = await invoke<Ack>("send_message", { seed: sessionId ?? this.requireSeed("send_message"), text });
       if (ack.status === "rejected") throw rejectAck(ack);
       return ack;
     }
     if (channel === "conversation" && type === "conversation_cancel") {
-      const ack = await invoke<Ack>("cancel_turn", { seed: this.requireSeed("cancel_turn") });
+      const ack = await invoke<Ack>("cancel_turn", { seed: sessionId ?? this.requireSeed("cancel_turn") });
       if (ack.status === "rejected") throw rejectAck(ack);
       return ack;
     }
@@ -76,8 +76,9 @@ export class TauriTransport implements TransportBackend {
     throw new Error(`command not allowed from webui: ${channel}/${type || "(untyped)"}`);
   }
 
-  rpc<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-    return invoke<T>("service_rpc", { method, params });
+  rpc<T = unknown>(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<T> {
+    const scoped = sessionId == null ? params : { ...params, session_id: sessionId };
+    return invoke<T>("service_rpc", { method, params: scoped });
   }
 
   async timelinePage(seed: string, query = ""): Promise<TimelinePageResponse> {
