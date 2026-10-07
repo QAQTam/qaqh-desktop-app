@@ -10,6 +10,7 @@ import { untrack } from "solid-js";
 import { SessionStore } from "./session/store";
 import { applyEntry } from "./session/reducer";
 import { SessionView } from "./session/SessionView";
+import { ThinkingChain } from "./thinking/ThinkingChain";
 import { transport } from "./lib/transport";
 import type { Tab } from "./tabs/store";
 import "./styles/app.css";
@@ -356,6 +357,101 @@ function feed(turnId: string, event: Record<string, unknown>, seq?: number): voi
 const report: Array<Record<string, unknown>> = [];
 
 const scenarios = {
+  async thinking(): Promise<Record<string, unknown>> {
+    const id = `thinking-${liveSeq}`;
+    feed(id, { type: "block_opened", block: { block_id: id, kind: "reasoning", state: "open" } });
+    const cadence = await sampleFrames(120, async () => {
+      for (let tick = 0; tick < 300; tick += 1) {
+        feed(id, { type: "text_delta", block_id: id, delta: "思考".repeat(150) });
+        await wait(10);
+      }
+    });
+    await frames(3);
+    const tail = document.querySelector(".thinking-line-text")?.textContent ?? "";
+    feed(id, { type: "block_sealed", block_id: id });
+    feed(id, { type: "block_opened", block: { block_id: `${id}-new`, kind: "reasoning", state: "open" } });
+    await frames(3);
+    const reset = document.querySelector(".thinking-line-text")?.textContent === "";
+    feed(id, { type: "turn_sealed", state: "completed" });
+    await frames(3);
+    return { tailChars: tail.length, reset, cleared: document.querySelector(".thinking-chain") == null, correct: tail.length === 200 && reset, cadence, m: metrics() };
+  },
+  /** 合成 token 是 4 个中文字符,每 10ms 到一批;测试真实 store/组件,不模拟响应式。 */
+  async highRate(rate = 300, seconds = 6): Promise<Record<string, unknown>> {
+    const id = `rate-${rate}-${liveSeq}`;
+    const token = "持续输出";
+    const expected = new Map<string, string>();
+    let block = `${id}-text-0`;
+    let fedTokens = 0;
+    let textIdentityLost = false;
+    let stableText: Element | null = null;
+    const tasksBefore = longTasks.length;
+    feed(id, { type: "turn_opened", user_text: `持续 ${rate} 合成 token/s` });
+    feed(id, { type: "block_opened", block: { block_id: `${id}-reason`, kind: "reasoning", state: "open" } });
+    feed(id, { type: "text_delta", block_id: `${id}-reason`, delta: "思考末尾必须保留" });
+    feed(id, { type: "block_sealed", block_id: `${id}-reason` });
+    feed(id, { type: "block_opened", block: { block_id: block, kind: "text", state: "open" } });
+    await frames(2);
+    churnReset();
+    const plainChurn = { added: 0, removed: 0 };
+    for (let frame = 0; frame < 12 && messagesEl().querySelector(`[data-text-id="${block}"]`) == null; frame += 1) await frames(1);
+    const observedText = messagesEl().querySelector(`[data-text-id="${block}"]`);
+    if (observedText == null) throw new Error("流式文本容器未挂载");
+    const watch = new MutationObserver((records) => {
+      for (const record of records) { plainChurn.added += record.addedNodes.length; plainChurn.removed += record.removedNodes.length; }
+    });
+    watch.observe(observedText, { childList: true, subtree: true });
+    const startedAt = performance.now();
+    const cadence = await sampleFrames(180, async () => {
+      const ticks = Math.round(seconds * 100);
+      for (let tick = 0; tick < ticks; tick += 1) {
+        // 每两秒进入下一个工作段,同一任务内混合中途回复与工具。
+        if (tick > 0 && tick % 200 === 0) {
+          feed(id, { type: "block_sealed", block_id: block });
+          const tool = `${id}-tool-${tick}`;
+          feed(id, { type: "block_opened", block: { block_id: tool, kind: "tool", tool: { name: "read", state: "running", args_json: "{}" } } });
+          feed(id, { type: "tool_progress", block_id: tool, chunk: "工具末尾必须保留" });
+          feed(id, { type: "tool_updated", block_id: tool, tool: { name: "read", state: "succeeded" } });
+          block = `${id}-text-${tick}`;
+          feed(id, { type: "block_opened", block: { block_id: block, kind: "text", state: "open" } });
+        }
+        for (let n = 0; n < rate / 100; n += 1) {
+          feed(id, { type: "text_delta", block_id: block, delta: token });
+          expected.set(block, (expected.get(block) ?? "") + token);
+          fedTokens += 1;
+        }
+        if (stableText == null) stableText = messagesEl().querySelector(`[data-text-id="${id}-text-0"]`);
+        else if (messagesEl().querySelector(`[data-text-id="${id}-text-0"]`) !== stableText) textIdentityLost = true;
+        await wait(Math.max(0, startedAt + (tick + 1) * 10 - performance.now()));
+      }
+      // 最后几个 delta 与 turn_sealed 刻意落在同一帧。
+      feed(id, { type: "turn_sealed", state: "completed" });
+    });
+    await frames(30);
+    watch.disconnect();
+    const turn = untrack(() => store.state[0].turns[id]!);
+    const lostChars = untrack(() => [...expected].reduce((sum, [key, text]) => {
+      const step = turn.steps.find((item) => item.id === key);
+      return sum + Math.max(0, text.length - (step != null && "text" in step ? step.text.length : 0));
+    }, 0));
+    const renderedCorrect = [...expected].every(([key, text]) => messagesEl().querySelector(`[data-text-id="${key}"]`)?.textContent === text);
+    const work = messagesEl().querySelector(`[data-text-id="${id}-text-0"]`)?.previousElementSibling;
+    const remainedCollapsed = work?.querySelector(".collapsed-row")?.getAttribute("aria-expanded") === "false";
+    return { rate, seconds, fedTokens, elapsedMs: Math.round(performance.now() - startedAt), cadence, lostChars, renderedCorrect, textIdentityLost, remainedCollapsed, plainChurn, streamLongTasks: longTasks.slice(tasksBefore), m: metrics() };
+  },
+  async checkpoint(): Promise<Record<string, unknown>> {
+    const id = `checkpoint-${liveSeq}`;
+    feed(id, { type: "block_opened", block: { block_id: id, kind: "text", state: "open" } });
+    feed(id, { type: "text_delta", block_id: id, delta: "OLD paragraph\n\nTAIL" });
+    await frames(30);
+    feed(id, { type: "block_checkpoint", block_id: id, text: "NEW paragraph\n\nTAIL" });
+    await frames(3);
+    const rewritten = messagesEl().querySelector(`[data-text-id="${id}"]`)?.textContent ?? "";
+    feed(id, { type: "block_checkpoint", block_id: id, text: "" });
+    await frames(3);
+    const cleared = messagesEl().querySelector(`[data-text-id="${id}"]`)?.textContent === "";
+    return { rewritten, cleared, correct: rewritten.includes("NEW") && !rewritten.includes("OLD") && cleared, m: metrics() };
+  },
   /** 流式一个新回合:思考 + 工具 + 大段 Markdown 作答,测每帧工作量。 */
   async stream(): Promise<Record<string, unknown>> {
     const id = "t200";
@@ -593,12 +689,13 @@ const scenarios = {
     const el = messagesEl();
     const paintAt: number[] = [];
     const watch = new MutationObserver((records) => {
-      if (records.some((record) => (record.target as HTMLElement).classList?.contains("md-tail"))) paintAt.push(performance.now());
+      if (records.some((record) => (record.target.nodeType === Node.ELEMENT_NODE ? record.target as Element : record.target.parentElement)?.closest(".md-tail"))) paintAt.push(performance.now());
     });
     feed(id, { type: "turn_opened", user_text: "第 201 问：把窗口逐行列出来" });
     feed(id, { type: "block_opened", block: { block_id: "x201", kind: "text", state: "open" } });
+    feed(id, { type: "text_delta", block_id: "x201", delta: "| item | time | width | policy | result |\n| --- | --- | --- | --- | --- |\n" });
     await frames(2);
-    watch.observe(el, { childList: true, subtree: true });
+    watch.observe(el, { childList: true, characterData: true, subtree: true });
     const cadence = await sampleFrames(200, async () => {
       for (let row = 0; row < 200; row += 1) {
         feed(id, { type: "text_delta", block_id: "x201", delta: `| w-${row} | ${(row * 7919) % 977}ms | ${(row * 31) % 260}px | ${row % 2 ? "auto" : "content"} | ok |\n` });
@@ -618,7 +715,7 @@ const scenarios = {
       paintGapP95Ms: sorted[Math.floor(sorted.length * 0.95)] ?? 0,
       throttledPaints: gaps.filter((gap) => gap > 60).length,
       frameRatePaints: gaps.filter((gap) => gap <= 40).length,
-      tableRows: el.querySelectorAll("table tr").length,
+      tableRows: el.querySelector('[data-text-id="x201"]')?.querySelectorAll("table tr").length ?? 0,
       ...metrics(),
     };
     report.push(out);
@@ -781,6 +878,9 @@ render(
       <main id="main">
         <SessionView tab={tab} />
       </main>
+      <div style="position:fixed;bottom:0;width:760px;pointer-events:none">
+        <ThinkingChain store={store} />
+      </div>
     </div>
   ),
   document.getElementById("root") as HTMLElement,

@@ -2,7 +2,7 @@
  * 长上下文分页纯函数(spec §14):窗口淘汰、前插、滚动补偿计算。
  * 无 DOM、无 Solid 依赖,可单测。
  */
-import { recomputeDerived } from "./reducer";
+import { mergeSlots, recomputeDerived } from "./reducer";
 import type { GapSpan, SessionState, Slot } from "./types";
 
 /** 内存回合窗口(spec §14.1,集中定义便于调整)。 */
@@ -53,32 +53,32 @@ export function evictForWindow(
   const limit = viewportTop - screens * viewportHeight;
   let spans: GapSpan[] = [];
   let gapKey: string | null = null;
-  let at = -1; // 合并后的 gap 落位下标
   let index = 0;
-  while (index < draft.slots.length && loaded > window) {
+  while (index < draft.slots.length && (loaded > window || draft.slots[index]!.kind === "gap")) {
     const slot = draft.slots[index]!;
     if (slot.kind === "gap") {
       // 跨过既有段:摘出来一起重排(继续淘汰的回合与它必然相邻),并保留它的 key,
       // 免得每次淘汰都把这个行的 DOM 换掉。
-      if (at < 0) at = index;
       spans = spans.concat(slot.spans);
       gapKey ??= slot.key;
-      draft.slots.splice(index, 1);
+      index += 1;
       continue;
     }
     const turn = draft.turns[slot.key];
     if (!turn || turn.status === "running") break;
     const top = offsetTopOf(slot.key);
     if (top == null || top > limit) break; // 还在视口附近 → 不淘汰(保视口内容优先)
-    if (at < 0) at = index;
     evicted.push(slot.key);
     spans.push({ key: slot.key, height: 0 });
-    draft.slots.splice(index, 1);
+    index += 1;
     delete draft.turns[slot.key];
     loaded -= 1;
   }
   if (spans.length > 0) {
-    draft.slots.splice(Math.max(at, 0), 0, { kind: "gap", key: gapKey ?? `gap:${spans[0]!.key}`, spans } satisfies Slot);
+    const remaining = draft.slots.slice(index).map((slot): Slot => slot.kind === "turn"
+      ? { kind: "turn", key: slot.key }
+      : { kind: "gap", key: slot.key, spans: slot.spans });
+    mergeSlots(draft, [{ kind: "gap", key: gapKey ?? `gap:${spans[0]!.key}`, spans }, ...remaining]);
     // 槽位表变了 → 派生答案跟着重算(被淘汰的失败回合不能再点亮标签的状态点)。
     recomputeDerived(draft);
   }
@@ -90,13 +90,15 @@ export function evictForWindow(
  * 只认 gap 里已有的 key:回填期间该回合若已被权威快照重新物化,就自然找不到小节。
  */
 export function fillGapHeights(draft: SessionState, heights: ReadonlyMap<string, number>): void {
+  let changed = false;
   for (const slot of draft.slots) {
     if (slot.kind !== "gap") continue;
     for (const span of slot.spans) {
       const height = heights.get(span.key);
-      if (height != null && height !== span.height) span.height = height;
+      if (height != null && height !== span.height) { span.height = height; changed = true; }
     }
   }
+  if (changed) draft.structureVersion += 1;
 }
 
 /** 占位高度上限:超过 2 屏的占位截到 2 屏,避免单个巨大占位把视口顶飞。 */

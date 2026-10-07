@@ -11,9 +11,10 @@
  *
  * `revision` 变化(block_checkpoint 全量替换/重置)时清空缓存整体重渲染。
  */
-import { createEffect, onCleanup, type Component } from "solid-js";
+import { createEffect, onSettled, type Component } from "solid-js";
 import { splitBlocks } from "./split";
 import { renderMarkdownHtml } from "./render";
+import { patchMarkdown } from "./patch";
 
 /**
  * 单帧同步绘制预算(ms)。120Hz 一帧 8.3ms,留一半给布局与绘制。
@@ -28,11 +29,14 @@ const REVEAL_FRAMES = 6;
 /** 落后超过这个字符量说明不是实时流(快照整块落地/切标签回来),直接全量显示。 */
 const CATCH_UP_CHARS = 4_000;
 
-export const Markdown: Component<{ text: () => string; revision?: string | number }> = (props) => {
+export const Markdown: Component<{ text: () => string; revision?: string | number; streaming?: boolean }> = (props) => {
   let host!: HTMLDivElement;
   let tail: HTMLDivElement | undefined;
-  let sealedCount = 0;
-  let renderedRevision: string | number | null = null;
+  let sealedOffset = 0;
+  let tailSource = "";
+  let tailHtml = "";
+  let plainText: Text | null = null;
+  let reduceMotion = false;
 
   let target = ""; // store 里的全文(真相)
   let shown = 0; // 已露出的字符数(表现)
@@ -42,8 +46,12 @@ export const Markdown: Component<{ text: () => string; revision?: string | numbe
   let handle: number | null = null;
 
   const reset = (): void => {
-    sealedCount = 0;
+    sealedOffset = 0;
+    tailSource = "";
+    tailHtml = "";
+    plainText = null;
     while (host.firstChild && host.firstChild !== tail) host.firstChild.remove();
+    tail?.replaceChildren();
   };
 
   const sealInto = (html: string): void => {
@@ -57,21 +65,40 @@ export const Markdown: Component<{ text: () => string; revision?: string | numbe
   const draw = (): void => {
     const startedAt = performance.now();
     const text = shown >= target.length ? target : target.slice(0, shown);
-    if (renderedRevision !== revisionKey) {
-      renderedRevision = revisionKey;
-      reset();
-    }
-    const blocks = splitBlocks(text);
-    if (blocks.length < sealedCount) reset();
-    // 闭合 [sealedCount, blocks.length-1) 的块:内容 append-only,不会再变——
+    // 已闭合前缀永远不再扫描;工作量只随当前尾块增长。
+    const suffix = text.slice(sealedOffset);
+    const blocks = splitBlocks(suffix);
+    // 闭合除尾块之外的新增块:内容 append-only,不会再变——
     // 渲染一次直接写进 DOM,不再缓存 HTML 字符串(缓存等于把整篇输出存两遍)。
-    while (sealedCount < blocks.length - 1) {
-      const block = blocks[sealedCount]!;
+    let consumed = 0;
+    for (let index = 0; index < blocks.length - 1; index += 1) {
+      const block = blocks[index]!;
       sealInto(renderMarkdownHtml(block.content));
-      sealedCount += 1;
+      consumed = suffix.indexOf(block.content, consumed) + block.content.length;
     }
+    sealedOffset += consumed;
     const tailBlock = blocks[blocks.length - 1];
-    if (tail) tail.innerHTML = tailBlock ? renderMarkdownHtml(tailBlock.content) : "";
+    const source = tailBlock?.content ?? "";
+    if (tail && source !== tailSource) {
+      tailSource = source;
+      // 单行普通段落用稳定 text node;每个 token 不需要销毁/重建 <p>。
+      if (source.trim() !== "" && !/[\n\r\\`*_~\[\]<>#|&]/.test(source)
+        && !/^(?: {4}|\t)|^\s*(?:[-+]|\d+[.)])\s|^\s*-{3,}\s*$/.test(source)
+        && !/(?:https?:\/\/|www\.|[\w.+-]+@[\w.-]+\.[a-z]{2,})/i.test(source)) {
+        if (plainText == null) {
+          const paragraph = document.createElement("p");
+          plainText = document.createTextNode(source);
+          paragraph.append(plainText);
+          tail.replaceChildren(paragraph);
+        } else plainText.data = source;
+        tailHtml = "";
+      } else {
+        const html = source ? renderMarkdownHtml(source) : "";
+        if (plainText != null || html !== tailHtml) patchMarkdown(tail, html);
+        plainText = null;
+        tailHtml = html;
+      }
+    }
     lastCostMs = performance.now() - startedAt;
     earliestAt = performance.now() + (lastCostMs > PAINT_BUDGET_MS ? THROTTLE_MS : 0);
   };
@@ -85,7 +112,7 @@ export const Markdown: Component<{ text: () => string; revision?: string | numbe
       return;
     }
     // 落后太多 = 不是逐帧流进来的(快照/回切),没必要再动画。
-    shown = backlog > CATCH_UP_CHARS ? target.length : shown + Math.max(1, Math.ceil(backlog / REVEAL_FRAMES));
+    shown = reduceMotion || backlog > CATCH_UP_CHARS ? target.length : shown + Math.max(1, Math.ceil(backlog / REVEAL_FRAMES));
     draw();
     if (shown < target.length) handle = requestAnimationFrame(tick);
   };
@@ -97,8 +124,8 @@ export const Markdown: Component<{ text: () => string; revision?: string | numbe
   let primed = false; // 首帧不动画:静态文本块不该有「从零长出来」的入场
 
   createEffect(
-    () => [props.text(), props.revision ?? 0] as const,
-    ([text, revision]) => {
+    () => [props.text(), props.revision ?? 0, props.streaming ?? true] as const,
+    ([text, revision, streaming]) => {
       // 全量替换(checkpoint / 权威快照重写)或换块(revision 变了):按真相整块画。
       const wholesale = !primed || revision !== revisionKey || (text !== target && !text.startsWith(target));
       target = text;
@@ -106,17 +133,32 @@ export const Markdown: Component<{ text: () => string; revision?: string | numbe
       if (wholesale) {
         primed = true;
         shown = text.length;
+        reset();
         draw();
         return;
       }
       if (shown > text.length) shown = text.length;
+      if (!streaming && shown < text.length) {
+        if (handle != null) cancelAnimationFrame(handle);
+        handle = null;
+        shown = text.length;
+        draw();
+        return;
+      }
       if (shown < text.length) schedule();
     },
   );
 
-  onCleanup(() => {
-    if (handle != null) cancelAnimationFrame(handle);
-    handle = null;
+  onSettled(() => {
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const updateMotion = (): void => { reduceMotion = motion.matches; };
+    updateMotion();
+    motion.addEventListener("change", updateMotion);
+    return () => {
+      motion.removeEventListener("change", updateMotion);
+      if (handle != null) cancelAnimationFrame(handle);
+      handle = null;
+    };
   });
 
   return (

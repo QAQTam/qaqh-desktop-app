@@ -232,6 +232,8 @@
   .turn-placeholder { width: min(var(--content-width), 100%); margin-inline: auto; }
 
   .turn-steps { display: grid; gap: 6px; margin-bottom: 10px; }
+  .session-group, .work-step-group { display: contents; }
+  .collapse.instant { transition: none; }
   .turn-intermediate { margin: 6px 0; }
   .turn-answer { overflow-anchor: auto; }
   /* 中断且无任何产物的回合状态行(与折叠行同一家族的弱化文本) */

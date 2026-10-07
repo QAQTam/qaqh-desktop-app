@@ -6,12 +6,12 @@ import { createEffect, createSignal, onCleanup, Show, untrack, type ParentCompon
 /** ≥ CSS --dur-out:保留收起过渡动画,播完再释放子树。 */
 const UNMOUNT_DELAY_MS = 260;
 
-export const Collapse: ParentComponent<{ open: boolean }> = (props) => {
+export const Collapse: ParentComponent<{ open: boolean; instant?: boolean }> = (props) => {
   const [mounted, setMounted] = createSignal(untrack(() => props.open));
   let timer: ReturnType<typeof setTimeout> | null = null;
   createEffect(
-    () => props.open,
-    (open) => {
+    () => [props.open, props.instant ?? false] as const,
+    ([open, instant]) => {
       if (timer != null) {
         clearTimeout(timer);
         timer = null;
@@ -21,6 +21,7 @@ export const Collapse: ParentComponent<{ open: boolean }> = (props) => {
         return;
       }
       if (!untrack(mounted)) return;
+      if (instant) { setMounted(false); return; }
       timer = setTimeout(() => {
         timer = null;
         setMounted(false);
@@ -31,7 +32,7 @@ export const Collapse: ParentComponent<{ open: boolean }> = (props) => {
     if (timer != null) clearTimeout(timer);
   });
   return (
-    <div class={`collapse${props.open ? " open" : ""}`} data-open={props.open}>
+    <div class={`collapse${props.open ? " open" : ""}${props.instant ? " instant" : ""}`} data-open={props.open}>
       <div class="collapse-inner">
         <Show when={mounted()}>{props.children}</Show>
       </div>

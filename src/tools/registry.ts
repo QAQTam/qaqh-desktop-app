@@ -57,9 +57,9 @@ function firstString(value: unknown, depth = 0): string | null {
 export function primaryArgFull(argsJson: string | undefined, display: TimelineToolDisplay | undefined): string {
   // header 是后端声明的展示事实(variant 即字段真相),只在缺失/不适用时回退入参键位。
   const header = display?.header;
-  if (header?.kind === "shell") return header.command;
-  if (header?.kind === "path") return header.path;
-  if (header?.kind === "query") return header.scope ? `${header.query}(${header.scope})` : header.query;
+  if (header?.kind === "shell" && typeof header.command === "string" && header.command) return header.command;
+  if (header?.kind === "path" && typeof header.path === "string" && header.path) return header.path;
+  if (header?.kind === "query" && typeof header.query === "string" && header.query) return header.scope ? `${header.query}(${header.scope})` : header.query;
   // 空 label 必须继续往下回退到入参键位:MCP 的 display header 刻意给空
   // label(只用来抑制 legacy 摘要,工具名本身是真相),早返回会让摘要整行空白。
   if (header?.kind === "other" && header.label) return header.label;

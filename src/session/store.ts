@@ -26,7 +26,7 @@ interface PendingFragment {
   turnId: string;
   blockId: string;
   /** `text_delta` 的累积文本,或 `tool_progress` 的累积输出。 */
-  text: string;
+  fragments: Array<{ seq: number; text: string }>;
   truncated: boolean;
   /** 已消费到的 seq(取批次里最大的那个)。 */
   seq: number;
@@ -63,12 +63,13 @@ export class SessionStore {
    */
   private pendingFragments = new Map<string, PendingFragment>();
   /**
-   * 已消费(立即应用,或进了 delta 缓冲)到的最大 seq。store 里的 `watermark` 只
-   * 随非 delta 帧推进,所以缺口判定必须看这个更高的值 —— 否则同一批里的第二条
+   * 已消费(立即应用,或进了 delta 缓冲)到的最大 seq。store 的 `watermark` 要等
+   * 缓冲提交才推进,所以缺口判定必须看这个更高的值 —— 否则同一批里的第二条
    * delta 就会被当成缺口丢掉(夹具实测:连续喂 78 条只落地 10 条,文本每 2s 跳一次)。
    */
   private consumedSeq = 0;
   private rafHandle: number | null = null;
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private lastResnapshotAt = 0;
   private waitFrom: { kind: Wait["kind"]; at: number } | null = null;
   private lastTurnCount: number | null = null;
@@ -126,6 +127,8 @@ export class SessionStore {
       this.rafHandle = null;
     }
     this.pendingFragments.clear();
+    if (this.flushTimer != null) clearTimeout(this.flushTimer);
+    this.flushTimer = null;
   }
 
   retry(): void {
@@ -232,16 +235,18 @@ export class SessionStore {
       const key = `${progress ? "p" : "t"}\u0000${entry.turn_id}\u0000${blockId}`;
       const buffered = this.pendingFragments.get(key);
       if (buffered) {
-        buffered.text += piece;
+        buffered.fragments.push({ seq: entry.timeline_seq, text: piece });
         buffered.truncated = buffered.truncated || truncated;
         buffered.seq = Math.max(buffered.seq, entry.timeline_seq);
       } else {
-        this.pendingFragments.set(key, { turnId: entry.turn_id, blockId, text: piece, truncated, seq: entry.timeline_seq, progress });
+        this.pendingFragments.set(key, { turnId: entry.turn_id, blockId, fragments: [{ seq: entry.timeline_seq, text: piece }], truncated, seq: entry.timeline_seq, progress });
       }
       this.consumedSeq = Math.max(this.consumedSeq, entry.timeline_seq);
       this.scheduleFlush();
     } else {
       this.mutate((draft) => {
+        // 结构事件是顺序屏障:同一事务先落地较早的增量,不能用更高水位吞掉它们。
+        this.flushFragmentsInto(draft);
         applyEntry(draft, entry);
         draft.watermark = entry.timeline_seq;
       });
@@ -251,32 +256,42 @@ export class SessionStore {
 
   private scheduleFlush(): void {
     if (this.rafHandle != null) return;
-    this.rafHandle = requestAnimationFrame(() => {
+    const commit = (): void => {
+      if (this.rafHandle != null) globalThis.cancelAnimationFrame?.(this.rafHandle);
       this.rafHandle = null;
+      if (this.flushTimer != null) clearTimeout(this.flushTimer);
+      this.flushTimer = null;
       if (this.pendingFragments.size === 0) return;
-      const batch = [...this.pendingFragments.values()];
-      this.pendingFragments.clear();
-      this.mutate((draft) => {
-        let maxSeq = draft.watermark;
-        for (const item of batch) {
-          // 权威快照可能已经覆盖到这段文本(resnapshot 与缓冲竞态):已被水位包含
-          // 的再追加一遍就是重复字符。
-          if (item.seq <= draft.watermark) continue;
-          applyEntry(draft, {
-            timeline_seq: item.seq,
-            turn_id: item.turnId,
-            event: item.progress
-              ? { type: "tool_progress", block_id: item.blockId, chunk: item.text, truncated: item.truncated }
-              // 合并帧:多条 delta 已并成一段,块内片段号不再有意义(顺序真相是
-              // timeline_seq,reducer 也不读 fragment_seq)。
-              : { type: "text_delta", block_id: item.blockId, fragment_seq: 0, delta: item.text },
-          });
-          maxSeq = Math.max(maxSeq, item.seq);
-        }
-        // 增量同样是「已消费」:水位必须跟着走,否则下一条增量会被判成缺口。
-        draft.watermark = maxSeq;
+      this.mutate((draft) => this.flushFragmentsInto(draft));
+    };
+    this.rafHandle = requestAnimationFrame(commit);
+    // 窗口被遮挡时 Chromium 可暂停 rAF;后台仍提交数据,不无限积累片段。
+    this.flushTimer = setTimeout(commit, 100);
+  }
+
+  private flushFragmentsInto(draft: SessionState): void {
+    let maxSeq = draft.watermark;
+    for (const item of this.pendingFragments.values()) {
+      // 权威快照可能只覆盖合并批次的一部分;只追加水位之后的片段。
+      if (item.seq <= draft.watermark) continue;
+      const text = item.fragments.filter((part) => part.seq > draft.watermark).map((part) => part.text).join("");
+      applyEntry(draft, {
+        timeline_seq: item.seq,
+        turn_id: item.turnId,
+        event: item.progress
+          ? { type: "tool_progress", block_id: item.blockId, chunk: text, truncated: item.truncated }
+          // 合并后块内片段号不再有意义;顺序真相是 timeline_seq。
+          : { type: "text_delta", block_id: item.blockId, fragment_seq: 0, delta: text },
       });
-    });
+      maxSeq = Math.max(maxSeq, item.seq);
+    }
+    // 所有块提交完再推进水位,避免跨块合并批次互相覆盖。
+    draft.watermark = maxSeq;
+    this.pendingFragments.clear();
+    if (this.rafHandle != null) globalThis.cancelAnimationFrame?.(this.rafHandle);
+    this.rafHandle = null;
+    if (this.flushTimer != null) clearTimeout(this.flushTimer);
+    this.flushTimer = null;
   }
 
   /**

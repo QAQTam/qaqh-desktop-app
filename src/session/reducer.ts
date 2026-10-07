@@ -10,7 +10,7 @@
  * + 普通对象可测」的契约。等价做法是「认得出同一个回合就保住原对象,只有内容真
  * 变了才整对象替换」——同一份权威数据再落地时,回合的订阅者一个都不重跑。
  */
-import { emptySession, gapHeight, type SessionState, type Slot, type Step, type TimelineEntryWire, type ToolDisplay, type ToolOutput, type ToolPermission, type ToolStatus, type Turn } from "./types";
+import { emptySession, type SessionState, type Slot, type Step, type TimelineEntryWire, type ToolDisplay, type ToolOutput, type ToolPermission, type ToolStatus, type Turn } from "./types";
 import type { TimelineSnapshot } from "../api/qaqh/TimelineSnapshot";
 import type { TimelineTool } from "../api/qaqh/TimelineTool";
 import type { TimelineTurn } from "../api/qaqh/TimelineTurn";
@@ -231,6 +231,7 @@ export function applyEntry(draft: SessionState, entry: TimelineEntryWire): Sessi
   const turn = ensureTurn(draft, entry);
   const event = entry.event;
   const ts = now();
+  turn.renderVersion = (turn.renderVersion ?? 0) + 1;
 
   switch (event.type) {
     case "turn_opened": {
@@ -242,6 +243,7 @@ export function applyEntry(draft: SessionState, entry: TimelineEntryWire): Sessi
       if (!block.block_id) break;
       if (block.kind === "reasoning") {
         ensureReasoning(turn, block.block_id, seq);
+        demoteAnswerIfStale(turn);
       } else if (block.kind === "tool") {
         const step = ensureTool(turn, block.block_id, seq, block.tool ?? undefined);
         // 新工具/思考开始 → 之前的流式作答降级为中间叙述(spec 模型外的真实事件)。
@@ -270,7 +272,7 @@ export function applyEntry(draft: SessionState, entry: TimelineEntryWire): Sessi
       const step = findStep(turn, event.block_id);
       const target = step?.kind === "thinking" || step?.kind === "text" ? step : null;
       if (target == null) break;
-      if (event.text) {
+      if (event.text != null) {
         // 全量替换(丢失 delta 或文本旁移后的重对齐)。
         target.text = event.text;
         if (target.kind === "text") promoteAnswer(turn, target);
@@ -328,7 +330,7 @@ export function applyEntry(draft: SessionState, entry: TimelineEntryWire): Sessi
     }
     case "block_sealed": {
       const step = findStep(turn, event.block_id);
-      if (step?.kind === "thinking") step.endedAt = ts;
+      if (step?.kind === "thinking" || step?.kind === "text") step.endedAt = ts;
       break;
     }
     case "turn_sealed": {
@@ -365,6 +367,7 @@ function isTerminalToolStatus(status: ToolStatus): boolean {
  * 集中派生。代价只是每次结构事件多走一遍槽位表(≤ 窗口大小,且不在高频帧上)。
  */
 export function recomputeDerived(draft: SessionState): void {
+  draft.structureVersion += 1;
   let running = 0;
   let failed = 0;
   let activeTurnKey: string | null = null;
@@ -480,6 +483,7 @@ export function buildTurn(raw: TimelineTurn, ts: number): Turn {
   // 答案 = 最后一个文本块(快照里回合已定形)。
   for (let i = turn.steps.length - 1; i >= 0; i -= 1) {
     const step = turn.steps[i]!;
+    if (turn.status === "running" && i === turn.steps.length - 1 && step.kind !== "text") break;
     if (step.kind === "text") {
       turn.answerStepId = step.id;
       turn.answer = { text: step.text, startedAt: turn.workStartedAt };
@@ -600,6 +604,7 @@ function installTurns(draft: SessionState, built: Turn[]): string[] {
  * 还会把用户展开的时间线收起。本地已有的事实带过去,不算发明数据。
  */
 function carryLocalFacts(prev: Turn, next: Turn): void {
+  next.renderVersion = prev.renderVersion;
   next.expanded = prev.expanded;
   next.workStartedAt = prev.workStartedAt ?? next.workStartedAt;
   if (prev.answer != null && next.answer != null && prev.answerStepId === next.answerStepId && prev.answer.text === next.answer.text) {
@@ -623,14 +628,25 @@ function carryLocalFacts(prev: Turn, next: Turn): void {
  * 整表替换会让 `slots` 的每个订阅者重跑;逐位写只通知真动了的那几位,而
  * `<For keyed>` 按 key 认行——排列变化对它是搬家,不是重建。
  */
-function mergeSlots(draft: SessionState, next: Slot[]): void {
+export function mergeSlots(draft: SessionState, next: Slot[]): void {
   for (let index = 0; index < next.length; index += 1) {
     const want = next[index]!;
     const current = draft.slots[index];
     if (current == null) {
       draft.slots.push(want);
     } else if (!sameSlot(current, want)) {
-      draft.slots[index] = want;
+      if (current.kind === want.kind) {
+        current.key = want.key;
+        if (current.kind === "gap" && want.kind === "gap") {
+          for (let i = 0; i < want.spans.length; i += 1) {
+            const span = want.spans[i]!;
+            const existing = current.spans[i];
+            if (existing == null) current.spans.push(span);
+            else { existing.key = span.key; existing.height = span.height; }
+          }
+          if (current.spans.length > want.spans.length) current.spans.splice(want.spans.length);
+        }
+      } else draft.slots[index] = want;
     }
   }
   if (draft.slots.length > next.length) draft.slots.splice(next.length);
@@ -640,7 +656,7 @@ function sameSlot(a: Slot, b: Slot): boolean {
   if (a.kind !== b.kind || a.key !== b.key) return false;
   // 权威页永远不会带 gap 槽(gap 只由本地淘汰产生),所以这里实际只会走到
   // 「kinds 不同」的分支;留着是为了并排比较时不会误判成相同而漏写。
-  if (a.kind === "gap" && b.kind === "gap") return gapHeight(a.spans) === gapHeight(b.spans);
+  if (a.kind === "gap" && b.kind === "gap") return deepEqual(a.spans, b.spans);
   return true;
 }
 
@@ -668,7 +684,9 @@ export function prependPage(
     fresh.push({ kind: "turn", key: turn.key });
     if (oldestAdded == null && turn.turnIndex != null) oldestAdded = turn.turnIndex;
   }
-  if (fresh.length > 0) draft.slots.unshift(...fresh);
+  if (fresh.length > 0) mergeSlots(draft, [...fresh, ...draft.slots.map((slot): Slot => slot.kind === "turn"
+    ? { kind: "turn", key: slot.key }
+    : { kind: "gap", key: slot.key, spans: slot.spans })]);
   draft.hasMore = page.has_more === true;
   if (page.total_turns != null) draft.totalTurns = page.total_turns;
   if (oldestAdded != null) {

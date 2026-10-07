@@ -25,6 +25,36 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
   const [todoOpen, setTodoOpen] = createSignal(false);
   const store = props.tab.store;
   const state = () => store.state[0];
+  const slots = createMemo(() => {
+    state().structureVersion;
+    // keying 只读普通结构快照,避免 For 订阅 50 个 store 槽位的 100+ 叶子。
+    return untrack(() => state().slots.map((slot): Slot => slot.kind === "turn"
+      ? { kind: "turn", key: slot.key }
+      : { kind: "gap", key: slot.key, spans: slot.spans }));
+  }, { name: "session.slots" });
+  const slotTable = createMemo(() => new Map(slots().map((slot) => [slot.key, slot])), { name: "session.slotTable" });
+  const buckets = new Map<string, string>();
+  let nextLocalBucket = 0;
+  const slotGroups = createMemo(() => {
+    const current = slots();
+    return untrack(() => {
+      const live = new Set(current.map((slot) => slot.key));
+      for (const key of buckets.keys()) if (!live.has(key)) buckets.delete(key);
+      const groups: Array<{ key: string; keys: string[] }> = [];
+      for (const slot of current) {
+        let bucket = buckets.get(slot.key);
+        if (bucket == null) {
+          const index = state().turns[slot.key]?.turnIndex;
+          bucket = slot.kind === "gap" ? slot.key : index != null ? `page:${Math.floor(index / 8)}` : `local:${Math.floor(nextLocalBucket++ / 8)}`;
+          buckets.set(slot.key, bucket);
+        }
+        let group = groups[groups.length - 1];
+        if (group?.key !== bucket) { group = { key: bucket, keys: [] }; groups.push(group); }
+        group.keys.push(slot.key);
+      }
+      return groups;
+    });
+  }, { name: "session.groups" });
   let anchoring = false;
   /**
    * 用户是否真的动过滚动区。首屏的 scroll 事件(滚动位置恢复、布局定高后的夹取)
@@ -137,11 +167,7 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
     if (last == null || last.kind !== "turn") return 0;
     const turn = state().turns[last.key];
     if (turn == null) return 0;
-    let chars = turn.user.text.length + (turn.answer?.text.length ?? 0);
-    for (const step of turn.steps) {
-      if ("text" in step) chars += step.text.length;
-    }
-    return chars;
+    return turn.renderVersion ?? 0;
   });
 
   // 新回合入场后文档还会继续变高(Markdown 限频绘制、离屏回合的真实高度逐帧替换
@@ -224,12 +250,12 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
         <Show when={store.compactedAfter[0]() != null && !state().slots.some((slot) => slot.kind === "turn" && slot.key === store.compactedAfter[0]())}>
           <div class="compact-divider" role="separator"><span>{STR.compactedAbove}</span></div>
         </Show>
-        <For each={state().slots} keyed={(slot) => slot.key}>
-          {(slot) => (
-            <Show when={slot().kind === "turn"} fallback={<GapRow slot={slot()} />}>
-              <TurnSlot store={store} slotKey={slot().key} />
+        <For each={slotGroups()} keyed={(group) => group.key}>
+          {(group) => <div class="session-group"><For each={group().keys}>{(key) => (
+            <Show when={slotTable().get(key)?.kind === "turn"} fallback={<GapRow slot={slotTable().get(key) ?? { kind: "gap", key, spans: [] }} />}>
+              <TurnSlot store={store} slotKey={key} />
             </Show>
-          )}
+          )}</For></div>}
         </For>
       </div>
       <TodoPanel store={store} onOpenChange={setTodoOpen} />
@@ -256,7 +282,10 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
  * 逐回合一个占位会让 slots 与 DOM 随翻页无界增长(实测 201 槽里 151 是占位)。
  */
 const GapRow: Component<{ slot: Slot }> = (props) => {
-  const height = createMemo(() => (props.slot.kind === "gap" ? gapHeight(props.slot.spans) : 0));
+  const height = createMemo(() => {
+    const slot = props.slot;
+    return slot.kind === "gap" ? untrack(() => gapHeight(slot.spans)) : 0;
+  });
   return (
     <div
       class="turn-placeholder"

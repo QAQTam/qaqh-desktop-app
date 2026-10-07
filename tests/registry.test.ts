@@ -1,8 +1,12 @@
 /** 工具注册表(spec §8.1):折叠行摘要的 header 优先级与入参回退。 */
 import { describe, expect, test } from "vitest";
-import { primaryArgFull } from "../src/tools/registry";
+import { primaryArg, primaryArgFull } from "../src/tools/registry";
 
 describe("primaryArgFull:空 Other label 必须回退到入参", () => {
+  test("缺失 header 字段不能让渲染抛错", () => {
+    expect(primaryArg(undefined, { header: { kind: "shell" } } as any)).toBe("");
+    expect(primaryArg('{"path":"/fallback"}', { header: { kind: "path" } } as any)).toBe("/fallback");
+  });
   test("MCP 的 header 只有空 label → 用 args 里的 url/query", () => {
     // 后端 qaqh-mcp/bridge.rs 刻意发 `Other{ label: "" }`(工具名 mcp__server__tool
     // 已是真相,header 只用来抑制 legacy 摘要)。早返回空串会让摘要整行空白。

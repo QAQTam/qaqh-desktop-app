@@ -13,7 +13,7 @@
  *  - 词级 diff 惰性化:配对映射只做廉价扫描(parse.pairLines),Myers 代价
  *    「渲染到哪行付哪行」(WeakMap 缓存),展开时不再整文件一次算完。
  */
-import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Component } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onSettled, Show, untrack, type Component } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import {
   fileContentChars,
@@ -147,15 +147,17 @@ const LineContent: Component<{ line: ParsedLine; segments?: WordSegment[]; token
  * 固定行高虚拟开窗:只渲染 [scrollTop±overscan] 内的行,上下留白由容器总高撑出。
  * 行高恒定(等宽字体 + white-space:pre 不折行),不需要动态测量。
  */
-const VirtualRows: Component<{ rows: DiffRow[]; row: (row: DiffRow, index: number) => JSX.Element }> = (props) => {
+const VirtualRows: Component<{ rows: DiffRow[]; row: (row: DiffRow) => JSX.Element }> = (props) => {
+  const renderRow = untrack(() => props.row);
   let container: HTMLDivElement | undefined;
   const [view, setView] = createSignal({ start: 0, end: 0 });
   const recalc = (): void => {
     const el = container;
     if (el == null) return;
     const start = Math.max(0, Math.floor(el.scrollTop / ROW_HEIGHT) - OVERSCAN);
-    const end = Math.min(props.rows.length, Math.ceil((el.scrollTop + el.clientHeight) / ROW_HEIGHT) + OVERSCAN);
-    setView({ start, end });
+    const count = untrack(() => props.rows.length);
+    const end = Math.min(count, Math.ceil((el.scrollTop + el.clientHeight) / ROW_HEIGHT) + OVERSCAN);
+    setView((previous) => previous.start === start && previous.end === end ? previous : { start, end });
   };
   let frame = 0;
   const onScroll = (): void => {
@@ -169,17 +171,20 @@ const VirtualRows: Component<{ rows: DiffRow[]; row: (row: DiffRow, index: numbe
   // ref 挂载点:元素创建即测量首屏 + 追踪容器尺寸变化。
   const attach = (el: HTMLDivElement): void => {
     container = el;
+  };
+  onSettled(() => {
     recalc();
     observer = new ResizeObserver(recalc);
-    observer.observe(el);
-  };
-  onCleanup(() => {
-    observer?.disconnect();
-    if (frame !== 0) cancelAnimationFrame(frame);
+    if (container != null) observer.observe(container);
+    return () => {
+      observer?.disconnect();
+      if (frame !== 0) cancelAnimationFrame(frame);
+    };
   });
+  createEffect(() => props.rows.length, () => recalc());
   /** 等宽字体下的行宽估算(ch 单位,CJK/全角按 2 列、tab 按 4 列):给窗口一个
    *  稳定的 min-width,横向滚动条范围不随「当前渲染到哪些行」跳动。 */
-  const minWidth = (): string => {
+  const minWidth = createMemo((): string => {
     let units = 0;
     for (const row of props.rows) {
       const text = row.kind === "line" ? row.line.text : row.kind === "hunkhead" ? row.text : "";
@@ -189,13 +194,13 @@ const VirtualRows: Component<{ rows: DiffRow[]; row: (row: DiffRow, index: numbe
       if (lineUnits > units) units = lineUnits;
     }
     return `calc(${units}ch + 106px)`;
-  };
+  });
   return (
     <div class="diff-scroll" ref={attach} onScroll={onScroll}>
       <div class="diff-rows" style={{ height: `${props.rows.length * ROW_HEIGHT}px` }}>
         <div class="diff-rows-window" style={{ transform: `translateY(${view().start * ROW_HEIGHT}px)`, "min-width": minWidth() }}>
           <For each={props.rows.slice(view().start, view().end)}>
-            {(row, index) => props.row(row, view().start + index())}
+            {(row) => renderRow(row)}
           </For>
         </div>
       </div>
@@ -210,7 +215,7 @@ export const DiffFileView: Component<{ file: ParsedFile }> = (props) => {
   // 富渲染门槛:超限即降级——降级路径不跑词级 diff 与 shiki,输入先被截到 800 行。
   const rich = () => totalLines() <= RICH_MAX_LINES && fileContentChars(file()) <= RICH_MAX_CHARS;
   const displayRows = createMemo(() => (rich() ? rows() : truncateRows(rows(), FALLBACK_HEAD, FALLBACK_TAIL)));
-  const [expanded, setExpanded] = createSignal(totalLines() <= BIG_DIFF_LINES);
+  const [expanded, setExpanded] = createSignal(untrack(() => totalLines() <= BIG_DIFF_LINES));
 
   // 词级配对映射:廉价扫描(O(行数),无 Myers);真正的 diff 在渲染时逐行结算。
   const EMPTY_PAIRS = new Map<ParsedLine, ParsedLine>();

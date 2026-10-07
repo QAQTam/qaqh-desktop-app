@@ -12,7 +12,7 @@
  *  - 数据面只读 `activeReasoningTurnKey` 指向的那一个回合:遍历 turns 会让
  *    这条链订阅每一个回合的每一个属性(流式期每帧都要重算一遍全表)。
  */
-import { createEffect, createSignal, Show, type Component } from "solid-js";
+import { createEffect, createMemo, Show, untrack, type Component } from "solid-js";
 import IconBrain from "~icons/lucide/brain";
 import type { SessionStore } from "../session/store";
 
@@ -22,29 +22,45 @@ const LINE_TAIL_CHARS = 200;
 const LINE_SCAN_CHARS = LINE_TAIL_CHARS * 4;
 
 export const ThinkingChain: Component<{ store: SessionStore }> = (props) => {
-  const [shown, setShown] = createSignal("");
+  let shown = "";
+  let lineNode: HTMLSpanElement | undefined;
+  let shownId: string | null = null;
+  const active = createMemo(() => {
+    const state = props.store.state[0];
+    const id = state.activeReasoningId;
+    const key = state.activeReasoningTurnKey;
+    if (id == null || key == null) return null;
+    const steps = state.turns[key]?.steps;
+    if (steps == null) return null;
+    const index = untrack(() => steps.findIndex((step) => step.id === id));
+    return index < 0 ? null : steps[index];
+  }, { name: "thinking.active" });
+  const setShown = (text: string): void => {
+    if (shown === text) return;
+    shown = text;
+    if (lineNode != null) lineNode.textContent = text;
+  };
 
   createEffect(
     () => {
-      const state = props.store.state[0];
-      const id = state.activeReasoningId;
-      const turnKey = state.activeReasoningTurnKey;
-      if (id == null || turnKey == null) return null;
-      const turn = state.turns[turnKey];
-      if (turn == null) return null;
-      for (let i = turn.steps.length - 1; i >= 0; i -= 1) {
-        const step = turn.steps[i]!;
-        if (step.kind !== "thinking" || step.id !== id) continue;
+      const step = active();
+      if (step?.kind === "thinking") {
         const text = step.text;
         const tail = text.length > LINE_SCAN_CHARS ? text.slice(-LINE_SCAN_CHARS) : text;
-        return { id, line: tail.slice(tail.lastIndexOf("\n") + 1) };
+        return { id: step.id, line: tail.slice(tail.lastIndexOf("\n") + 1) };
       }
       return null;
     },
     (current) => {
       // 消失立即清;空行(刚收到换行)保持上一次显示,不闪空(§10.1.2)。
       if (current == null) {
+        shownId = null;
         setShown("");
+        return;
+      }
+      if (current.id !== shownId) {
+        shownId = current.id;
+        setShown(current.line.slice(-LINE_TAIL_CHARS));
         return;
       }
       if (current.line === "") return;
@@ -56,7 +72,7 @@ export const ThinkingChain: Component<{ store: SessionStore }> = (props) => {
     <Show when={props.store.state[0].activeReasoningId != null}>
       <div class="thinking-chain" role="status">
         <span class="thinking-icon"><IconBrain /></span>
-        <span class="thinking-line"><span class="thinking-line-text">{shown()}</span></span>
+        <span class="thinking-line"><span class="thinking-line-text" ref={(node) => { lineNode = node; node.textContent = shown; }} /></span>
       </div>
     </Show>
   );

@@ -21,10 +21,10 @@ function isHardBoundary(line: string): boolean {
   return ATX_HEADING.test(line) || HR.test(line);
 }
 
-function isClosingFence(line: string, fenceChar: string): boolean {
+function isClosingFence(line: string, fenceChar: string, fenceLength: number): boolean {
   const trimmed = line.trim();
   if (!trimmed.startsWith(fenceChar.repeat(3))) return false;
-  return new RegExp(`^\\${fenceChar}{3,}\\s*$`).test(trimmed);
+  return new RegExp(`^ {0,3}\\${fenceChar}{${fenceLength},}\\s*$`).test(line);
 }
 
 export function splitBlocks(text: string): MdBlock[] {
@@ -33,6 +33,7 @@ export function splitBlocks(text: string): MdBlock[] {
   const blocks: MdBlock[] = [];
   let current: string[] = [];
   let fenceChar: string | null = null;
+  let fenceLength = 0;
 
   const flush = (complete: boolean): void => {
     if (current.length === 0) return;
@@ -44,7 +45,7 @@ export function splitBlocks(text: string): MdBlock[] {
     const line = lines[i]!;
     if (fenceChar != null) {
       current.push(line);
-      if (isClosingFence(line, fenceChar)) {
+      if (isClosingFence(line, fenceChar, fenceLength)) {
         fenceChar = null;
         flush(true);
       }
@@ -55,6 +56,7 @@ export function splitBlocks(text: string): MdBlock[] {
       if (current.some((l) => l.trim() !== "")) flush(true);
       current.push(line);
       fenceChar = fenceMatch[1]![0]!;
+      fenceLength = fenceMatch[1]!.length;
       continue;
     }
     current.push(line);

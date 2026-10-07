@@ -49,6 +49,8 @@ export interface Turn {
   error?: { message: string };
   /** 时间线里是否被用户展开。 */
   expanded: boolean;
+  /** 仅供贴底触发;避免滚动 effect 订阅每个文本块。 */
+  renderVersion?: number;
 }
 
 export interface ThinkingStep {
@@ -124,6 +126,8 @@ export interface SessionState {
   turns: Record<string, Turn>;
   /** 渲染顺序槽:回合或(被淘汰回合的)等高占位。 */
   slots: Slot[];
+  /** 结构提交版本。消息列表只订阅它,token 更新不重读所有槽位 key。 */
+  structureVersion: number;
   watermark: number;
   serverEpoch: string | null;
   hasMore: boolean;
@@ -179,6 +183,7 @@ export function emptySession(): SessionState {
   return {
     turns: {},
     slots: [],
+    structureVersion: 0,
     watermark: 0,
     serverEpoch: null,
     hasMore: false,

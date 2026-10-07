@@ -12,7 +12,7 @@
  * 前置:/stress.html + /src/stress.tsx 夹具(合成数据,不连 daemon)。
  */
 import { spawn } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -90,10 +90,11 @@ function connect(url) {
       // vite 首次请求会补优化依赖并整页 reload → 执行上下文被销毁。等一次再来。
       for (let attempt = 0; ; attempt += 1) {
         try {
+          let timer;
           const result = await Promise.race([
             send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error(`evaluate timed out: ${expression.slice(0, 60)}`)), timeoutMs)),
-          ]);
+            new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`evaluate timed out: ${expression.slice(0, 60)}`)), timeoutMs); timer.unref(); }),
+          ]).finally(() => clearTimeout(timer));
           if (result.exceptionDetails) {
             const detail = result.exceptionDetails;
             if (detail.exception?.description?.includes("harness 未加载") && attempt < 3) {
@@ -128,8 +129,11 @@ const child = spawn(
     "--window-size=1280,900",
     "--enable-precise-memory-info",
     "--js-flags=--expose-gc",
-    "--disable-gpu",
+    ...(process.env.QAQH_GPU === "1" ? [] : ["--disable-gpu"]),
     "--no-first-run",
+    "--disable-extensions",
+    "--disable-sync",
+    "--no-default-browser-check",
     "--disable-backgrounding-occluded-windows",
     "--disable-renderer-backgrounding",
     "--disable-background-timer-throttling",
@@ -144,13 +148,16 @@ child.on("error", (error) => {
 });
 
 const out = { steps: [], diagnostics: [], perf: [] };
+let activeCdp;
 try {
   const wsUrl = await waitForTarget();
   const cdp = connect(wsUrl);
+  activeCdp = cdp;
   await cdp.open;
   await cdp.send("Runtime.enable");
   await cdp.send("Page.enable");
   await cdp.send("Performance.enable").catch(() => {});
+  out.environment = { browser: await cdp.send("Browser.getVersion"), gpuRequested: process.env.QAQH_GPU === "1", target: TARGET, recordedAt: new Date().toISOString() };
   await new Promise((resolve) => setTimeout(resolve, 3000)); // 让 vite 的首次 reload 落地
 
   /** 页内真实 JS 堆(--expose-gc + --enable-precise-memory-info 才有意义)。 */
@@ -195,7 +202,7 @@ try {
     }
     if (!out.perfNames) out.perfNames = Object.keys(after);
     const deltaMs = (name) => Math.round(((after[name] ?? 0) - (before[name] ?? 0)) * 1000 * 10) / 10;
-    const frames = Math.max(1, Math.round(elapsedMs / (1000 / 60))); // headless 帧钟 60Hz
+    const frames = Math.max(1, detail?.cadence?.frames ?? Math.round(elapsedMs / (1000 / 60)));
     out.perf.push({
       label,
       elapsedMs,
@@ -217,6 +224,10 @@ try {
 
   await step("boot", `(async()=>{ for (let i=0;i<120 && !window.__stress;i++) await new Promise(r=>setTimeout(r,100)); if (!window.__stress) throw new Error("harness 未加载: " + document.title + " | " + document.documentElement.outerHTML.slice(0,300)); for (let i=0;i<60 && !window.__stress.report.length;i++) await new Promise(r=>setTimeout(r,100)); const b=window.__stress.report[0]||{}; gc(); return { mountMs:b.mountMs, bootChurn:b.bootChurn, hidden:document.hidden, longTasks:b.longTasks, m:window.__stress.metrics() }; })()`);
   await step("stream", `window.__stress.scenarios.stream().then(r=>({thinkingCadence:r.thinkingCadence, answerCadence:r.answerCadence, paintCadence:r.paintCadence, churn:r.churn, m:r}))`);
+  await perfSample("rate300", `window.__stress.scenarios.highRate(300, 6)`).then((detail) => { if (detail) out.steps.push({ name: "rate300", detail }); });
+  await perfSample("rate900", `window.__stress.scenarios.highRate(900, 6)`).then((detail) => { if (detail) out.steps.push({ name: "rate900", detail }); });
+  await step("checkpoint", `window.__stress.scenarios.checkpoint()`);
+  await step("thinking", `window.__stress.scenarios.thinking()`);
   await step("markdownCost", `window.__stress.scenarios.markdownCost()`);
   await step("progressStream:direct", `window.__stress.scenarios.progressStream("direct")`);
   await step("progressStream:merged", `window.__stress.scenarios.progressStream("merged")`);
@@ -238,7 +249,29 @@ try {
   await step("layout", `Promise.resolve(window.__stress.scenarios.layout()).then(r=>({offenders:r.offenders, turnWidths:r.turnWidths, zeroHeightTurns:r.zeroHeightTurns, innerWidth:r.innerWidth, m:r}))`);
 
   out.diagnostics = diagnostics;
+  if (process.env.QAQH_ASSERT === "1") {
+    const failures = [];
+    for (const { name, detail } of out.steps) {
+      if (name.startsWith("rate") && (detail.lostChars !== 0 || !detail.renderedCorrect || detail.textIdentityLost || !detail.remainedCollapsed || detail.cadence.janks > 0)) failures.push(name);
+      if ((name === "checkpoint" || name === "thinking") && !detail.correct) failures.push(name);
+      if (name === "tableStream" && detail.tableRows !== 201) failures.push(name);
+    }
+    if (diagnostics.length) failures.push("browser diagnostics");
+    out.assertions = { passed: failures.length === 0, failures };
+    if (failures.length) throw new Error(`Stress regression: ${failures.join(", ")}`);
+  }
+  if (process.env.QAQH_REPORT) writeFileSync(process.env.QAQH_REPORT, JSON.stringify(out, null, 2));
   console.log("\n" + JSON.stringify(out, null, 1));
 } finally {
+  if (process.env.QAQH_REPORT) writeFileSync(process.env.QAQH_REPORT, JSON.stringify({ ...out, diagnostics }, null, 2));
+  // Windows Edge may relaunch: killing the launcher alone leaves the isolated browser alive.
+  let closeTimer;
+  if (activeCdp) {
+    await Promise.race([
+      activeCdp.send("Browser.close").catch(() => {}),
+      new Promise((resolve) => { closeTimer = setTimeout(resolve, 1000); }),
+    ]).finally(() => clearTimeout(closeTimer));
+  }
+  activeCdp?.ws.close();
   await child.kill();
 }
