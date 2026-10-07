@@ -12,10 +12,11 @@
  * BYOK 六字段与档案预设拆在 `byok/ProfileManager`;设备配对在 `PairingSection`;
  * 左侧分区导航按 section id 跳转(长表单不再一滚到底)。
  */
-import { createEffect, createMemo, createSignal, For, Show, type Component } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onSettled, Show, type Component } from "solid-js";
 import IconX from "~icons/lucide/x";
 import IconRotate from "~icons/lucide/rotate-ccw";
 import { STR } from "../lib/strings";
+import { sessionMaterial, setSessionMaterial, type SessionMaterial } from "../lib/visual";
 import { MASK, PERMISSION_TIERS, THEME_OPTIONS, formatToolList, needsBypassConfirm, parseToolList, toInt, toNumber } from "./patch";
 import {
   baseline,
@@ -62,6 +63,13 @@ export const SettingsView: Component = () => {
   const [subKey, setSubKey] = createSignal("");
   const [toolsInput, setToolsInput] = createSignal("");
   const [activeSection, setActiveSection] = createSignal<string>(NAV[0].id);
+  let modal: HTMLDivElement | undefined;
+
+  onSettled(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    modal?.querySelector<HTMLElement>(".settings-close")?.focus();
+    return () => previousFocus?.focus();
+  });
 
   // 基线换了(载入/保存/切 profile)才重置缓冲——它们不参与 patch 构建。
   createEffect(
@@ -77,9 +85,34 @@ export const SettingsView: Component = () => {
 
   const bypassPending = createMemo(() => requireBypass() && needsBypassConfirm(patch()));
 
+  const revealNavItem = (id: string): void => {
+    modal?.querySelector<HTMLElement>(`.settings-nav-item[data-section-id="${id}"]`)
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  };
+
   const jumpTo = (id: string): void => {
     setActiveSection(id);
+    revealNavItem(id);
     document.getElementById(id)?.scrollIntoView({ block: "start" });
+  };
+
+  const syncActiveSection = (scroller: HTMLDivElement): void => {
+    const nav = scroller.querySelector<HTMLElement>(".settings-nav");
+    const threshold = scroller.getBoundingClientRect().top + Math.min(nav?.getBoundingClientRect().height ?? 0, 48) + 12;
+    let current: string = NAV[0].id;
+    for (const item of NAV) {
+      const section = document.getElementById(item.id);
+      if (section == null) continue;
+      if (section.getBoundingClientRect().top > threshold) break;
+      current = item.id;
+    }
+    if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4) {
+      current = NAV[NAV.length - 1]!.id;
+    }
+    if (current !== activeSection()) {
+      setActiveSection(current);
+      revealNavItem(current);
+    }
   };
 
   return (
@@ -89,7 +122,32 @@ export const SettingsView: Component = () => {
         if (event.target === event.currentTarget) requestClose();
       }}
     >
-      <div class="settings-modal" role="dialog" aria-modal="true" aria-label={STR.settings}>
+      <div
+        class="settings-modal"
+        ref={(node) => { modal = node; }}
+        role="dialog"
+        aria-modal="true"
+        aria-label={STR.settings}
+        onKeyDown={(event) => {
+          if (event.key !== "Tab" || modal == null) return;
+          const nodes = Array.from(modal.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          )).filter((node) => node.getClientRects().length > 0);
+          if (nodes.length === 0) {
+            event.preventDefault();
+            return;
+          }
+          const first = nodes[0]!;
+          const last = nodes[nodes.length - 1]!;
+          if (event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && (document.activeElement === last || !modal.contains(document.activeElement))) {
+            event.preventDefault();
+            first.focus();
+          }
+        }}
+      >
         <header class="settings-head">
           <h2>{STR.settings}</h2>
           <Show when={(draft()?.activeProfile ?? "") !== ""}>
@@ -115,13 +173,15 @@ export const SettingsView: Component = () => {
         <Show when={draft()}>
           {(config) => (
             <>
-              <div class="settings-body">
+              <div class="settings-body" onScroll={(event) => syncActiveSection(event.currentTarget)}>
                 <nav class="settings-nav" aria-label="设置分区">
                   <For each={NAV}>
                     {(item) => (
                       <button
                         type="button"
                         class={`settings-nav-item${activeSection() === item.id ? " active" : ""}`}
+                        aria-current={activeSection() === item.id ? "location" : undefined}
+                        data-section-id={item.id}
                         onClick={() => jumpTo(item.id)}
                       >
                         {item.label}
@@ -208,6 +268,16 @@ export const SettingsView: Component = () => {
                         onChange={(event) => setField("theme", event.currentTarget.value)}
                       >
                         <For each={THEME_OPTIONS}>{(item) => <option value={item.value}>{item.label}</option>}</For>
+                      </select>
+                    </Field>
+                    <Field label="会话标签材质" hint="仅保存在此应用窗口，不写入 daemon 配置。">
+                      <select
+                        class="field-input"
+                        value={sessionMaterial()}
+                        onChange={(event) => setSessionMaterial(event.currentTarget.value as SessionMaterial)}
+                      >
+                        <option value="glass">Glass</option>
+                        <option value="solid">Solid</option>
                       </select>
                     </Field>
                     <Field label="lang" hint="空 = 跟随系统;后端不校验取值。">
@@ -401,7 +471,7 @@ export const SettingsView: Component = () => {
                   </button>
                   <button
                     type="button"
-                    class="primary-mini"
+                    class="primary-mini button-primary"
                     disabled={busy() || loading() || !dirty()}
                     onClick={() => void save()}
                   >

@@ -36,9 +36,18 @@ function normalizeStatus(raw: unknown): TodoStatus {
 
 const TodoRow: Component<{ item: { title?: string; status?: string; evidence?: string }; index: number }> = (props) => {
   const status = () => normalizeStatus(props.item.status);
+  const statusLabel = () => {
+    switch (status()) {
+      case "in_progress": return "进行中";
+      case "completed": return "已完成";
+      case "cancelled": return "已取消";
+      default: return "待处理";
+    }
+  };
   return (
     <li
       class={{ "todo-row": true, [`st-${status()}`]: true }}
+      aria-label={`${props.item.title ?? "待办"}，${statusLabel()}`}
       style={{ "animation-delay": `${Math.min(props.index, 12) * 40}ms` }}
     >
       <Show
@@ -50,6 +59,7 @@ const TodoRow: Component<{ item: { title?: string; status?: string; evidence?: s
       <span class="todo-title" title={props.item.evidence ?? props.item.title}>
         {props.item.title}
       </span>
+      <span class="sr-only">{statusLabel()}</span>
     </li>
   );
 };

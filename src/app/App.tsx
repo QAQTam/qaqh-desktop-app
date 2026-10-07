@@ -14,10 +14,11 @@
 import { createSignal, For, Match, onSettled, Show, Switch, type Component } from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import IconMinus from "~icons/lucide/minus";
-import IconSettings from "~icons/lucide/settings";
 import IconSquare from "~icons/lucide/square";
 import IconX from "~icons/lucide/x";
 import { TabBar } from "../tabs/TabBar";
+import { GlobalNav, type GlobalSection } from "./GlobalNav";
+import { ToolsPage } from "./ToolsPage";
 import {
   activeId,
   activeTab,
@@ -55,6 +56,7 @@ const inTauri = isTauriRuntime();
 /** D1 兼容性失败详情(conn://incompatible);null = 正常。 */
 const [hostIncompatible, setHostIncompatible] = createSignal<Record<string, unknown> | null>(null);
 const [hostActionNote, setHostActionNote] = createSignal<string | null>(null);
+const [section, setSection] = createSignal<"messages" | "tools">("messages");
 
 /** 一键停止旧 daemon(不静默杀:Busy 时给动作文案)→ 重启标签引导。 */
 async function stopStaleAndReconnect(): Promise<void> {
@@ -98,7 +100,7 @@ const App: Component = () => {
     // 启动即取一次主题配置(失败静默:跟随系统),避免「设置过深色但重开是浅色」。
     void transport
       .rpc<{ theme: string | null }>("config.load")
-      .then((config) => applyConfigTheme(config.theme))
+      .then((config) => applyConfigTheme(config.theme, false))
       .catch(() => {});
 
     // Tauri:外链一律走系统浏览器;宿主诊断事件(兼容性失败/宿主错误)。
@@ -146,15 +148,21 @@ const App: Component = () => {
       if (!mod) return;
       if (event.key === "t" || event.key === "T") {
         event.preventDefault();
+        setSection("messages");
         if (activeTab() != null) void createSession();
       } else if (event.key === "w" || event.key === "W") {
         event.preventDefault();
+        setSection("messages");
         const id = activeId();
-        if (id != null) void closeTab(id);
+        if (id != null) {
+          void closeTab(id);
+          requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".tab.active")?.focus());
+        }
       } else if (event.key === "Tab") {
         event.preventDefault();
         const list = tabs();
         if (list.length < 2) return;
+        setSection("messages");
         const index = list.findIndex((tab) => tab.id === activeId());
         const next = event.shiftKey
           ? list[(index - 1 + list.length) % list.length]!
@@ -165,6 +173,7 @@ const App: Component = () => {
         const target = list[Number(event.key) - 1];
         if (target != null) {
           event.preventDefault();
+          setSection("messages");
           void activateTab(target);
         }
       }
@@ -214,88 +223,115 @@ const App: Component = () => {
   return (
     <div id="app">
       <header id="top" data-tauri-drag-region={inTauri ? true : undefined}>
+        <div class="titlebar-brand">QAQH</div>
+        <div class="titlebar-session-title">{settingsOpen() ? "设置" : section() === "tools" ? "工具" : "消息"}</div>
+        {inTauri && <div class="top-drag" data-tauri-drag-region />}
+        <ConnectionStatus />
+        {inTauri && <TitlebarControls />}
+      </header>
+      <GlobalNav
+        active={settingsOpen() ? "settings" : section()}
+        onNavigate={(next: GlobalSection) => {
+          if (next === "settings") toggleSettings();
+          else setSection(next);
+        }}
+      />
+      <div class="workspace">
+        <div class="session-tabs-region">
         <TabBar
           tabs={tabs()}
           activeId={activeId()}
           creating={creating()}
           canCreate={activeTab() != null}
           onSelect={(id) => {
+            setSection("messages");
             const tab = tabs().find((item) => item.id === id);
             if (tab != null) void activateTab(tab);
           }}
           onClose={(id) => void closeTab(id)}
-          onCreate={() => void createSession()}
+          onCreate={() => {
+            setSection("messages");
+            void createSession();
+          }}
         />
-        {inTauri && <div class="top-drag" data-tauri-drag-region />}
-        <button
-          type="button"
-          class="ghost-mini settings-open"
-          aria-label={STR.settings}
-          title={`${STR.settings} (Ctrl+,)`}
-          onClick={toggleSettings}
-        >
-          <IconSettings />
-        </button>
-        <ConnectionStatus />
-        {inTauri && <TitlebarControls />}
-      </header>
-      <main id="main">
-        <Show when={hostIncompatible() != null}>
-          <div class="host-banner" role="alert">
-            <span>
-              {STR.incompatibleDaemon(
-                typeof hostIncompatible()!.detail === "string" ? (hostIncompatible()!.detail as string) : "版本/协议不匹配",
-              )}
-            </span>
-            <Show when={hostActionNote() != null}>
-              <span class="host-banner-note">{hostActionNote()}</span>
-            </Show>
-            <span class="host-banner-actions">
-              <button type="button" class="ghost-mini" onClick={() => void stopStaleAndReconnect()}>
-                {STR.incompatibleStopAndConnect}
-              </button>
-              <button type="button" class="ghost-mini" onClick={() => void bootTabs()}>
-                {STR.retry}
-              </button>
-            </span>
-          </div>
-        </Show>
-        <Show when={bootError() != null}>
-          <div class="boot-error">
-            <span>{bootError()}</span>
-            <button type="button" class="ghost-mini" onClick={() => void bootTabs()}> {STR.retry}</button>
-          </div>
-        </Show>
-        <For each={tabs()}>
-          {(tab) => (
-            // 非活动标签卸载 DOM(§5.3),store 数据保留。
-            <Show when={tab.id === activeId()}>
-              <div class="session-column" role="tabpanel" aria-label={tab.store.title[0]() ?? STR.newTab}>
-                <SessionView tab={tab} />
-                <Show when={tab.store.pending[0]().length > 0}>
-                  <ApprovalStack
-                    pending={tab.store.pending[0]()}
-                    respond={(challengeId, decision, payload) => tab.store.respondApproval(challengeId, decision, payload)}
-                  />
+        </div>
+        <main id="main">
+          <Show when={hostIncompatible() != null}>
+            <div class="host-banner" role="alert">
+              <span>
+                {STR.incompatibleDaemon(
+                  typeof hostIncompatible()!.detail === "string" ? (hostIncompatible()!.detail as string) : "版本/协议不匹配",
+                )}
+              </span>
+              <Show when={hostActionNote() != null}>
+                <span class="host-banner-note">{hostActionNote()}</span>
+              </Show>
+              <span class="host-banner-actions">
+                <button type="button" class="ghost-mini" onClick={() => void stopStaleAndReconnect()}>
+                  {STR.incompatibleStopAndConnect}
+                </button>
+                <button type="button" class="ghost-mini" onClick={() => void bootTabs()}>
+                  {STR.retry}
+                </button>
+              </span>
+            </div>
+          </Show>
+          <Show when={bootError() != null}>
+            <div class="boot-error">
+              <span>{bootError()}</span>
+              <button type="button" class="ghost-mini" onClick={() => void bootTabs()}> {STR.retry}</button>
+            </div>
+          </Show>
+          <Show when={section() === "messages"}>
+            <For each={tabs()}>
+              {(tab) => (
+                // 非活动标签卸载 DOM(§5.3),store 数据保留。
+                <Show when={tab.id === activeId()}>
+                  <div
+                    class="session-column"
+                    id={`panel-${tab.id}`}
+                    role="tabpanel"
+                    aria-labelledby={`tab-${tab.id}`}
+                  >
+                    <SessionView tab={tab} />
+                    <Show when={tab.store.pending[0]().length > 0}>
+                      <ApprovalStack
+                        pending={tab.store.pending[0]()}
+                        respond={(challengeId, decision, payload) => tab.store.respondApproval(challengeId, decision, payload)}
+                      />
+                    </Show>
+                    <ThinkingChain store={tab.store} />
+                    <Composer
+                      draft={() => draftOf(tab.seed)}
+                      onDraft={(value) => setDraftOf(tab.seed, value)}
+                      blocked={blockedReason}
+                      running={runningNow}
+                      onSend={(text) => void send(text)}
+                      onStop={() => void tab.store.cancelTurn().catch(() => {})}
+                      focusToken={focusToken()}
+                    />
+                  </div>
                 </Show>
-                <ThinkingChain store={tab.store} />
-                <Composer
-                  draft={() => draftOf(tab.seed)}
-                  onDraft={(value) => setDraftOf(tab.seed, value)}
-                  blocked={blockedReason}
-                  running={runningNow}
-                  onSend={(text) => void send(text)}
-                  onStop={() => void tab.store.cancelTurn().catch(() => {})}
-                  focusToken={focusToken()}
-                />
-              </div>
+              )}
+            </For>
+            <Show when={tabs().length === 0 && bootError() == null}>
+              <div class="no-tab" />
             </Show>
-          )}
-        </For>
-        <Show when={tabs().length === 0 && bootError() == null}>
-          <div class="no-tab" />
-        </Show>
-      </main>
+          </Show>
+          {/* The session switcher remains available on the Tools page, so keep its
+              selected tab's controlled panel in the accessibility tree contract. */}
+          <Show when={section() === "tools" && activeTab() != null}>
+            <div
+              class="session-column"
+              id={`panel-${activeTab()!.id}`}
+              role="tabpanel"
+              aria-labelledby={`tab-${activeTab()!.id}`}
+              hidden
+            />
+          </Show>
+          <Show when={section() === "tools"}><ToolsPage /></Show>
+        </main>
+      </div>
       {/* 全局配置面,与标签/会话无关:零会话、引导失败时也要能打开。 */}
       <Show when={settingsOpen()}>
         <SettingsView />

@@ -6,17 +6,31 @@
  * `transport.timelinePage` 被挂了一个内存假页,不写任何后端、不发任何命令。
  */
 import { render } from "@solidjs/web";
-import { untrack } from "solid-js";
+import { createSignal, Show, untrack } from "solid-js";
 import { SessionStore } from "./session/store";
 import { applyEntry } from "./session/reducer";
 import { SessionView } from "./session/SessionView";
 import { ThinkingChain } from "./thinking/ThinkingChain";
+import { Composer } from "./composer/Composer";
+import { ApprovalStack } from "./approval/ApprovalCards";
+import { GlobalNav } from "./app/GlobalNav";
+import { ToolsPage } from "./app/ToolsPage";
+import { SettingsView } from "./settings/SettingsView";
+import { reload as reloadSettings } from "./settings/store";
+import { TabBar } from "./tabs/TabBar";
+import { setSessionMaterial, type SessionMaterial } from "./lib/visual";
+import { applyConfigTheme, type ResolvedTheme } from "./lib/theme";
 import { transport } from "./lib/transport";
+import type { ConfigDto } from "./api/qaqh/ConfigDto";
+import type { ApprovalView } from "./lib/transport";
 import type { Tab } from "./tabs/store";
 import "./styles/app.css";
 
 /** 会话总回合数(权威 total_turns)。 */
-const TOTAL = 200;
+const previewParams = new URLSearchParams(window.location.search);
+const previewView = previewParams.get("view");
+const isVisualPreview = previewView === "settings" || previewView === "approval" || previewView === "tools";
+const TOTAL = isVisualPreview ? 4 : 200;
 /** 假页水位;实时条目序号从 liveSeq 往后走。 */
 let watermark = 2000;
 let liveSeq = 2001;
@@ -234,6 +248,75 @@ function pageFor(query: string): Record<string, unknown> {
 
 const store = new SessionStore("stress");
 const tab: Tab = { id: "tab-stress", seed: "stress", store };
+const fixtureTabs: Tab[] = [tab];
+for (let index = 2; index <= 20; index += 1) {
+  const extraStore = new SessionStore(`stress-${index}`);
+  extraStore.title[1](`会话 ${index}`);
+  if (index % 6 === 0) extraStore.hasNewReply[1](true);
+  if (index % 7 === 0) extraStore.activity[1]("working");
+  fixtureTabs.push({ id: `tab-stress-${index}`, seed: `stress-${index}`, store: extraStore });
+}
+const [draft, setDraft] = createSignal("");
+
+if (isVisualPreview && previewView === "settings") {
+  const previewConfig: ConfigDto = {
+    model: "qaqh-visual-preview",
+    baseUrl: "https://api.example.test/v1",
+    wire: "responses",
+    maxTokens: 8192,
+    contextLength: 128000,
+    reasoningEffort: "medium",
+    autoCompactThreshold: 0.82,
+    permissionLevel: 2,
+    apiKey: "****",
+    lang: "zh-CN",
+    fontFamily: "",
+    theme: previewParams.get("theme") === "dark" ? "dark" : "light",
+    notificationsEnabled: true,
+    activeProfile: "视觉验收",
+    profiles: ["视觉验收", "本地模型"],
+    complianceEnabled: true,
+    subagent: {
+      model: "qaqh-subagent-preview",
+      baseUrl: "https://api.example.test/v1",
+      apiKey: "",
+      apiKeySet: false,
+      maxTokens: 4096,
+      timeoutSecs: 120,
+      defaultTools: ["read", "write"],
+      maxDepth: 3,
+      messageInFlightPerPair: 0,
+      messageOutboundPerSender: 0,
+    },
+    mcp: { enabled: true, idleShutdownSecs: 300, servers: [] },
+    lsp: { enabled: false, idleShutdownSecs: 300, servers: [] },
+    tokenizerPath: null,
+  };
+  transport.rpc = async <T = unknown>(method: string): Promise<T> => {
+    if (method === "config.load") return structuredClone(previewConfig) as T;
+    throw new Error(`visual preview does not mock ${method}`);
+  };
+}
+
+if (previewView === "approval") {
+  const approval: ApprovalView = {
+    challenge_id: "visual-approval-high-risk",
+    kind: "tool_permission",
+    expires_in: 120,
+    details: {
+      tool_name: "exec",
+      action_summary: "执行具有外部影响的命令",
+      reason: "此操作会访问工作区以外的路径，并可能触发网络请求。请核对路径与命令内容。",
+      paths: ["E:/workspace/project/dist/release/package.exe", "C:/workspace/cache/"],
+      risk: "high",
+      level: 1,
+      level_name: "read-only",
+      category: "filesystem + network",
+      consequence: "允许后只对本次请求生效；信任会放行后续同类工具调用。",
+    },
+  };
+  store.pending[1]([approval, { ...approval, challenge_id: "visual-approval-next", details: { tool_name: "read", risk: "low" } }]);
+}
 
 function messagesEl(): HTMLElement {
   return document.getElementById("messages") as HTMLElement;
@@ -357,6 +440,11 @@ function feed(turnId: string, event: Record<string, unknown>, seq?: number): voi
 const report: Array<Record<string, unknown>> = [];
 
 const scenarios = {
+  /** Theme switcher for visual review of the Web/Tauri surface. */
+  theme(mode: ResolvedTheme): { theme: ResolvedTheme; owner: "web" } {
+    applyConfigTheme(mode);
+    return { theme: mode, owner: "web" };
+  },
   async thinking(): Promise<Record<string, unknown>> {
     const id = `thinking-${liveSeq}`;
     feed(id, { type: "block_opened", block: { block_id: id, kind: "reasoning", state: "open" } });
@@ -855,7 +943,17 @@ const scenarios = {
     report.push(out);
     return out;
   },
+  material(mode: SessionMaterial): Record<string, unknown> {
+    setSessionMaterial(mode);
+    return { name: "material", mode, dataset: document.documentElement.dataset.material };
+  },
 };
+
+// URL switches make visual review reproducible without changing production preferences.
+const previewTheme = previewParams.get("theme");
+if (previewTheme === "light" || previewTheme === "dark") applyConfigTheme(previewTheme, false);
+const previewMaterial = previewParams.get("material");
+if (previewMaterial === "glass" || previewMaterial === "solid") setSessionMaterial(previewMaterial);
 
 // ── 启动 ─────────────────────────────────────────────────────────────────────
 
@@ -867,20 +965,46 @@ declare global {
 }
 
 const bootStart = performance.now();
-// 复刻真实滚动链(#app > header#top[40px] + main#main > #session > #messages):
-// 少了头部行,main#main 会占 40px 那行,所有视口相关测量都失真。
+// 复刻 App 的标题栏、全局导航、顶部 session tabs 与消息／工具内容区。
 render(
   () => (
     <div id="app">
       <header id="top">
-        <span class="stress-title">stress fixture</span>
+        <span class="titlebar-brand">QAQH</span>
+        <span class="titlebar-session-title">{previewView === "settings" ? "设置" : previewView === "tools" ? "工具" : "消息"}</span>
       </header>
-      <main id="main">
-        <SessionView tab={tab} />
-      </main>
-      <div style="position:fixed;bottom:0;width:760px;pointer-events:none">
-        <ThinkingChain store={store} />
+      <GlobalNav active={previewView === "settings" ? "settings" : previewView === "tools" ? "tools" : "messages"} onNavigate={() => {}} />
+      <div class="workspace">
+        <div class="session-tabs-region">
+          <TabBar tabs={fixtureTabs} activeId={tab.id} creating={false} canCreate={false} onSelect={() => {}} onClose={() => {}} onCreate={() => {}} />
+        </div>
+        <main id="main">
+          <Show when={previewView === "tools"}>
+            <ToolsPage />
+            {/* Keep the shared stress metrics target available in this shell-only fixture. */}
+            <div id="messages" hidden />
+          </Show>
+          <Show when={previewView !== "tools"}>
+            <div class="session-column" id="panel-tab-stress" role="tabpanel" aria-labelledby="tab-tab-stress">
+              <SessionView tab={tab} />
+              <Show when={store.pending[0]().length > 0}>
+                <ApprovalStack pending={store.pending[0]()} respond={async () => {}} />
+              </Show>
+              <ThinkingChain store={store} />
+              <Composer
+                draft={draft}
+                onDraft={setDraft}
+                blocked={() => null}
+                running={() => false}
+                onSend={() => setDraft("")}
+                onStop={() => {}}
+                focusToken={0}
+              />
+            </div>
+          </Show>
+        </main>
       </div>
+      <Show when={previewView === "settings"}><SettingsView /></Show>
     </div>
   ),
   document.getElementById("root") as HTMLElement,
@@ -889,6 +1013,8 @@ render(
 churnReset();
 void (async () => {
   await store.resnapshot();
+  if (previewView === "approval") store.todos[1]([]);
+  if (previewView === "settings") await reloadSettings();
   await frames(2);
   const mountMs = Math.round(performance.now() - bootStart);
   await frames(30);

@@ -166,7 +166,7 @@ export const ProfileManager: Component = () => {
                 </button>
                 <button
                   type="button"
-                  class="ghost-mini is-danger"
+                  class="ghost-mini is-danger button-danger"
                   disabled={busy() || name === config().activeProfile}
                   onClick={() => void deleteProfile(name)}
                 >

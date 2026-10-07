@@ -206,14 +206,14 @@ export const PairingSection: Component = () => {
                         <Show
                           when={confirmRevoke() === device.device_id}
                           fallback={
-                            <button type="button" class="ghost-mini is-danger" onClick={() => setConfirmRevoke(device.device_id)}>
+                            <button type="button" class="ghost-mini is-danger button-danger" onClick={() => setConfirmRevoke(device.device_id)}>
                               吊销
                             </button>
                           }
                         >
                           <span class="devices-confirm">
                             确认吊销?
-                            <button type="button" class="ghost-mini is-danger" onClick={() => void revoke(device.device_id)}>
+                            <button type="button" class="ghost-mini is-danger button-danger" onClick={() => void revoke(device.device_id)}>
                               确认
                             </button>
                             <button type="button" class="ghost-mini" onClick={() => setConfirmRevoke(null)}>

@@ -29,6 +29,28 @@ const REVEAL_FRAMES = 6;
 /** 落后超过这个字符量说明不是实时流(快照整块落地/切标签回来),直接全量显示。 */
 const CATCH_UP_CHARS = 4_000;
 
+function addCodeBlockHeaders(root: HTMLElement): void {
+  for (const pre of Array.from(root.querySelectorAll("pre"))) {
+    if (pre.parentElement?.classList.contains("md-code-block")) continue;
+    const wrapper = root.ownerDocument.createElement("div");
+    wrapper.className = "md-code-block";
+    const head = root.ownerDocument.createElement("div");
+    head.className = "md-code-head";
+    const label = root.ownerDocument.createElement("span");
+    label.textContent = "代码";
+    const button = root.ownerDocument.createElement("button");
+    button.type = "button";
+    button.className = "md-copy-code";
+    button.dataset.copyCode = "true";
+    button.setAttribute("aria-label", "复制代码");
+    button.title = "复制代码";
+    button.textContent = "复制";
+    head.append(label, button);
+    pre.parentNode?.insertBefore(wrapper, pre);
+    wrapper.append(head, pre);
+  }
+}
+
 export const Markdown: Component<{ text: () => string; revision?: string | number; streaming?: boolean }> = (props) => {
   let host!: HTMLDivElement;
   let tail: HTMLDivElement | undefined;
@@ -37,6 +59,7 @@ export const Markdown: Component<{ text: () => string; revision?: string | numbe
   let tailHtml = "";
   let plainText: Text | null = null;
   let reduceMotion = false;
+  let isStreaming = true;
 
   let target = ""; // store 里的全文(真相)
   let shown = 0; // 已露出的字符数(表现)
@@ -58,6 +81,7 @@ export const Markdown: Component<{ text: () => string; revision?: string | numbe
     const node = document.createElement("div");
     node.className = "md-block";
     node.innerHTML = html; // 已净化输出
+    addCodeBlockHeaders(node);
     host.insertBefore(node, tail!);
   };
 
@@ -99,6 +123,7 @@ export const Markdown: Component<{ text: () => string; revision?: string | numbe
         tailHtml = html;
       }
     }
+    if (!isStreaming && tail != null) addCodeBlockHeaders(tail);
     lastCostMs = performance.now() - startedAt;
     earliestAt = performance.now() + (lastCostMs > PAINT_BUDGET_MS ? THROTTLE_MS : 0);
   };
@@ -122,12 +147,14 @@ export const Markdown: Component<{ text: () => string; revision?: string | numbe
   };
 
   let primed = false; // 首帧不动画:静态文本块不该有「从零长出来」的入场
+  const copyTimers = new Set<number>();
 
   createEffect(
     () => [props.text(), props.revision ?? 0, props.streaming ?? true] as const,
     ([text, revision, streaming]) => {
       // 全量替换(checkpoint / 权威快照重写)或换块(revision 变了):按真相整块画。
       const wholesale = !primed || revision !== revisionKey || (text !== target && !text.startsWith(target));
+      isStreaming = streaming;
       target = text;
       revisionKey = revision;
       if (wholesale) {
@@ -152,10 +179,33 @@ export const Markdown: Component<{ text: () => string; revision?: string | numbe
   onSettled(() => {
     const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const updateMotion = (): void => { reduceMotion = motion.matches; };
+    const onClick = (event: MouseEvent): void => {
+      const target = event.target instanceof Element ? event.target : null;
+      const button = target?.closest<HTMLButtonElement>("button[data-copy-code]");
+      const code = button?.closest(".md-code-block")?.querySelector("pre code");
+      if (button == null || code == null || navigator.clipboard?.writeText == null) return;
+      void navigator.clipboard.writeText(code.textContent ?? "").then(() => {
+        if (!button.isConnected) return;
+        button.textContent = "已复制";
+        button.setAttribute("aria-label", "已复制代码");
+        const timer = window.setTimeout(() => {
+          copyTimers.delete(timer);
+          if (button.isConnected) {
+            button.textContent = "复制";
+            button.setAttribute("aria-label", "复制代码");
+          }
+        }, 1200);
+        copyTimers.add(timer);
+      }).catch(() => {});
+    };
     updateMotion();
     motion.addEventListener("change", updateMotion);
+    host.addEventListener("click", onClick);
     return () => {
       motion.removeEventListener("change", updateMotion);
+      host.removeEventListener("click", onClick);
+      for (const timer of copyTimers) window.clearTimeout(timer);
+      copyTimers.clear();
       if (handle != null) cancelAnimationFrame(handle);
       handle = null;
     };

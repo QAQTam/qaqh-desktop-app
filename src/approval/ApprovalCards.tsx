@@ -66,10 +66,10 @@ export const ApprovalCard: Component<{ view: ApprovalView; busy: () => boolean; 
           <div class="card-line"><span class="card-key">{STR.consequence}</span>{details().consequence}</div>
         </Show>
       </div>
-      <div class="card-actions">
-        <button type="button" class="primary" disabled={props.busy()} onClick={() => props.respond("approve")}>{STR.allowOnce}</button>
-        <button type="button" disabled={props.busy()} onClick={() => props.respond("reject")}>{STR.reject}</button>
-        <button type="button" disabled={props.busy()} onClick={() => props.respond("trust")}>{STR.allowTrust}</button>
+      <div class="card-actions" aria-busy={props.busy() ? "true" : "false"}>
+        <button type="button" class="primary button-primary" disabled={props.busy()} onClick={() => props.respond("approve")}>{STR.allowOnce}</button>
+        <button type="button" class="button-secondary" disabled={props.busy()} onClick={() => props.respond("reject")}>{STR.reject}</button>
+        <button type="button" class="button-secondary" disabled={props.busy()} onClick={() => props.respond("trust")}>{STR.allowTrust}</button>
       </div>
     </div>
   );
@@ -122,9 +122,9 @@ export const AskCard: Component<{ view: ApprovalView; busy: () => boolean; respo
           )}
         </For>
       </div>
-      <div class="card-actions">
-        <button type="button" class="primary" disabled={props.busy()} onClick={submit}>{STR.submit}</button>
-        <button type="button" disabled={props.busy()} onClick={props.skip}>{STR.skip}</button>
+      <div class="card-actions" aria-busy={props.busy() ? "true" : "false"}>
+        <button type="button" class="primary button-primary" disabled={props.busy()} onClick={submit}>{STR.submit}</button>
+        <button type="button" class="button-secondary" disabled={props.busy()} onClick={props.skip}>{STR.skip}</button>
       </div>
     </div>
   );
@@ -146,9 +146,9 @@ export const PlanCard: Component<{ view: ApprovalView; busy: () => boolean; resp
           <span>{STR.autonomous}</span>
         </label>
       </div>
-      <div class="card-actions">
-        <button type="button" class="primary" disabled={props.busy()} onClick={() => props.respond(true, message(), autonomous())}>{STR.allowOnce}</button>
-        <button type="button" disabled={props.busy()} onClick={() => props.respond(false, message(), autonomous())}>{STR.reject}</button>
+      <div class="card-actions" aria-busy={props.busy() ? "true" : "false"}>
+        <button type="button" class="primary button-primary" disabled={props.busy()} onClick={() => props.respond(true, message(), autonomous())}>{STR.allowOnce}</button>
+        <button type="button" class="button-secondary" disabled={props.busy()} onClick={() => props.respond(false, message(), autonomous())}>{STR.reject}</button>
       </div>
     </div>
   );

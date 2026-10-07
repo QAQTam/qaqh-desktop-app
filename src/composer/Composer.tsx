@@ -78,8 +78,8 @@ export const Composer: Component<{
           fallback={
             <button
               type="button"
-              class="icon-btn"
-              aria-label={STR.send}
+              class="icon-btn send button-primary"
+              aria-label={props.blocked() == null ? STR.send : `${STR.send}，${blockTitle()}`}
               title={blockTitle()}
               disabled={props.draft().trim() === "" || props.blocked() != null}
               onClick={submit}
@@ -88,7 +88,7 @@ export const Composer: Component<{
             </button>
           }
         >
-          <button type="button" class="icon-btn stop" aria-label={STR.stop} title={STR.stop} onClick={() => props.onStop()}>
+          <button type="button" class="icon-btn stop button-danger" aria-label={STR.stop} title={STR.stop} onClick={() => props.onStop()}>
             <IconSquare />
           </button>
         </Show>

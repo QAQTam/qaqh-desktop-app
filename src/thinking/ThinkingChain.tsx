@@ -69,11 +69,16 @@ export const ThinkingChain: Component<{ store: SessionStore }> = (props) => {
   );
 
   return (
-    <Show when={props.store.state[0].activeReasoningId != null}>
-      <div class="thinking-chain" role="status">
+    <>
+      <div class="thinking-chain" aria-hidden="true">
+      <Show when={props.store.state[0].activeReasoningId != null}>
         <span class="thinking-icon"><IconBrain /></span>
         <span class="thinking-line"><span class="thinking-line-text" ref={(node) => { lineNode = node; node.textContent = shown; }} /></span>
+      </Show>
       </div>
-    </Show>
+      <Show when={props.store.state[0].activeReasoningId != null}>
+        <span class="sr-only" role="status" aria-live="polite">正在思考…</span>
+      </Show>
+    </>
   );
 };
