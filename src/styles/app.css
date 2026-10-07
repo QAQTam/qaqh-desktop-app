@@ -182,12 +182,11 @@
 /* ── components ────────────────────────────────────────────────────── */
 @layer components {
   #app {
-    display: grid; grid-template-columns: 64px minmax(0, 1fr); grid-template-rows: 40px minmax(0, 1fr);
+    display: grid; grid-template-columns: 64px minmax(0, 1fr); grid-template-rows: var(--topbar-height, 40px) minmax(0, 1fr);
     height: 100%; min-width: 0;
   }
-  html.tauri #app.tauri-shell:not(.has-topbar) { grid-template-rows: minmax(0, 1fr); }
-  html.tauri .tauri-shell > .global-nav,
-  html.tauri .tauri-shell > .workspace { grid-row: 1; }
+  /* Keep navigation/content in row 2 even when the native shell hides the header. */
+  html.tauri #app.tauri-shell:not(.has-topbar) { --topbar-height: 0px; }
 
   /* 标签栏(40px 固定,§4/§5) */
   #top { grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; gap: 12px; min-width: 0; padding-left: 16px; border-bottom: 1px solid var(--border); }
@@ -220,7 +219,7 @@
   .global-nav-item.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
   .workspace {
     grid-column: 2; grid-row: 2; min-width: 0; min-height: 0;
-    display: grid; grid-template-rows: 56px minmax(0, 1fr);
+    display: grid; grid-template-rows: minmax(0, 1fr);
   }
   .workspace.workspace-messages { grid-template-columns: 244px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
   .workspace.workspace-settings { grid-template-rows: minmax(0, 1fr); }
@@ -685,7 +684,9 @@
   .md-host h2 { font-size: 19px; }
   .md-host h3 { font-size: 16px; }
   .md-host ul, .md-host ol { margin: 6px 0; padding-left: 22px; list-style: disc; }
-  .md-host ol { list-style: decimal; }
+  /* content-visibility on .turn clips markers outside its bounds. Reserve enough
+     space for decimal markers in the bundled monospace font, including 100+. */
+  .md-host ol { list-style: decimal; padding-left: max(2.5em, 5ch); }
   .md-host li { margin: 2px 0; }
   .md-host code { font-size: .92em; background: var(--surface-code); border-radius: var(--r-sm); padding: 1px 4px; }
   .md-code-block { margin: 8px 0; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-code); overflow: hidden; }
@@ -1253,7 +1254,7 @@
   }
 
   @media (max-width: 720px) {
-    #app { grid-template-columns: minmax(0, 1fr); grid-template-rows: 40px minmax(0, 1fr) auto; }
+    #app { grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--topbar-height, 40px) minmax(0, 1fr) auto; }
     #top { grid-column: 1; grid-row: 1; }
     .global-nav {
       grid-column: 1; grid-row: 3;
@@ -1262,7 +1263,7 @@
       border-right: 0; border-top: 1px solid var(--border);
     }
     .global-nav-item { flex: 1; min-height: 52px; }
-    .workspace { grid-column: 1; grid-row: 2; grid-template-rows: 52px minmax(0, 1fr); }
+    .workspace { grid-column: 1; grid-row: 2; }
     .workspace.workspace-messages { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
     .workspace-content { grid-column: 1; grid-template-rows: 52px minmax(0, 1fr); }
     .workspace-messages > .workspace-content { grid-column: 1; }
