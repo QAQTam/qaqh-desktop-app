@@ -1,5 +1,5 @@
 /** 时长格式化与等待扣除(spec §1.3 允许的纯逻辑单测;spec §7.3/D3)。 */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { formatOffset, formatWorkDuration } from "../src/lib/strings";
 import { workDurationMs } from "../src/lib/time";
 import { backoffDelayMs, exhausted, BACKOFF_MAX_MS } from "../src/lib/reconnect";

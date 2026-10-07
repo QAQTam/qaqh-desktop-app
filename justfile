@@ -14,17 +14,17 @@ default:
 
 # 安装依赖 + 静态检查 + 单测 + vite build（产物 out/renderer/）。
 renderer-build:
-    bun install --frozen-lockfile
-    bun run typecheck
-    bun run test
-    bun run build
+    pnpm install --frozen-lockfile
+    pnpm run typecheck
+    pnpm run test
+    pnpm run build
 
 # ── 类型契约（唯一的跨仓生成物）──────────────────────
 #
 # `src/api/qaqh/*.ts` 是**生成物**：由后端仓 crate 上的 `derive(TS)` 导出。
 # 生成动作必须在后端仓跑（要 cargo + 那几个 crate 的 ts feature），
 # 本仓只把 `TS_RS_EXPORT_DIR` 指到自己的 `src/api/`。
-# 若用 pnpm 而非 bun，请保持 lockfile 单一来源——本仓以 bun.lock 为准。
+# 本仓以 **pnpm** 为唯一包管理器：只认 pnpm-lock.yaml，不保留第二份锁文件。
 
 [unix]
 ts-export:
@@ -47,17 +47,17 @@ ts-check: ts-export
 place-sidecar mode="debug":
     @pwsh -NoLogo -File scripts/place-sidecar.ps1 {{mode}}
 
-# 桌面开发：后端仓建 daemon(debug) → 放置 sidecar → bun tauri dev。
+# 桌面开发：后端仓建 daemon(debug) → 放置 sidecar → pnpm tauri dev。
 [windows]
 desktop-dev:
     cargo build --manifest-path ../qaqh-backend/Cargo.toml -p qaqh-daemon
     just place-sidecar debug
-    bun install --frozen-lockfile
-    bun tauri dev
+    pnpm install --frozen-lockfile
+    pnpm tauri dev
 
 # 自包含安装包：渲染层 + 后端 daemon(release) + sidecar + tauri build。
 [windows]
 desktop-build: renderer-build
     cargo build --manifest-path ../qaqh-backend/Cargo.toml --release -p qaqh-daemon
     just place-sidecar release
-    bun tauri build
+    pnpm tauri build

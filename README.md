@@ -24,19 +24,19 @@ daemon 的**权威构建在后端仓**；本仓只搬运它的产物为 Tauri si
 ## 构建
 
 ```bash
-bun install
-bun run typecheck
-bun run test      # 仅纯逻辑单测(spec §1.3)
-bun run build     # 输出 out/renderer/,由 tauri.conf.json 的 frontendDist 消费
+pnpm install
+pnpm run typecheck
+pnpm run test      # 仅纯逻辑单测(spec §1.3)
+pnpm run build     # 输出 out/renderer/,由 tauri.conf.json 的 frontendDist 消费
 ```
 
 ## 开发(桌面壳)
 
 ```bash
-just desktop-dev   # 构建 daemon(debug)+ 放置 sidecar + bun tauri dev
+just desktop-dev   # 构建 daemon(debug)+ 放置 sidecar + pnpm tauri dev
 ```
 
-`tauri dev` 会先跑 `bun run dev`(vite :5173),Rust 宿主以 devUrl 打开 webview;
+`tauri dev` 会先跑 `pnpm run dev`(vite :5173),Rust 宿主以 devUrl 打开 webview;
 宿主经 `qaqh-client` 直连 daemon——discovery 有兼容实例则复用,否则拉起
 `target/debug/qaqh-daemon`(可用 `QAQH_DAEMON_PATH` 覆盖)。
 

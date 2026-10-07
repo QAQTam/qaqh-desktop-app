@@ -3,7 +3,7 @@
  * `crates/qaqh-session/tests/projection_event_contract.rs:12`
  * （`payload = {"kind":"control_delta","data":{"kind":"…","data":{字段}}}`,双层 tag/content）。
  */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { normalizeActivity, projectionActions, readProjection, type ProjectionDelta } from "../src/session/projection";
 
 const goldenStreamKey = { kind: "channel", data: "control" };

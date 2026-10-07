@@ -1,5 +1,5 @@
 /** diff 配对与词级高亮(spec §1.3 允许的纯逻辑单测)。 */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { findWordPairs, flattenFileRows, languageOf, omittedLinesBefore, pairLines, parseUnifiedDiff, trailingWhitespace, truncateRows, wordSegments, type DiffRow } from "../src/diff/parse";
 
 const SAMPLE = `diff --git a/src/a.ts b/src/a.ts

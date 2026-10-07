@@ -1,5 +1,5 @@
 /** 分页前插滚动补偿与窗口淘汰(spec §1.3 允许的纯逻辑单测)。 */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { anchorScrollTop, clampPlaceholderHeight, evictForWindow, fillGapHeights, shouldLoadOlder } from "../src/session/pagination";
 import { applySnapshot, emptySession, recomputeDerived } from "../src/session/reducer";
 import { gapHeight, type SessionState } from "../src/session/types";

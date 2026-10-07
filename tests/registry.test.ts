@@ -1,5 +1,5 @@
 /** 工具注册表(spec §8.1):折叠行摘要的 header 优先级与入参回退。 */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { primaryArgFull } from "../src/tools/registry";
 
 describe("primaryArgFull:空 Other label 必须回退到入参", () => {

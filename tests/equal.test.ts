@@ -1,5 +1,5 @@
 /** 结构相等深比较(spec §1.3 允许的纯逻辑单测)。 */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { deepEqual } from "../src/lib/equal";
 
 describe("deepEqual", () => {

@@ -1,5 +1,5 @@
 /** 流式 Markdown 分块器(§7.5:已闭合块缓存、只重解析尾块)。 */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { splitBlocks } from "../src/markdown/split";
 
 describe("splitBlocks", () => {

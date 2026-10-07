@@ -1,5 +1,5 @@
 /** 事件 reducer(spec §1.3 允许的纯逻辑单测:事件 reducer 与 seq 去重)。 */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { applyEntry, applySnapshot, buildTurn, emptySession, prependPage, recomputeDerived } from "../src/session/reducer";
 import { isWorkStep } from "../src/session/types";
 import type { SessionState, TimelineEntryWire } from "../src/session/types";

@@ -1,9 +1,10 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import solid from "@solidjs/vite-plugin";
 import Icons from "unplugin-icons/vite";
 
-// webui-tauri C3 起,webui 的唯一构建产物是 Tauri 壳的 renderer 资源
-// (`webui/out/renderer`,由 `tauri.conf.json > build.frontendDist` 消费)。
+// C3 起,本仓的唯一构建产物是 Tauri 壳的 renderer 资源
+// (`out/renderer`,由 `tauri.conf.json > build.frontendDist` 消费)。
 // CSP 由 `tauri.conf.json > app.security.csp` 一处接管,构建期不再注入,
 // 也不存在浏览器直连的 gateway 代理。
 
@@ -17,5 +18,11 @@ export default defineConfig({
     target: "esnext",
     outDir: "out/renderer",
     emptyOutDir: true,
+  },
+  // 单测是纯逻辑(不碰 DOM),显式指定 node 环境——否则 vitest 5 会去找
+  // jsdom/happy-dom 并因缺失而拒绝启动 worker。
+  test: {
+    environment: "node",
+    include: ["tests/**/*.test.ts"],
   },
 });

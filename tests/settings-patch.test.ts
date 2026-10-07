@@ -4,7 +4,7 @@
  * fixture 与 `crates/qaqh-config-api/src/lib.rs` 的 wire fixture 逐字段对齐——
  * 读模型**拒绝残缺载荷**(缺字段即解析失败),所以测试数据必须是完整形状。
  */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import type { ConfigDto } from "../src/api/qaqh/ConfigDto";
 import type { SubagentDto } from "../src/api/qaqh/SubagentDto";
 import {
