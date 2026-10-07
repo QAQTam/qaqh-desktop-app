@@ -6,10 +6,9 @@
  * 非活动标签卸载 DOM,仅保留 store 数据(§5.3)。
  *
  * 会话创建(spec §5.1「+」):经控制通道 SessionCreate,轮询 sessions 列表
- * 找出新 seed。宿主模式下 SessionCreate 不要求 active seed,但保持与原网关
- * 一致的入口约束(活动标签发起)。
+ * 找出新 seed。宿主模式下 SessionCreate 不要求 active seed,空会话也可创建。
  */
-import { createSignal } from "solid-js";
+import { createSignal, createStore } from "solid-js";
 import { transport } from "../lib/transport";
 import { SessionStore } from "../session/store";
 
@@ -32,12 +31,14 @@ export type SidebarSession = {
   updated_at?: number;
   archived?: boolean;
   running?: boolean;
+  /** 会话轮次数:后台标签状态点用它判断「跑过东西但没在跑」(§5.2)。 */
+  turn_count?: number;
   workspace_id?: string | null;
 };
 export type SidebarWorkspace = { id: string; title: string; path: string; order: number; missing_dir?: boolean };
 const [sessionCatalog, setSessionCatalog] = createSignal<SidebarSession[]>([]);
 const [workspaceCatalog, setWorkspaceCatalog] = createSignal<SidebarWorkspace[]>([]);
-const drafts = new Map<string, string>();
+const [drafts, setDrafts] = createStore<Record<string, string>>({});
 /** 焦点令牌:切标签/新建时 +1,Composer 响应后聚焦。 */
 const [focusToken, setFocusToken] = createSignal(0);
 /** Serialize singleton-host attach calls; rapid tab changes must settle on the latest tab. */
@@ -48,9 +49,9 @@ export const setBootError = (value: string | null): void => {
   setBootErrorSignal(value);
 };
 export const activeTab = (): Tab | null => tabs().find((tab) => tab.id === activeId()) ?? null;
-export const draftOf = (seed: string): string => drafts.get(seed) ?? "";
+export const draftOf = (seed: string): string => drafts[seed] ?? "";
 export const setDraftOf = (seed: string, value: string): void => {
-  drafts.set(seed, value);
+  setDrafts((draft) => { draft[seed] = value; });
 };
 
 function addTab(seed: string): Tab {
@@ -98,7 +99,7 @@ export async function closeTab(tabId: string): Promise<void> {
   const tab = list[index]!;
   const wasActive = activeId() === tabId;
   setTabs(list.filter((item) => item.id !== tabId));
-  drafts.delete(tab.seed);
+  setDrafts((draft) => { delete draft[tab.seed]; });
   tab.store.dispose();
   if (wasActive) {
     const next = list[index - 1] ?? list[index + 1] ?? null;
@@ -110,12 +111,10 @@ export async function closeTab(tabId: string): Promise<void> {
 /** 新建会话:控制通道 SessionCreate → 轮询 sessions 找新 seed(≤6s)。 */
 export async function createSession(): Promise<void> {
   if (creating()) return;
-  const active = activeTab();
-  if (active == null) return; // 保持入口约束:由活动标签发起创建
   setCreating(true);
   try {
     const before = new Set((await transport.sessions()).map((item) => String(item.session_id)));
-    await active.store.createSession();
+    await transport.command("control", { channel: "control", type: "session_create", close_current: false });
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 300));
       const list = await transport.sessions();
@@ -167,7 +166,7 @@ export async function boot(): Promise<void> {
   setWorkspaceCatalog(workspaces);
   const live = list.find((item) => !item.archived && item.running) ?? list.find((item) => !item.archived) ?? list[0];
   if (live?.session_id == null) {
-    setBootError("没有可用会话");
+    setBootError(null);
     return;
   }
   await openSession(String(live.session_id));

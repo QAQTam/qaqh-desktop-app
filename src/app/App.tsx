@@ -1,5 +1,5 @@
 /**
- * 应用壳:标签栏 + 会话视图 + 授权卡 + 单行思考链 + 输入区(spec §4 布局);
+ * 应用壳:标签栏 + 会话视图 + 授权卡 + 输入区(spec §4 布局);
  * 全局快捷键(§5.3)与后台会话轮询。
  *
  * Tauri 桌面壳:
@@ -14,6 +14,7 @@ import { createEffect, createSignal, For, onSettled, Show, type Component } from
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import IconArrowLeft from "~icons/lucide/arrow-left";
+import IconX from "~icons/lucide/x";
 import { TabBar } from "../tabs/TabBar";
 import { MessageSidebar } from "./MessageSidebar";
 import { GlobalNav, type GlobalSection } from "./GlobalNav";
@@ -38,7 +39,6 @@ import {
   type Tab,
 } from "../tabs/store";
 import { SessionView } from "../session/SessionView";
-import { ThinkingChain } from "../thinking/ThinkingChain";
 import { Composer, type SendBlockReason } from "../composer/Composer";
 import { ApprovalStack } from "../approval/ApprovalCards";
 import { SettingsView } from "../settings/SettingsView";
@@ -50,7 +50,7 @@ import {
 import { STR } from "../lib/strings";
 import { isTauriRuntime, listenHostDiagnostics, openExternalUrl, transport, tauriHost } from "../lib/transport";
 import { applyConfigTheme } from "../lib/theme";
-import { ToastHost } from "../ui/toast";
+import { toast, ToastHost } from "../ui/toast";
 import "../styles/app.css";
 
 const inTauri = isTauriRuntime();
@@ -184,7 +184,7 @@ const App: Component = () => {
       if (event.key === "t" || event.key === "T") {
         event.preventDefault();
         setSection("messages");
-        if (activeTab() != null) void createSession();
+        void createSession();
       } else if (event.key === "w" || event.key === "W") {
         event.preventDefault();
         setSection("messages");
@@ -300,14 +300,15 @@ const App: Component = () => {
   const send = async (tab: Tab, text: string): Promise<void> => {
     try {
       await tab.store.sendMessage(text);
-      setDraftOf(tab.seed, "");
-    } catch {
-      // 发送失败保留草稿,下次重试。
+      // A slow acknowledgement must not erase text typed for the next message.
+      if (draftOf(tab.seed) === text) setDraftOf(tab.seed, "");
+    } catch (error) {
+      toast(`${STR.sendFailed}：${String(error instanceof Error ? error.message : error)}`, "err");
     }
   };
 
   return (
-    <div id="app" classList={{ "tauri-shell": inTauri, "has-topbar": !inTauri || settingsOpen() || section() !== "messages" }}>
+    <div id="app" class={{ "tauri-shell": inTauri, "has-topbar": !inTauri || settingsOpen() || section() !== "messages" }}>
       <Show when={!inTauri || settingsOpen() || section() !== "messages"}>
         <header id="top">
           <Show when={settingsOpen() || section() !== "messages"}>
@@ -335,12 +336,11 @@ const App: Component = () => {
         </Show>
         <div class="workspace-content">
         <div class="session-tabs-region">
-        <Show when={tabs().length > 0} fallback={<span class="session-empty-title">{STR.noSessionTitle}</span>}>
         <TabBar
           tabs={tabs()}
           activeId={activeId()}
           creating={creating()}
-          canCreate={activeTab() != null}
+          canCreate={hostIncompatible() == null}
           onSelect={(id) => {
             setSection("messages");
             const tab = tabs().find((item) => item.id === id);
@@ -352,7 +352,6 @@ const App: Component = () => {
             void createSession();
           }}
         />
-        </Show>
         </div>
         <main id="main">
           <Show when={hostIncompatible() != null}>
@@ -382,12 +381,15 @@ const App: Component = () => {
                   <div class="messages-empty-copy">
                     <strong>QAQH</strong>
                     <p>{STR.emptyMessages}</p>
+                    <button type="button" class="primary-mini button-primary" disabled={creating() || hostIncompatible() != null} onClick={() => void createSession()}>
+                      {creating() ? STR.creatingSession : STR.newTab}
+                    </button>
                   </div>
                 </div>
                 <Composer
                   draft={() => emptyDraft()}
                   onDraft={setEmptyDraft}
-                  blocked={() => "offline"}
+                  blocked={() => "no-session"}
                   running={() => false}
                   onSend={() => {}}
                   onStop={() => {}}
@@ -414,13 +416,12 @@ const App: Component = () => {
                         respond={(challengeId, decision, payload) => tab.store.respondApproval(challengeId, decision, payload)}
                       />
                     </Show>
-                    <ThinkingChain store={tab.store} />
                     <Composer
                       draft={() => draftOf(tab.seed)}
                       onDraft={(value) => setDraftOf(tab.seed, value)}
                       blocked={() => blockedReason(tab)}
                       running={() => runningNow(tab)}
-                      onSend={(text) => void send(tab, text)}
+                      onSend={(text) => send(tab, text)}
                       onStop={() => void tab.store.cancelTurn().catch(() => {})}
                       focusToken={focusToken()}
                     />

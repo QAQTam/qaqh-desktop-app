@@ -10,7 +10,6 @@ import { createSignal, Show, untrack } from "solid-js";
 import { SessionStore } from "./session/store";
 import { applyEntry } from "./session/reducer";
 import { SessionView } from "./session/SessionView";
-import { ThinkingChain } from "./thinking/ThinkingChain";
 import { Composer } from "./composer/Composer";
 import { ApprovalStack } from "./approval/ApprovalCards";
 import { GlobalNav } from "./app/GlobalNav";
@@ -475,14 +474,18 @@ const scenarios = {
       }
     });
     await frames(3);
-    const tail = document.querySelector(".thinking-line-text")?.textContent ?? "";
+    const scroller = document.querySelector<HTMLElement>(".thinking-full");
+    const textChars = scroller?.textContent?.length ?? 0;
+    const lineHeight = scroller == null ? 0 : parseFloat(getComputedStyle(scroller).lineHeight);
+    const bounded = scroller != null && scroller.clientHeight <= lineHeight * 4 + 1;
+    const following = scroller != null && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 2;
     feed(id, { type: "block_sealed", block_id: id });
     feed(id, { type: "block_opened", block: { block_id: `${id}-new`, kind: "reasoning", state: "open" } });
     await frames(3);
-    const reset = document.querySelector(".thinking-line-text")?.textContent === "";
+    const reset = document.querySelector(".thinking-full")?.textContent === "";
     feed(id, { type: "turn_sealed", state: "completed" });
     await frames(3);
-    return { tailChars: tail.length, reset, cleared: document.querySelector(".thinking-chain") == null, correct: tail.length === 200 && reset, cadence, m: metrics() };
+    return { textChars, bounded, following, reset, correct: textChars === 90_000 && bounded && following && reset, cadence, m: metrics() };
   },
   /** 合成 token 是 4 个中文字符,每 10ms 到一批;测试真实 store/组件,不模拟响应式。 */
   async highRate(rate = 300, seconds = 6): Promise<Record<string, unknown>> {
@@ -1026,13 +1029,12 @@ render(
               <Show when={previewActiveTab().store.pending[0]().length > 0}>
                 <ApprovalStack pending={previewActiveTab().store.pending[0]()} respond={async () => { previewActiveTab().store.pending[1]([]); }} />
               </Show>
-              <ThinkingChain store={previewActiveTab().store} />
               <Composer
                 draft={draft}
                 onDraft={setDraft}
                 blocked={() => null}
                 running={() => false}
-                onSend={() => setDraft("")}
+                onSend={() => { setDraft(""); }}
                 onStop={() => {}}
                 focusToken={0}
                 showDesignControls

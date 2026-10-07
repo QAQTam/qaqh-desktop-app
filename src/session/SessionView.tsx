@@ -315,24 +315,23 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
           <For each={navItems()} keyed={(item) => item.key}>{(item, index) => (
             <button
               type="button"
-              class="turn-navigator-tick"
-              classList={{ active: activeNavKey() === item.key }}
-              aria-label={`跳转到第 ${item.index == null ? index() + 1 : item.index + 1} 条用户消息：${excerpt(item.question)}`}
-              aria-current={activeNavKey() === item.key ? "location" : undefined}
-              onMouseEnter={() => setHoveredNavKey(item.key)}
-              onMouseLeave={() => setHoveredNavKey((key) => key === item.key ? null : key)}
-              onFocus={() => setHoveredNavKey(item.key)}
-              onBlur={() => setHoveredNavKey((key) => key === item.key ? null : key)}
+              class={{ "turn-navigator-tick": true, active: activeNavKey() === item().key }}
+              aria-label={`跳转到第 ${(item().index ?? index()) + 1} 条用户消息：${excerpt(item().question)}`}
+              aria-current={activeNavKey() === item().key ? "location" : undefined}
+              onMouseEnter={() => setHoveredNavKey(item().key)}
+              onMouseLeave={() => setHoveredNavKey((key) => key === item().key ? null : key)}
+              onFocus={() => setHoveredNavKey(item().key)}
+              onBlur={() => setHoveredNavKey((key) => key === item().key ? null : key)}
               onClick={() => {
-                const target = scroller?.querySelector<HTMLElement>(`[data-slot-key="${CSS.escape(item.key)}"]`);
+                const target = scroller?.querySelector<HTMLElement>(`[data-slot-key="${CSS.escape(item().key)}"]`);
                 if (target == null) return;
                 markUserScrolled();
-                setActiveNavKey(item.key);
+                setActiveNavKey(item().key);
                 target.scrollIntoView({ behavior: "smooth", block: "start" });
               }}
             >
               <span class="turn-navigator-mark" />
-              <Show when={hoveredNavKey() === item.key && hoverNavItem()}>
+              <Show when={hoveredNavKey() === item().key && hoverNavItem()}>
                 {(turn) => <span class="turn-navigator-card" role="tooltip">
                   <span class="turn-navigator-question">{excerpt(turn().user.text) || "（空消息）"}</span>
                   <span class="turn-navigator-answer">{answerExcerpt(turn())}</span>

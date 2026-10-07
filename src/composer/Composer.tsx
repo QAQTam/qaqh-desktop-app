@@ -14,14 +14,14 @@ import IconChevronDown from "~icons/lucide/chevron-down";
 import IconX from "~icons/lucide/x";
 import { STR } from "../lib/strings";
 
-export type SendBlockReason = "running" | "pending" | "offline" | null;
+export type SendBlockReason = "running" | "pending" | "offline" | "no-session" | null;
 
 export const Composer: Component<{
   draft: () => string;
   onDraft: (value: string) => void;
   blocked: () => SendBlockReason;
   running: () => boolean;
-  onSend: (text: string) => void;
+  onSend: (text: string) => void | Promise<void>;
   onStop: () => void;
   focusToken: number;
   autoFocus?: boolean;
@@ -36,6 +36,7 @@ export const Composer: Component<{
   const [model, setModel] = createSignal("qaqh-visual-preview");
   const [permission, setPermission] = createSignal("workspace-write");
   const [files, setFiles] = createSignal<File[]>([]);
+  const [submitting, setSubmitting] = createSignal(false);
 
   const autoGrow = (): void => {
     const el = textarea;
@@ -52,10 +53,16 @@ export const Composer: Component<{
     () => { if (props.autoFocus !== false) textarea?.focus(); },
   );
 
-  const submit = (): void => {
+  const submit = async (): Promise<void> => {
+    if (submitting()) return;
     if (!props.draft().trim()) return;
     if (props.blocked() != null) return;
-    props.onSend(props.draft());
+    setSubmitting(true);
+    try {
+      await props.onSend(props.draft());
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const blockTitle = (): string => {
@@ -66,6 +73,8 @@ export const Composer: Component<{
         return STR.sendDisabledApproval;
       case "offline":
         return STR.sendDisabledOffline;
+      case "no-session":
+        return STR.sendDisabledNoSession;
       default:
         return STR.send;
     }
@@ -96,7 +105,7 @@ export const Composer: Component<{
             // 输入法组合态不发送(§12):isComposing 或 keyCode 229。
             if (e.isComposing || e.keyCode === 229) return;
             e.preventDefault();
-            submit();
+            void submit();
           }}
         />
         <div class="composer-toolbar">
@@ -174,8 +183,8 @@ export const Composer: Component<{
               class="icon-btn send button-primary"
               aria-label={props.blocked() == null ? STR.send : `${STR.send}，${blockTitle()}`}
               title={blockTitle()}
-              disabled={props.draft().trim() === "" || props.blocked() != null}
-              onClick={submit}
+              disabled={submitting() || props.draft().trim() === "" || props.blocked() != null}
+              onClick={() => void submit()}
             >
               <IconArrowUp />
             </button>

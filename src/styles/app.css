@@ -281,7 +281,7 @@
   }
   .session-tabs-region .session-capsule { max-width: min(760px, 100%); }
   .session-tabs-region .session-menu { bottom: auto; top: calc(100% + 8px); transform-origin: right top; }
-  #main { grid-row: 2; min-width: 0; min-height: 0; display: grid; }
+  #main { grid-row: 2; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
   .tools-page {
     display: grid; align-content: start; justify-items: center; gap: 24px;
     min-width: 0; min-height: 0; overflow: auto; padding: clamp(24px, 8vh, 72px) 24px;
@@ -425,8 +425,10 @@
   #main { min-height: 0; display: grid; }
   .session-column {
     display: grid;
-    grid-template-rows: minmax(0, 1fr) auto auto auto;
-    min-height: 0;
+    /* Long timeline content must not set the grid's intrinsic minimum width. */
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto auto;
+    min-width: 0; min-height: 0;
   }
   #session {
     position: relative; min-height: 0;
@@ -487,7 +489,7 @@
   #composer textarea::placeholder { color: var(--muted); opacity: .72; }
 
   /* 内容列(§4):760px 居中 */
-  .turn, .history-note, .compact-divider, #approval-slot > *, #composer, .thinking-chain {
+  .turn, .history-note, .compact-divider, #approval-slot > *, #composer {
     width: min(var(--content-width), 100%);
     margin-inline: auto;
   }
@@ -546,7 +548,7 @@
   .timeline-head { color: var(--muted); font-size: var(--fs-xs); }
   .timeline-row { display: flex; align-items: flex-start; gap: 8px; min-height: 28px; }
   .timeline-row .timeline-body { flex: 1; min-width: 0; }
-  .timeline-row.thinking { align-items: baseline; flex-wrap: wrap; }
+  .timeline-row.thinking { display: block; min-width: 0; }
   .timeline-label {
     display: inline-flex; align-items: center; gap: 4px;
     color: var(--muted); font-size: var(--fs-sm);
@@ -561,7 +563,12 @@
     padding-top: 4px;
   }
   .timeline-row.wait .timeline-label { color: var(--warn); }
-  .thinking-full { white-space: pre-wrap; color: var(--muted); font-size: var(--fs-sm); padding: 4px 0 6px; }
+  .thinking-full {
+    width: 100%; min-width: 0; max-height: 6.4em; margin: 4px 0 6px;
+    overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    color: var(--muted); font-size: var(--fs-xs); line-height: 1.6;
+  }
 
   /* 工具行(§8) */
   .step-row.tool { min-width: 0; }
@@ -676,9 +683,9 @@
   .diff-word.del { background: var(--diff-del-word); }
 
   /* Markdown(§7.5) */
-  .md-host { font-size: var(--fs-body); line-height: 1.75; overflow-wrap: anywhere; }
+  .md-host { font-size: var(--fs-xs); line-height: 1.6; overflow-wrap: anywhere; }
   .md-host .md-block, .md-host .md-tail > :first-child { margin-top: 0; }
-  .md-host p { margin: 12px 0; }
+  .md-host p { margin: 8px 0; }
   .md-host h1, .md-host h2, .md-host h3, .md-host h4, .md-host h5, .md-host h6 { margin: 24px 0 10px; line-height: 1.4; }
   .md-host h1 { font-size: 22px; }
   .md-host h2 { font-size: 19px; }
@@ -791,25 +798,6 @@
   .card-actions button:not(.primary):disabled { color: var(--muted); }
   .card-actions button:not(.primary) { border: 1px solid var(--border-strong); }
   .card-actions button:disabled { cursor: not-allowed; }
-
-  /* 单行思考链(§10) */
-  .thinking-chain {
-    display: flex; align-items: center; gap: 8px;
-    height: 28px; padding: 0 12px;
-    color: var(--muted); font-size: var(--fs-sm);
-  }
-  .thinking-icon { flex: none; display: inline-grid; place-items: center; }
-  .thinking-icon svg { width: 13px; height: 13px; }
-  .thinking-line {
-    flex: 1; min-width: 0;
-    display: flex; justify-content: flex-end;
-    overflow: hidden; white-space: nowrap;
-    mask-image: linear-gradient(to right, transparent 0, #000 24px);
-    color: var(--muted);
-  }
-  /* 显式 flex:none:文本项保持内容宽度,溢出稳定落在左缘被裁(追尾显示右端),
-   * 不给浏览器在超长行下做收缩/截断二义性的空间。 */
-  .thinking-line-text { flex: none; min-width: 0; }
 
   /* ── 待办面板:消息区右侧停靠(§14 外挂面) ─────────────────────────────── */
   .todo-dock {

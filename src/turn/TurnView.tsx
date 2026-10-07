@@ -1,5 +1,5 @@
 /** 同一文本块只挂载一个 Markdown。工作段在回复边界关闭,后续工作不重开旧段。 */
-import { createEffect, createMemo, createSignal, For, Show, Switch, Match, untrack, type Accessor, type Component } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, Switch, Match, untrack, type Accessor, type Component } from "solid-js";
 import IconChevronDown from "~icons/lucide/chevron-down";
 import IconChevronRight from "~icons/lucide/chevron-right";
 import { Collapse } from "../ui/Collapse";
@@ -14,13 +14,55 @@ import { turnSegments, type TurnSegment, type WorkSegment } from "./segments";
 const WorkStep: Component<{ step: Accessor<Step>; turn: Turn }> = (props) => {
   const thinking = createMemo(() => { const step = props.step(); return step.kind === "thinking" ? step : null; });
   const tool = createMemo(() => { const step = props.step(); return step.kind === "tool" ? step : null; });
-  const [thinkingOpen, setThinkingOpen] = createSignal(false);
+  const [thinkingOverride, setThinkingOverride] = createSignal<boolean | null>(null);
+  const thinkingOpen = () => thinkingOverride() ?? (thinking() != null && props.turn.status === "running" && thinking()?.endedAt == null);
+  let thinkingRow: HTMLDivElement | undefined;
+  let following = true;
+  let frame: number | null = null;
+  let resizeObserver: ResizeObserver | undefined;
+
+  const followTail = (): void => {
+    if (frame != null) return;
+    frame = requestAnimationFrame(() => {
+      frame = null;
+      const scroller = thinkingRow?.querySelector<HTMLDivElement>(".thinking-full");
+      if (following && scroller?.isConnected) scroller.scrollTop = scroller.scrollHeight;
+    });
+  };
+  createEffect(
+    () => [thinkingOpen(), thinking()?.text] as const,
+    ([open]) => { if (open) followTail(); },
+  );
+  onCleanup(() => {
+    if (frame != null) cancelAnimationFrame(frame);
+    resizeObserver?.disconnect();
+  });
   return (
     <Switch>
       <Match when={thinking() != null}>
-        <div class="timeline-row thinking">
-          <button type="button" class="timeline-label" aria-expanded={thinkingOpen() ? "true" : "false"} onClick={() => setThinkingOpen((open) => !open)}>{STR.thinking}</button>
-          <Collapse open={thinkingOpen()}><div class="thinking-full">{thinking()?.text}</div></Collapse>
+        <div class="timeline-row thinking" ref={(node) => {
+          thinkingRow = node;
+          resizeObserver = new ResizeObserver(followTail);
+          resizeObserver.observe(node);
+        }}>
+          <button type="button" class="timeline-label" aria-expanded={thinkingOpen() ? "true" : "false"} onClick={() => {
+            following = true;
+            setThinkingOverride(!thinkingOpen());
+          }}>{STR.thinking}</button>
+          <Collapse open={thinkingOpen()} instant={thinkingOverride() == null}>
+            <div class="thinking-full" tabindex={0} role="region" aria-label={STR.thinking}
+              onScroll={(event) => {
+                const el = event.currentTarget;
+                // Layout/resize can also emit scroll events; only user input
+                // suspends following, while reaching the bottom resumes it.
+                if (el.scrollHeight - el.scrollTop - el.clientHeight <= 2) following = true;
+              }}
+              onWheel={(event) => { if (event.deltaY < 0) following = false; }}
+              onPointerDown={() => { following = false; }}
+              onTouchStart={() => { following = false; }}
+              onKeyDown={(event) => { if (["ArrowUp", "PageUp", "Home"].includes(event.key)) following = false; }}
+            >{thinking()?.text}</div>
+          </Collapse>
         </div>
       </Match>
       <Match when={tool() != null}><StepRow step={tool()!} turn={props.turn} /></Match>

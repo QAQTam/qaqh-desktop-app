@@ -248,7 +248,7 @@ export const TabBar: Component<{
           type="button"
           class="tab-add"
           aria-label={STR.newTab}
-          title={props.canCreate ? STR.newTab : "需要至少一个活动会话才能新建"}
+          title={props.canCreate ? STR.newTab : STR.sendDisabledOffline}
           disabled={props.creating || !props.canCreate}
           onClick={props.onCreate}
         >

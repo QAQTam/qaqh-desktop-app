@@ -34,12 +34,12 @@ export const MessageSidebar: Component<{
     if (ungrouped.length > 0) grouped.push({ id: "__ungrouped", title: "未分组", path: "", sessions: ungrouped });
     return grouped.filter((group) => group.sessions.length > 0);
   };
-  const toggle = (id: string): void => setCollapsed((current) => {
-    const next = new Set(current);
+  const toggle = (id: string): void => {
+    const next = new Set(collapsed());
     if (next.has(id)) next.delete(id);
     else next.add(id);
-    return next;
-  });
+    setCollapsed(next);
+  };
 
   return (
     <aside class="message-sidebar" aria-label="工作区与会话">
@@ -54,11 +54,11 @@ export const MessageSidebar: Component<{
               <button
                 class="message-workspace-toggle"
                 type="button"
-                aria-expanded={!collapsed().has(group.id)}
+                aria-expanded={collapsed().has(group.id) ? "false" : "true"}
                 onClick={() => toggle(group.id)}
                 title={group.path || group.title}
               >
-                <IconChevronDown classList={{ collapsed: collapsed().has(group.id) }} />
+                <IconChevronDown class={{ collapsed: collapsed().has(group.id) }} />
                 <Show when={group.id !== "__ungrouped"}><IconFolder /></Show>
                 <span class="message-workspace-title">{group.title}</span>
                 <span class="message-workspace-count">{group.sessions.length}</span>
@@ -69,8 +69,7 @@ export const MessageSidebar: Component<{
                     const active = () => props.activeSeed === session.session_id;
                     return (
                       <button
-                        class="message-session-item"
-                        classList={{ active: active(), running: session.running === true }}
+                        class={{ "message-session-item": true, active: active(), running: session.running === true }}
                         type="button"
                         aria-current={active() ? "page" : undefined}
                         onClick={() => props.onSelect(session.session_id)}

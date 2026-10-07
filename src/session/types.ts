@@ -135,7 +135,7 @@ export interface SessionState {
   /** 最旧已加载回合的全局序号(翻页游标,排他);null = 禁用翻页。 */
   oldestIndex: number | null;
   totalTurns: number;
-  /** 当前正在流式输出的 reasoning 块 id(单行思考链)。 */
+  /** 当前正在流式输出的 reasoning 块 id。 */
   activeReasoningId: string | null;
   /** 该 reasoning 块所属回合 key:思考链只读这一个回合,不遍历 turns。 */
   activeReasoningTurnKey: string | null;
