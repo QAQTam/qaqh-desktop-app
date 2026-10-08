@@ -13,6 +13,12 @@ set windows-shell := ["pwsh.exe", "-NoLogo", "-Command"]
 # 别让人对上 8 个 E0609。后端并行分支合流后可以把它往前挪。
 BACKEND_CONTRACT_REV := "d454865"
 
+# Intel mac 的产物三元组，显式传而不靠推断：Apple Silicon 上的 Rosetta shell 会把
+# host tuple 报成 x86_64，反过来原生 arm64 的 sidecar 在 Intel 机器上装不上——
+# 两种情况下报错都出现在打包之后，这里钉死最省事。macOS 26(Tahoe) 是最后一个
+# 支持 x86_64 的大版本，所以这条路径要一直留到它退出生命周期。
+MAC_X64_TARGET := "x86_64-apple-darwin"
+
 default:
     @just --list
 
@@ -36,9 +42,10 @@ check:
     pnpm run test
     pnpm run build
 
-# 壳侧闸：rustfmt + clippy（-D warnings，含 workspace 的 unwrap_used deny）+ 单测。
-# 前置：src-tauri/binaries/ 里得有 sidecar（build.rs 断言），缺了先跑
+# 前置：src-tauri/binaries/ 里得有**当前三元组**的 sidecar（build.rs 断言），缺了先跑
 #   cargo build --manifest-path ../qaqh-backend/Cargo.toml -p qaqh-daemon && just place-sidecar debug
+# Intel mac 上三条命令都要带 x86_64-apple-darwin，写法见 README「Intel macOS(x86_64)」。
+# 壳侧闸：rustfmt + clippy（-D warnings，含 workspace 的 unwrap_used deny）+ 单测。
 check-shell:
     cargo fmt --check --manifest-path src-tauri/Cargo.toml
     cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
@@ -68,12 +75,17 @@ ts-check: ts-export
 
 # ── 桌面壳 ────────────────────────────────────────────
 
-# 把后端仓的 daemon 产物放置为 Tauri sidecar（目标三元组命名）。
-# mode: debug | release
-[unix]
+# 分两个 OS 变体：macOS/Linux 不自带 pwsh，ps1 在那两个平台是死路。
+# 缺 sidecar 时先跑:
+#   cargo build --manifest-path ../qaqh-backend/Cargo.toml -p qaqh-daemon && just place-sidecar debug
+# 放置 daemon 产物为 Tauri sidecar；mode: debug|release，target 留空 = 宿主三元组。
 [windows]
-place-sidecar mode="debug":
-    @pwsh -NoLogo -File scripts/place-sidecar.ps1 {{mode}}
+place-sidecar mode="debug" target="":
+    @pwsh -NoLogo -File scripts/place-sidecar.ps1 {{mode}} {{target}}
+
+[unix]
+place-sidecar mode="debug" target="":
+    @sh scripts/place-sidecar.sh {{mode}} {{target}}
 
 # 断言 ../qaqh-backend 的 HEAD 含指定契约提交；不在场就中止（早于任何长编译）。
 verify-backend rev=BACKEND_CONTRACT_REV:
@@ -97,3 +109,32 @@ desktop-build: renderer-build
     cargo build --manifest-path ../qaqh-backend/Cargo.toml --release -p qaqh-daemon
     just place-sidecar release
     pnpm tauri build
+
+# 缺了它 cargo 会在长编译中途报 E0463(std not found),前面几百秒的依赖编译全白扔。
+# 断言 rustup 装了 Intel mac 的 x86_64-apple-darwin std。
+[macos]
+verify-mac-target:
+    @rustup target list --installed | grep -qx "{{MAC_X64_TARGET}}" || { echo "缺 {{MAC_X64_TARGET}}:跑 rustup target add {{MAC_X64_TARGET}}" >&2; exit 1; }
+
+# 打包目标(.app/.dmg)与最低系统版本来自 src-tauri/tauri.macos.conf.json,Tauri 按
+# 三元组自动合并,所以这里不用带 --bundles。
+# 桌面开发(Intel mac)：契约 + 三元组断言 → daemon(x86_64) → sidecar → pnpm tauri dev。
+[macos]
+desktop-dev:
+    just verify-backend
+    just verify-mac-target
+    cargo build --manifest-path ../qaqh-backend/Cargo.toml -p qaqh-daemon --target {{MAC_X64_TARGET}}
+    just place-sidecar debug {{MAC_X64_TARGET}}
+    pnpm install --frozen-lockfile
+    pnpm tauri dev --target {{MAC_X64_TARGET}}
+
+# 只要 .app、不想等 .dmg(hdiutil 偶发卡住)时:
+#   pnpm tauri build --target x86_64-apple-darwin --bundles app
+# 自包含安装包(Intel mac)：渲染层闸 + daemon(release,x86_64) + sidecar + tauri build。
+[macos]
+desktop-build: renderer-build
+    just verify-backend
+    just verify-mac-target
+    cargo build --manifest-path ../qaqh-backend/Cargo.toml --release -p qaqh-daemon --target {{MAC_X64_TARGET}}
+    just place-sidecar release {{MAC_X64_TARGET}}
+    pnpm tauri build --target {{MAC_X64_TARGET}}

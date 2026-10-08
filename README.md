@@ -40,6 +40,37 @@ just desktop-dev   # 构建 daemon(debug)+ 放置 sidecar + pnpm tauri dev
 宿主经 `qaqh-client` 直连 daemon——discovery 有兼容实例则复用,否则拉起
 `target/debug/qaqh-daemon`(可用 `QAQH_DAEMON_PATH` 覆盖)。
 
+### Intel macOS(x86_64)
+
+`just desktop-dev` / `just desktop-build` 在 macOS 上是同一对名字,走 `[macos]` 变体,
+产物三元组钉死 `x86_64-apple-darwin`(不靠 host 推断:Rosetta 下的 shell 会把
+host tuple 也报成 x86_64)。前置四样:
+
+```bash
+xcode-select --install                                    # clang + SDK,Tauri 壳必需
+rustup target add x86_64-apple-darwin                     # just verify-mac-target 断言它
+brew install just pnpm                                    # 渲染层闸只认 pnpm + just
+node -v                                                   # ≥ 22.12(rolldown 的 engines 下限)
+```
+
+daemon 侧的 sidecar 由 `scripts/place-sidecar.sh` 放置成
+`src-tauri/binaries/qaqh-daemon-x86_64-apple-darwin`(`binaries/` 已在 .gitignore)。
+打包目标与最低系统版本来自 `src-tauri/tauri.macos.conf.json`(Tauri 按三元组自动合并):
+`.app` + `.dmg`,`LSMinimumSystemVersion = 15.0`。
+
+跑壳侧闸(`just check-shell`)在 mac 上要把同一三元组贯穿三条命令:
+
+```bash
+cargo build --manifest-path ../qaqh-backend/Cargo.toml -p qaqh-daemon --target x86_64-apple-darwin
+just place-sidecar debug x86_64-apple-darwin
+just check-shell
+```
+
+最低 15 不只是政策:webview 层 `build.target` 是 `esnext`(不做降级),样式用了
+`color-mix()`(Safari 16.2+)与 `:has()`/`@layer`(15.4+),而 macOS 的 WKWebView 跟系统
+版本走。15 (Sequoia) 对应 Safari 18,整条 CSS 面都在支持内;反过来停在 12/13 的机器
+会让 42 处 `color-mix()` 静默失效,叠上 `transparent: true` 的窗口就是黑底。
+
 ## 数据单源(架构契约)
 
 | 事实 | 唯一来源 | 前端角色 |
