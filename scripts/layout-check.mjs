@@ -106,8 +106,8 @@ try {
       await document.fonts.ready;
     })()`);
     const typography = await evaluate("(() => { const s = getComputedStyle(document.querySelector('.md-host')); return { size: s.fontSize, height: s.lineHeight }; })()");
-    assert.equal(typography.size, "12px", "Message body must use the requested 12px font");
-    assert.equal(typography.height, "19.2px", "Message body must use 1.6 line spacing");
+    assert.equal(typography.size, "14px", "Message body must use the requested 14px font");
+    assert.equal(typography.height, "22.4px", "Message body must use 1.6 line spacing");
     const markers = await evaluate(`(() => {
       const canvas = document.createElement('canvas');
       const context = canvas.getContext('2d');
