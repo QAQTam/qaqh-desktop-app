@@ -78,7 +78,7 @@ const cdp = await (async () => {
 })();
 
 async function waitForFixture(view) {
-  const selector = view === "settings" ? ".settings-modal .settings-section" : view === "tools" ? ".tools-page" : "#approval-slot .card";
+  const selector = view === "settings" ? ".settings-page .settings-section" : view === "tools" ? ".tools-page" : "#approval-slot .card";
   const started = Date.now();
   while (Date.now() - started < 30_000) {
     const ready = await cdp.evaluate(`Boolean(document.querySelector(${JSON.stringify(selector)})) && document.fonts.status === "loaded"`);
@@ -97,8 +97,11 @@ async function capture(name, { view, theme, material, width, height, section } )
   await cdp.send("Page.navigate", { url });
   await waitForFixture(view);
   if (section) {
-    const navIndex = section === "section-pairing" ? 6 : 7;
-    await cdp.evaluate(`document.querySelectorAll('.settings-nav-item')[${navIndex}]?.click()`);
+    // 按 data-section-id 点，不按位置索引：设置分区一增删，索引版就静默拍错分区
+    // （pairing 曾经在第 6 项）。
+    await cdp.evaluate(
+      `document.querySelector('.settings-nav-item[data-section-id=${JSON.stringify(section)}]')?.click()`,
+    );
     await delay(300);
   }
   const { data } = await cdp.send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false });
