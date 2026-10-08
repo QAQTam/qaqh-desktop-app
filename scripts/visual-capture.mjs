@@ -118,6 +118,7 @@ try {
     ["settings-light-solid-desktop", { view: "settings", theme: "light", material: "solid", width: 1280, height: 900 }],
     ["settings-dark-glass-narrow", { view: "settings", theme: "dark", material: "glass", width: 480, height: 820 }],
     ["settings-dark-glass-narrow-pairing", { view: "settings", theme: "dark", material: "glass", width: 480, height: 820, section: "section-pairing" }],
+    ["settings-dark-glass-narrow-about", { view: "settings", theme: "dark", material: "glass", width: 480, height: 820, section: "section-about" }],
     ["tools-light-solid-desktop", { view: "tools", theme: "light", material: "solid", width: 1280, height: 900 }],
     ["tools-dark-solid-narrow", { view: "tools", theme: "dark", material: "solid", width: 480, height: 820 }],
     ["tools-light-solid-800x600", { view: "tools", theme: "light", material: "solid", width: 800, height: 600 }],

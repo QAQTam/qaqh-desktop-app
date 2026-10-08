@@ -4,9 +4,9 @@ members = ["src-tauri"]
 
 # 与后端仓 `qaqh-backend/Cargo.toml` 的 [workspace.package] 手工对齐：
 # `src-tauri` 用 `version.workspace` / `[lints] workspace = true` 继承本表。
-# 版本号是壳的版本，发布时与 daemon 一起 bump（见 README「版本」）。
+# 版本号是壳的版本，发布时与 daemon 一起 bump（见 README「打包与版本」）。
 [workspace.package]
-version = "2.0.0-beta.2"
+version = "2.0.0-beta.4"
 edition = "2024"
 license = "MIT"
 

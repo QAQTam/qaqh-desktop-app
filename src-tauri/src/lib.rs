@@ -10,6 +10,7 @@ mod daemon;
 mod events;
 mod lan;
 mod pairing;
+mod version;
 
 use tauri::{
     Emitter, Manager, RunEvent, WindowEvent,
@@ -115,6 +116,7 @@ pub fn run() {
             pairing::pairing_create,
             pairing::devices_list,
             pairing::device_revoke,
+            version::app_version,
         ])
         .setup(|app| {
             install_tray(app)?;

@@ -213,6 +213,9 @@ const internals = {
     if (cmd === "daemon_lan_enable") return lanEnable(String(args.bindIp ?? ""), (args.port as number | null | undefined) ?? null);
     if (cmd === "daemon_lan_disable") return lanDisable();
     if (cmd === "pairing_create") return pairingTicket();
+    if (cmd === "app_version") {
+      return { version: "2.0.0-beta.4", commit: "fixture0", display: "2.0.0-beta.4-fixture0" };
+    }
     if (cmd === "devices_list") {
       return {
         devices: [

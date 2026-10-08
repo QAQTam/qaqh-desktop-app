@@ -42,6 +42,7 @@ import {
 import { Field, Section, Switch, TextInput } from "./controls";
 import { ProfileManager } from "./byok/ProfileManager";
 import { PairingSection } from "./PairingSection";
+import { AboutSection } from "./AboutSection";
 
 /** 左侧分区导航;与各 Section 的 id 一一对应。 */
 const NAV = [
@@ -53,6 +54,7 @@ const NAV = [
   { id: "section-subagent", label: "子代理" },
   { id: "section-pairing", label: "设备配对" },
   { id: "section-mcp", label: "MCP / LSP" },
+  { id: "section-about", label: "关于" },
 ] as const;
 
 export const SettingsView: Component = () => {
@@ -404,6 +406,8 @@ export const SettingsView: Component = () => {
                       </table>
                     </Show>
                   </Section>
+
+                  <AboutSection />
                 </div>
               </div>
 
