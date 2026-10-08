@@ -1135,6 +1135,38 @@
   .field-hint.is-error { color: var(--err); }
 
   /* 设备配对 */
+  .field-hint.is-warn { color: var(--warn); }
+  /* 局域网模式面板:状态先行,配置表单只在确认态展开,别和二维码抢注意力。 */
+  .lan-block {
+    display: grid; gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: var(--r-md);
+    background: var(--bg);
+  }
+  .lan-head { display: flex; align-items: center; gap: 8px; }
+  .lan-title { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); }
+  .lan-title svg { width: 14px; height: 14px; color: var(--muted); }
+  .lan-head .ghost-mini { margin-left: auto; }
+  .lan-badge {
+    padding: 1px 8px; border-radius: 999px;
+    font-family: var(--font-mono); font-size: var(--fs-xs);
+    background: var(--surface-2); color: var(--muted);
+  }
+  .lan-badge.on { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+  .lan-badge.off { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+  .lan-badge.pending { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+  .lan-grid {
+    display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px;
+    margin: 0; font-size: var(--fs-xs); color: var(--muted);
+  }
+  .lan-grid dd { margin: 0; overflow-wrap: anywhere; }
+  .lan-grid b { color: var(--text); font-family: var(--font-mono); font-weight: 500; }
+  .lan-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .lan-confirm { display: grid; gap: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+  .lan-confirm-copy { margin: 0; font-size: var(--fs-xs); color: var(--muted); line-height: 1.6; }
+  .lan-confirm-copy.is-warn { color: var(--warn); }
+  .lan-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
+  .lan-form .lan-actions { grid-column: 1 / -1; }
   .scope-list { display: grid; gap: 6px; }
   .scope {
     display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: 8px;

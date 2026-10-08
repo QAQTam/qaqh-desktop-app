@@ -46,7 +46,7 @@ just desktop-dev   # 构建 daemon(debug)+ 放置 sidecar + pnpm tauri dev
 |---|---|---|
 | transcript 结构/文本 | timeline(宿主转发的快照 + `timeline://entry`,`watermark` 去重,缺口→快照校正) | 纯 reducer 投影 |
 | 审批/AskUser 待处理 | `pending_approvals` IPC(challenge 由宿主签发,canonical id 不出宿主) | 投影事件只当刷新信号 |
-| 会话标题/运行态/后台「有新回复」点 | `session_list` IPC 轮询(turn_count/running) | 对比渲染 |
+| 会话标题/运行态/后台「有新回复」点 | `session_list` IPC(按契约 G2 的 `SessionListEntry` 投影)+ `projection://event` 的 MetaDelta 触发重拉 | 对比渲染;事件只当刷新信号 |
 | diff | 后端 unified diff 文本(`display.body.diff.unified`) | 解析渲染,不重算 |
 | 工具展示 | 后端 `display` 投影(header/body/metrics) | 直接消费;`args_json` 仅作未注册回退 |
 

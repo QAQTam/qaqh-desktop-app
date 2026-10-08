@@ -66,7 +66,7 @@ export interface StreamHandlers {
 }
 
 export interface TransportBackend {
-  /** 会话列表(宿主侧已 sanitize 的投影字段)。 */
+  /** 会话列表(宿主把 `session.list` 的 G2 条目投影成侧栏卡片字段)。 */
   sessions(): Promise<any[]>;
 
   /** attach:宿主切 active seed + attach + 激活 timeline 流。 */

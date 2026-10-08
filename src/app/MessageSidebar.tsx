@@ -10,7 +10,7 @@ const pathName = (path: string | null | undefined): string => {
 };
 
 const sessionName = (session: SidebarSession): string =>
-  session.title?.trim() || session.last_summary?.trim() || `会话 ${session.session_id.slice(0, 8)}`;
+  session.title?.trim() || `会话 ${session.session_id.slice(0, 8)}`;
 
 export const MessageSidebar: Component<{
   onSelect: (seed: string) => void;
@@ -69,7 +69,7 @@ export const MessageSidebar: Component<{
                     const active = () => props.activeSeed === session.session_id;
                     return (
                       <button
-                        class={{ "message-session-item": true, active: active(), running: session.running === true }}
+                        class={{ "message-session-item": true, active: active(), running: session.busy === true }}
                         type="button"
                         aria-current={active() ? "page" : undefined}
                         onClick={() => props.onSelect(session.session_id)}
@@ -77,7 +77,7 @@ export const MessageSidebar: Component<{
                       >
                         <IconMessageSquare />
                         <span>{sessionName(session)}</span>
-                        <Show when={session.running}><i class="message-session-running" aria-label="工作中" /></Show>
+                        <Show when={session.busy}><i class="message-session-running" aria-label="工作中" /></Show>
                       </button>
                     );
                   }}</For>

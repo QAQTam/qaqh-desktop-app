@@ -54,6 +54,14 @@ export class SessionStore {
   compactedAfter = createSignal<string | null>(null);
   loadingOlder = createSignal(false);
 
+  /**
+   * 标签层注入的回调:本会话的元数据变了(标题/归档),去重拉 sessions 列表。
+   * meta 频道只有已 attach 的会话才有流,后台会话的变更仍要等列表重拉。
+   */
+  onSessionsChanged: (() => void) | null = null;
+  /** 标签层注入的回调:`MetaDelta::Deleted` 是权威终态,目录项与标签一起收掉。 */
+  onSessionDeleted: (() => void) | null = null;
+
   /** 宿主事件反订阅。 */
   private hostUnlisten: (() => void) | null = null;
   /**
@@ -353,6 +361,17 @@ export class SessionStore {
           this.compactedAfter[1](anchor);
           break;
         }
+        case "sessions":
+          // `title_changed` 自带新标题,先就地写标签(零延迟),再让标签层按
+          // 「session.list 全量权威」的契约重拉一次对齐其余字段。
+          this.applySessionMeta({
+            title: typeof delta.body.title === "string" ? delta.body.title : null,
+          });
+          this.onSessionsChanged?.();
+          break;
+        case "session_deleted":
+          this.onSessionDeleted?.();
+          break;
       }
     }
   }
@@ -505,8 +524,8 @@ export class SessionStore {
     });
   }
 
-  /** sessions 列表(轮询)驱动:标题与后台「有新回复」点。 */
-  applySessionMeta(meta: { title?: string | null; turn_count?: number; running?: boolean }): void {
+  /** sessions 列表驱动:标题 + 后台「有新回复」点(运行态走 activity 信号,不从这里取)。 */
+  applySessionMeta(meta: { title?: string | null; turn_count?: number }): void {
     if (typeof meta.title === "string" && meta.title) this.title[1](meta.title);
     if (typeof meta.turn_count === "number") {
       const known = this.lastTurnCount;

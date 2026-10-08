@@ -10,7 +10,10 @@ use axum::{
     Json, Router,
     extract::State,
     http::{HeaderMap, StatusCode},
-    response::{IntoResponse, sse::{Event, KeepAlive, Sse}},
+    response::{
+        IntoResponse,
+        sse::{Event, KeepAlive, Sse},
+    },
     routing::{get, post},
 };
 use futures_util::StreamExt;
@@ -23,7 +26,10 @@ use crate::{commands, daemon::HostState};
 const PREVIEW_PORT: u16 = 5174;
 
 fn browser_origin_allowed(headers: &HeaderMap) -> bool {
-    let Some(origin) = headers.get(axum::http::header::ORIGIN).and_then(|value| value.to_str().ok()) else {
+    let Some(origin) = headers
+        .get(axum::http::header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+    else {
         return false;
     };
     matches!(origin, "http://127.0.0.1:5173" | "http://localhost:5173")
@@ -46,22 +52,33 @@ async fn invoke(
     Json(request): Json<Value>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     if !browser_origin_allowed(&headers) {
-        return Err(error_response(StatusCode::FORBIDDEN, "browser preview origin denied"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "browser preview origin denied",
+        ));
     }
-    let command = request.get("command").and_then(Value::as_str).unwrap_or_default();
+    let command = request
+        .get("command")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let args = request.get("args").cloned().unwrap_or_else(|| json!({}));
     let run = async {
         match command {
             "session_list" => commands::session_list(app.clone()).await,
             "attach" => {
                 let seed = required_string(&args, "seed")?;
-                let limit = args.get("limit").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok());
+                let limit = args
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .and_then(|n| u32::try_from(n).ok());
                 commands::attach(app.clone(), app.state::<HostState>(), seed, limit).await?;
                 Ok(Value::Null)
             }
             "pending_approvals" => {
                 let seed = required_string(&args, "seed")?;
-                let views = commands::pending_approvals(app.clone(), app.state::<HostState>(), seed).await?;
+                let views =
+                    commands::pending_approvals(app.clone(), app.state::<HostState>(), seed)
+                        .await?;
                 serde_json::to_value(views).map_err(|error| error.to_string())
             }
             "respond_approval" => {
@@ -69,7 +86,15 @@ async fn invoke(
                 let challenge_id = required_string(&args, "challengeId")?;
                 let decision = required_string(&args, "decision")?;
                 let payload = args.get("payload").cloned().unwrap_or_else(|| json!({}));
-                commands::respond_approval(app.clone(), app.state::<HostState>(), seed, challenge_id, decision, payload).await?;
+                commands::respond_approval(
+                    app.clone(),
+                    app.state::<HostState>(),
+                    seed,
+                    challenge_id,
+                    decision,
+                    payload,
+                )
+                .await?;
                 Ok(Value::Null)
             }
             "send_message" => {
@@ -84,7 +109,10 @@ async fn invoke(
             "create_session" => commands::create_session(app.clone()).await,
             "timeline_page" => {
                 let seed = required_string(&args, "seed")?;
-                let limit = args.get("limit").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok());
+                let limit = args
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .and_then(|n| u32::try_from(n).ok());
                 let before_index = args.get("beforeIndex").and_then(Value::as_u64);
                 commands::timeline_page(app.clone(), seed, limit, before_index).await
             }
@@ -99,14 +127,18 @@ async fn invoke(
             }
             "timeline_status" => {
                 let seed = required_string(&args, "seed")?;
-                commands::timeline_status(app.clone(), seed).await.map(|value| value.unwrap_or(Value::Null))
+                commands::timeline_status(app.clone(), seed)
+                    .await
+                    .map(|value| value.unwrap_or(Value::Null))
             }
             "streams_retry" => {
                 let seed = args.get("seed").and_then(Value::as_str).map(str::to_owned);
                 commands::streams_retry(app.clone(), app.state::<HostState>(), seed).await?;
                 Ok(Value::Null)
             }
-            "stop_stale_daemon" => commands::stop_stale_daemon().await.map(|status| json!(status)),
+            "stop_stale_daemon" => commands::stop_stale_daemon()
+                .await
+                .map(|status| json!(status)),
             "open_external" => {
                 let url = required_string(&args, "url")?;
                 commands::open_external(app.clone(), url)?;
@@ -114,13 +146,16 @@ async fn invoke(
             }
             _ => Err(format!("browser preview command not allowed: {command}")),
         }
-    }.await;
-    run.map(Json).map_err(|message| error_response(StatusCode::BAD_REQUEST, message))
+    }
+    .await;
+    run.map(Json)
+        .map_err(|message| error_response(StatusCode::BAD_REQUEST, message))
 }
 
 async fn events(State(app): State<AppHandle>, headers: HeaderMap) -> impl IntoResponse {
     if !browser_origin_allowed(&headers) {
-        return error_response(StatusCode::FORBIDDEN, "browser preview origin denied").into_response();
+        return error_response(StatusCode::FORBIDDEN, "browser preview origin denied")
+            .into_response();
     }
     let receiver = app.state::<HostState>().preview_events.subscribe();
     let stream = BroadcastStream::new(receiver).filter_map(|message| async move {
@@ -128,7 +163,9 @@ async fn events(State(app): State<AppHandle>, headers: HeaderMap) -> impl IntoRe
             Ok::<Event, Infallible>(Event::default().event(name).data(payload.to_string()))
         })
     });
-    Sse::new(stream).keep_alive(KeepAlive::default()).into_response()
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 pub async fn serve(app: AppHandle) -> Result<(), String> {

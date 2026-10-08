@@ -270,7 +270,7 @@ const previewSessions: SidebarSession[] = fixtureTabs.map((item, index) => ({
   title: item.store.title[0]() ?? `会话 ${index + 1}`,
   cwd: index < 8 ? "E:/qaqh-desktop-app" : index < 14 ? "E:/qaqh-backend" : null,
   workspace_id: index < 8 ? "ws-web" : index < 14 ? "ws-backend" : null,
-  running: item.store.activity[0]() === "working",
+  busy: item.store.activity[0]() === "working",
   updated_at: 100 - index,
 }));
 const [previewActiveSeed, setPreviewActiveSeed] = createSignal(tab.seed);

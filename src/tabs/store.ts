@@ -23,14 +23,21 @@ const [activeId, setActiveId] = createSignal<string | null>(null);
 const [bootError, setBootErrorSignal] = createSignal<string | null>(null);
 // setBootError 由本模块内部与 App 兜底路径共用;导出名见文件底部。
 const [creating, setCreating] = createSignal(false);
+/**
+ * 侧栏卡片字段 = 宿主 `SidebarSession`(src-tauri/src/commands.rs)的同名镜像:
+ * 两边改一边,`commands.rs` 的 sidebar_projection_* 会红。
+ */
 export type SidebarSession = {
   session_id: string;
   title?: string | null;
-  last_summary?: string | null;
   cwd?: string | null;
   updated_at?: number;
   archived?: boolean;
-  running?: boolean;
+  /**
+   * 回合在跑,或卡在用户这一侧(授权/ask/计划评审)。宿主按 `SessionRunStatus`
+   * 折算(`commands.rs:session_is_busy`),不再是从前的 `running`(进程存在性)。
+   */
+  busy?: boolean;
   /** 会话轮次数:后台标签状态点用它判断「跑过东西但没在跑」(§5.2)。 */
   turn_count?: number;
   workspace_id?: string | null;
@@ -58,6 +65,10 @@ function addTab(seed: string): Tab {
   const existing = tabs().find((tab) => tab.seed === seed);
   if (existing != null) return existing;
   const tab: Tab = { id: `tab-${seed}`, seed, store: new SessionStore(seed) };
+  // 会话元数据变更接给标签层:store 只有已 attach 的那条流,所以这里只管活动
+  // 会话的即时刷新,后台会话仍靠 pollSessions 的列表重拉兜底。
+  tab.store.onSessionsChanged = () => { void pollSessions(); };
+  tab.store.onSessionDeleted = () => { void dropSession(seed); };
   setTabs((list) => [...list, tab]);
   return tab;
 }
@@ -133,8 +144,20 @@ export async function createSession(): Promise<void> {
   }
 }
 
-/** 轮询 sessions 列表:标题/turn_count 驱动后台状态点(§5.2)。 */
-export async function pollSessions(): Promise<void> {
+/**
+ * 轮询 sessions 列表:标题/turn_count 驱动后台状态点(§5.2)。
+ *
+ * in-flight 合并:15s 定时器、窗口聚焦、meta 频道事件会同时来敲,同一时刻只留
+ * 一条 `session.list` 在飞,其余调用复用同一个 promise。
+ */
+let sessionsFlight: Promise<void> | null = null;
+
+export function pollSessions(): Promise<void> {
+  sessionsFlight ??= pullSessions().finally(() => { sessionsFlight = null; });
+  return sessionsFlight;
+}
+
+async function pullSessions(): Promise<void> {
   try {
     const [list, workspaces] = await Promise.all([
       transport.sessions() as Promise<SidebarSession[]>,
@@ -148,12 +171,21 @@ export async function pollSessions(): Promise<void> {
       tab.store.applySessionMeta({
         title: typeof item.title === "string" ? item.title : null,
         turn_count: typeof item.turn_count === "number" ? item.turn_count : undefined,
-        running: item.running === true,
       });
     }
   } catch {
     // 轮询失败静默,下一轮再取。
   }
+}
+
+/**
+ * 会话被 daemon 判了终态(`MetaDelta::Deleted`):目录项立刻摘除,标签一并关掉。
+ * 留着它只会让下一次点击变成「快照拉不到」的错误屏。
+ */
+async function dropSession(seed: string): Promise<void> {
+  setSessionCatalog(sessionCatalog().filter((item) => String(item.session_id) !== seed));
+  const tab = tabs().find((candidate) => candidate.seed === seed);
+  if (tab != null) await closeTab(tab.id);
 }
 
 /** 启动:选一个非归档会话(优先运行中)作为第一个标签。 */
@@ -164,7 +196,7 @@ export async function boot(): Promise<void> {
   ]);
   setSessionCatalog(list);
   setWorkspaceCatalog(workspaces);
-  const live = list.find((item) => !item.archived && item.running) ?? list.find((item) => !item.archived) ?? list[0];
+  const live = list.find((item) => !item.archived && item.busy) ?? list.find((item) => !item.archived) ?? list[0];
   if (live?.session_id == null) {
     setBootError(null);
     return;

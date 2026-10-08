@@ -37,6 +37,19 @@ describe("readProjection:双层 tag/content 必须拆到内层", () => {
     expect(projectionActions(delta)).toEqual(["activity"]);
   });
 
+  test("meta_delta 信封同样双层:外层 meta_delta、内层才是 MetaDelta 的 kind", () => {
+    const delta = readProjection(
+      { kind: "channel", data: "control" },
+      {
+        kind: "meta_delta",
+        data: { kind: "title_changed", data: { revision: 3, title: "Bun 引导 daemon", source: "auto" } },
+      },
+    );
+    expect(delta).toMatchObject({ channel: "control", kind: "title_changed" });
+    expect(delta.body.title).toBe("Bun 引导 daemon");
+    expect(projectionActions(delta)).toEqual(["sessions"]);
+  });
+
   test("resource_kind 从字段体取,用来把非 todo 的资源变更挡在刷新外", () => {
     const delta = readProjection(
       { kind: "channel", data: "tool" },
@@ -73,6 +86,15 @@ describe("projectionActions:channel × kind 路由(频道真相见 replay.rs:151
     // (ClientV2Payload = ProjectionPayload),匹配它等于死分支。
     ["control dashboard_updated 已下线", at("control", "dashboard_updated"), []],
     ["control tool_intent 不在此频道", at("control", "tool_intent"), []],
+    // control 频道也承载 MetaDelta:`projection_stream_key` 把
+    // ProjectionSlot::Meta|Mailbox|Team 全映射成 RingingChannel::Control
+    // (replay.rs:166-168)。按 `meta` 频道分支就是死分支,标题永远等轮询。
+    ["control title_changed 触发列表重拉", at("control", "title_changed"), ["sessions"]],
+    ["control metadata_changed 触发列表重拉", at("control", "metadata_changed"), ["sessions"]],
+    ["control deleted 摘除会话", at("control", "deleted"), ["session_deleted"]],
+    ["control created 不刷列表(标签已由 openSession 建好)", at("control", "created"), []],
+    ["control context_revision 与侧栏无关", at("control", "context_revision"), []],
+    ["meta 频道不存在(死分支锁)", at("meta", "title_changed"), []],
     // tool 频道 = ControlDelta::ToolIntent + TimelineDelta + ResourceDelta
     ["tool tool_intent", at("tool", "tool_intent"), ["approvals"]],
     ["tool workspace_resource_changed todo", at("tool", "workspace_resource_changed", "todo"), ["todos"]],

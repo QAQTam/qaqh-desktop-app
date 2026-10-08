@@ -34,7 +34,9 @@ static LAST_LIVENESS_MS: AtomicU64 = AtomicU64::new(0);
 
 pub fn emit(app: &AppHandle, event: &str, payload: Value) {
     let state = app.state::<HostState>();
-    let _ = state.preview_events.send((event.to_string(), payload.clone()));
+    let _ = state
+        .preview_events
+        .send((event.to_string(), payload.clone()));
     if let Err(error) = app.emit(event, payload) {
         log::warn!("[qaqh-webui-app] emit {event} failed: {error}");
     }

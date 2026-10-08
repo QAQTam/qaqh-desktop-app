@@ -3,13 +3,15 @@
 //! 命令与前端 `TauriTransport` 方法一一对应;daemon token / lease 只存在于
 //! Rust 宿主侧的 `qaqh-client`,任何命令都不向 webview 返回凭据。
 
+use serde::Serialize;
 use serde_json::{Value, json};
 use tauri::{AppHandle, State};
 
 use qaqh_client::{
     ClientV2CommandAck, CommandOptions, ConversationCommand, ConversationInputPurpose,
-    RingingCommand, RingingCommandAckStatus, sanitize_session_list,
+    RingingCommand, RingingCommandAckStatus,
 };
+use qaqh_types::SessionListEntry;
 
 use crate::challenge::{command_for, command_options};
 use crate::daemon::{self, HostState};
@@ -93,7 +95,67 @@ fn active_seed_of(state: &HostState) -> Option<String> {
     state.lock_active_seed().clone()
 }
 
-/// `() → Vec<SessionMeta>`(sanitize 后字段同 gateway)。
+/// 侧栏卡片字段 = 前端 `SidebarSession`(src/tabs/store.ts)的同名镜像。
+///
+/// 展示面裁剪归桌面自己:字段集由这个类型声明,而不是后端与 TUI 共享的
+/// `sanitize_session_list` 字符串白名单——那份白名单剥掉的 `workspace_id`/`cwd`
+/// 正是侧栏分组与悬浮路径要吃的键,漏字段不报错,只让功能永远显示缺省值。
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+struct SidebarSession {
+    session_id: String,
+    title: Option<String>,
+    cwd: Option<String>,
+    updated_at: u64,
+    turn_count: usize,
+    busy: bool,
+    archived: bool,
+    workspace_id: Option<String>,
+}
+
+/// `SessionRunStatus` → 侧栏状态点的「还挂着事」判据。
+///
+/// 后端 2026-10-06 起用 agentloop 状态取代 `running: bool`(worker 进程存在性语义
+/// 已废除,`qaqh-types/src/session.rs:251-280`)。差别是要命的:`idle` 是 loop
+/// 空闲等输入;`not_running` 是**根本没加载**,不等于空闲;`canceled`/`error`
+/// 只是上一回合的终态驻留。字段叫 `busy` 而不是继续叫 `running`,就是因为
+/// 判据已经换了:回合在跑,或者卡在用户这一侧(授权/ask/计划评审)。
+fn session_is_busy(status: qaqh_types::SessionRunStatus) -> bool {
+    matches!(
+        status,
+        qaqh_types::SessionRunStatus::Working
+            | qaqh_types::SessionRunStatus::WaitingPermission
+            | qaqh_types::SessionRunStatus::WaitingAsk
+            | qaqh_types::SessionRunStatus::WaitingPlan
+    )
+}
+
+/// `session.list` 回包(前端契约 G2)→ 侧栏卡片。
+///
+/// 解码直接吃权威类型 `qaqh_types::SessionListEntry`:字段改名/删除(本轮就是
+/// `last_summary` 被删、`running` 换成 `status`)在这里是编译错误,而不是像字符串
+/// 白名单那样静默把某个功能永久留在缺省值上。
+fn sidebar_sessions(raw: Value) -> Result<Value, String> {
+    let entries = serde_json::from_value::<Vec<SessionListEntry>>(raw).map_err(string_of)?;
+    serde_json::to_value(
+        entries
+            .into_iter()
+            .map(|entry| SidebarSession {
+                session_id: entry.meta.session_id,
+                title: entry.meta.title,
+                cwd: entry.meta.cwd,
+                updated_at: entry.meta.updated_at,
+                turn_count: entry.meta.turn_count,
+                busy: session_is_busy(entry.status),
+                archived: entry.meta.archived,
+                workspace_id: entry.workspace_id,
+            })
+            .collect::<Vec<_>>(),
+    )
+    .map_err(string_of)
+}
+
+/// `() → Vec<SidebarSession>`(G2 条目投影;宿主细节不进 webview)。
 #[tauri::command]
 pub async fn session_list(app: AppHandle) -> Result<Value, String> {
     let client = daemon::ensure_connected(&app).await?;
@@ -101,7 +163,7 @@ pub async fn session_list(app: AppHandle) -> Result<Value, String> {
         .service_v2("session.list", json!({}))
         .await
         .map_err(string_of)?;
-    Ok(sanitize_session_list(raw))
+    sidebar_sessions(raw)
 }
 
 /// `(seed) → ()`:attach(归属)+ 激活 timeline 流(单活动标签持流)。
@@ -370,4 +432,136 @@ pub async fn exit_app(
     }
     app.exit(0);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use qaqh_types::{SessionMeta, SessionRunStatus};
+
+    /// daemon 侧一条 `session.list` 条目(契约 G2):`SessionMeta` 的键经 flatten
+    /// 平铺,同层再加 `status` / `workspace_id`(`service.rs:839-859`)。用权威类型
+    /// 序列化出来,就是线上真正吃到的那份形状。
+    fn wire_entry(status: SessionRunStatus, workspace_id: Option<&str>) -> Value {
+        let entry = SessionListEntry {
+            meta: SessionMeta {
+                session_id: "0123abcd".into(),
+                updated_at: 7,
+                model: "test-model".into(),
+                title: Some("Bun 引导 daemon".into()),
+                cwd: Some("E:\\code\\qaqh".into()),
+                turn_count: 3,
+                ..Default::default()
+            },
+            status,
+            workspace_id: workspace_id.map(str::to_string),
+        };
+        serde_json::to_value(entry).expect("SessionListEntry 可序列化")
+    }
+
+    #[test]
+    fn sidebar_projection_keeps_grouping_keys_and_holds_back_host_detail() {
+        let out = sidebar_sessions(json!([wire_entry(SessionRunStatus::Working, Some("w1"))]))
+            .expect("投影成功");
+        let card = &out.as_array().expect("回包是数组")[0];
+        let keys: std::collections::BTreeSet<&str> = card
+            .as_object()
+            .expect("卡片是对象")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        // 与前端 `SidebarSession`(src/tabs/store.ts)一一对应。
+        assert_eq!(
+            keys,
+            std::collections::BTreeSet::from([
+                "session_id",
+                "title",
+                "cwd",
+                "updated_at",
+                "turn_count",
+                "busy",
+                "archived",
+                "workspace_id",
+            ])
+        );
+        // 这两键是被退役的 `sanitize_session_list` 白名单剥掉的:侧栏分组与悬浮
+        // 路径全靠它们。
+        assert_eq!(card["workspace_id"], json!("w1"));
+        assert_eq!(card["cwd"], json!("E:\\code\\qaqh"));
+        assert_eq!(card["busy"], json!(true));
+        for leak in [
+            "model",
+            "effort",
+            "profile",
+            "skills",
+            "usage_totals",
+            "context_stats",
+            "frozen_annotation",
+            "tool_mode",
+            "custom_tools",
+            // 前端目前不读 ephemeral(子代理临时会话的过滤是另一件事),
+            // 留着它只会让人以为侧栏已经分得开。
+            "ephemeral",
+            "created_at",
+            "message_count",
+            // 状态词汇表不过 IPC:侧栏只看 `busy` 一个判据。
+            "status",
+        ] {
+            assert!(card.get(leak).is_none(), "宿主细节 {leak} 不该进 webview");
+        }
+    }
+
+    #[test]
+    fn busy_covers_working_and_user_waits_but_not_terminals() {
+        // `running: bool` 时代这四种都算「在跑」;归一化后 `idle`/终态/未加载都不算。
+        for status in [
+            SessionRunStatus::Working,
+            SessionRunStatus::WaitingPermission,
+            SessionRunStatus::WaitingAsk,
+            SessionRunStatus::WaitingPlan,
+        ] {
+            assert!(session_is_busy(status), "{status:?} 应当点亮状态点");
+        }
+        // `not_running` ≠ `idle`:未加载连投影都不读,两者都不该亮。
+        for status in [
+            SessionRunStatus::NotRunning,
+            SessionRunStatus::Idle,
+            SessionRunStatus::Canceled,
+            SessionRunStatus::Error,
+        ] {
+            assert!(!session_is_busy(status), "{status:?} 不该点亮状态点");
+        }
+    }
+
+    #[test]
+    fn sidebar_projection_survives_old_wire_and_fails_loudly_on_shape_drift() {
+        // 未分组(旧磁盘 meta:`workspace_id` 缺省)→ 键存在且为 null,前端据此进「未分组」。
+        let out =
+            sidebar_sessions(json!([wire_entry(SessionRunStatus::Idle, None)])).expect("投影成功");
+        assert_eq!(out[0]["workspace_id"], Value::Null);
+        assert_eq!(out[0]["busy"], json!(false));
+
+        // 旧 daemon 的回包:`running: bool` + 没有 `status`。扁平条目里多出来的
+        // `running` 被 meta 的 flatten 吸收,`status` 走 `#[serde(default)]`
+        // (NotRunning)→ 列表照常出,只是状态点不亮。升级不炸,但降级要提示。
+        let mut legacy = serde_json::to_value(SessionMeta {
+            session_id: "old1".into(),
+            created_at: 1,
+            updated_at: 2,
+            model: "m".into(),
+            message_count: 0,
+            ..Default::default()
+        })
+        .expect("SessionMeta 可序列化");
+        legacy
+            .as_object_mut()
+            .expect("条目是对象")
+            .insert("running".into(), json!(true));
+        let out = sidebar_sessions(json!([legacy])).expect("旧回包兼容");
+        assert_eq!(out[0]["session_id"], json!("old1"));
+        assert_eq!(out[0]["busy"], json!(false));
+
+        // 回包形状不符必须报错:字符串白名单时代的失败模式是静默空列表。
+        assert!(sidebar_sessions(json!({"unexpected": "envelope"})).is_err());
+    }
 }

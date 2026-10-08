@@ -5,6 +5,7 @@
  * 从 `resolvedTheme()` 读解析结果选配色。
  */
 import { createSignal } from "solid-js";
+import { invoke } from "@tauri-apps/api/core";
 
 export type ResolvedTheme = "light" | "dark";
 
@@ -15,10 +16,25 @@ const [resolved, setResolved] = createSignal<ResolvedTheme>(systemDark?.matches 
 /** config.theme 的现值;null = 尚未从 config.load 拿到(按跟随系统处理)。 */
 let configTheme: string | null = null;
 let themeTransitionTimer: number | undefined;
+let backdropSyncRevision = 0;
+let backdropSyncQueue: Promise<unknown> = Promise.resolve();
 
 const prefersReducedMotion = typeof matchMedia === "function"
   ? matchMedia("(prefers-reduced-motion: reduce)")
   : null;
+
+function syncNativeBackdrop(theme: ResolvedTheme): void {
+  if (typeof window === "undefined" || (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ == null) return;
+  const revision = ++backdropSyncRevision;
+  backdropSyncQueue = backdropSyncQueue
+    .then(() => {
+      if (revision !== backdropSyncRevision) return;
+      return invoke("set_window_theme", { dark: theme === "dark" });
+    })
+    .catch((error: unknown) => {
+      console.warn("[qaqh-webui] failed to sync native Mica theme", error);
+    });
+}
 
 function recompute(animate = true): void {
   const root = document.documentElement;
@@ -43,6 +59,7 @@ function recompute(animate = true): void {
   }
   setResolved(next);
   root.dataset.theme = next;
+  syncNativeBackdrop(next);
 }
 
 /** config 的 theme 值进来(空串 = 跟随系统);config.load 与每次改动都会调用。 */

@@ -3,11 +3,12 @@
 //! 架构:webview( Solid 渲染层)↔ 类型化 IPC ↔ Rust 宿主 ↔ `qaqh-client` ↔
 //! daemon(sidecar 或共享在跑实例)。daemon token 只存在于宿主进程内存。
 
+mod browser_preview;
 mod challenge;
 mod commands;
 mod daemon;
 mod events;
-mod browser_preview;
+mod lan;
 mod pairing;
 
 use tauri::{
@@ -15,6 +16,19 @@ use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
+
+#[tauri::command]
+fn set_window_theme(window: tauri::WebviewWindow, dark: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        window_vibrancy::apply_mica(&window, Some(dark)).map_err(|error| error.to_string())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, dark);
+        Ok(())
+    }
+}
 
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -79,6 +93,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(daemon::HostState::new())
         .invoke_handler(tauri::generate_handler![
+            set_window_theme,
             commands::session_list,
             commands::attach,
             commands::pending_approvals,
@@ -94,6 +109,9 @@ pub fn run() {
             commands::stop_stale_daemon,
             commands::exit_app,
             commands::timeline_status,
+            lan::daemon_lan_status,
+            lan::daemon_lan_enable,
+            lan::daemon_lan_disable,
             pairing::pairing_create,
             pairing::devices_list,
             pairing::device_revoke,
@@ -101,10 +119,10 @@ pub fn run() {
         .setup(|app| {
             install_tray(app)?;
             #[cfg(target_os = "windows")]
-            if let Some(window) = app.get_webview_window("main") {
-                if let Err(error) = window_vibrancy::apply_mica(&window, None) {
-                    log::warn!("[qaqh-webui-app] Windows Mica unavailable: {error}");
-                }
+            if let Some(window) = app.get_webview_window("main")
+                && let Err(error) = window_vibrancy::apply_mica(&window, None)
+            {
+                log::warn!("[qaqh-webui-app] Windows Mica unavailable: {error}");
             }
             #[cfg(debug_assertions)]
             {

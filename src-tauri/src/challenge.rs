@@ -316,7 +316,7 @@ mod tests {
             "trust",
             &payload(json!({})),
         )
-        .unwrap();
+        .expect("审批决策应映射成合法命令");
         assert!(matches!(
             command,
             RingingCommand::Tool(ToolCommand::ToolPermissionRespond {
@@ -334,7 +334,7 @@ mod tests {
             "submit",
             &payload(json!({ "answers": [{ "question_id": "q1", "answer": "yes" }] })),
         )
-        .unwrap();
+        .expect("审批决策应映射成合法命令");
         assert!(matches!(
             command,
             RingingCommand::Control(ControlCommand::InteractionAskRespond {
@@ -348,7 +348,8 @@ mod tests {
         ));
 
         assert!(matches!(
-            command_for(&challenge(ApprovalKind::Ask), "dismiss", &payload(json!({}))).unwrap(),
+            command_for(&challenge(ApprovalKind::Ask), "dismiss", &payload(json!({})))
+                .expect("dismiss 应映射成显式撤销命令"),
             RingingCommand::Control(ControlCommand::InteractionAskDismiss { interaction_id })
                 if interaction_id == "canonical-id"
         ));
@@ -361,7 +362,7 @@ mod tests {
             "approve",
             &payload(json!({ "message": "ok", "autonomous": true, "ignored": "x" })),
         )
-        .unwrap();
+        .expect("审批决策应映射成合法命令");
         assert!(matches!(
             command,
             RingingCommand::Control(ControlCommand::PlanReviewRespond {
@@ -381,7 +382,8 @@ mod tests {
             ApprovalKind::Plan,
         ] {
             assert_eq!(
-                command_for(&challenge(kind), "auto_approve", &payload(json!({}))).unwrap_err(),
+                command_for(&challenge(kind), "auto_approve", &payload(json!({})))
+                    .expect_err("未知决策必须被拒"),
                 "invalid_decision"
             );
         }
@@ -404,7 +406,7 @@ mod tests {
                 "details_unavailable": false,
             }
         });
-        let views = store.issue_views("seed1", &pending).unwrap();
+        let views = store.issue_views("seed1", &pending).expect("签发应成功");
         assert_eq!(views.len(), 1);
         let details = &views[0]["details"];
         assert!(details.get("tool_name").is_some());
@@ -425,8 +427,8 @@ mod tests {
         let pending = json!({
             "pending_interaction": { "id": "int_01ABC", "kind": "ask", "details": {"q": 1} }
         });
-        let first = store.issue_views("seed1", &pending).unwrap();
-        let second = store.issue_views("seed1", &pending).unwrap();
+        let first = store.issue_views("seed1", &pending).expect("签发应成功");
+        let second = store.issue_views("seed1", &pending).expect("签发应成功");
         assert_eq!(first[0]["challenge_id"], second[0]["challenge_id"]);
     }
 
@@ -436,25 +438,37 @@ mod tests {
         let pending = json!({
             "pending_interaction": { "id": "int_01ABC", "kind": "plan", "details": {} }
         });
-        let views = store.issue_views("seed1", &pending).unwrap();
-        let id = views[0]["challenge_id"].as_str().unwrap().to_string();
+        let views = store.issue_views("seed1", &pending).expect("签发应成功");
+        let id = views[0]["challenge_id"]
+            .as_str()
+            .expect("视图应带 challenge_id")
+            .to_string();
 
         assert_eq!(
-            store.consume(&id, "other-seed").unwrap_err(),
+            store
+                .consume(&id, "other-seed")
+                .expect_err("跨会话消费必须失败"),
             "approval_scope_violation"
         );
         // scope 失败同样消费掉(一次性语义,防跨 seed 重放枚举)。
         assert_eq!(
-            store.consume(&id, "other-seed").unwrap_err(),
+            store
+                .consume(&id, "other-seed")
+                .expect_err("跨会话消费必须失败"),
             "approval_not_found"
         );
 
-        let views = store.issue_views("seed1", &pending).unwrap();
-        let id = views[0]["challenge_id"].as_str().unwrap().to_string();
-        let consumed = store.consume(&id, "seed1").unwrap();
+        let views = store.issue_views("seed1", &pending).expect("签发应成功");
+        let id = views[0]["challenge_id"]
+            .as_str()
+            .expect("视图应带 challenge_id")
+            .to_string();
+        let consumed = store.consume(&id, "seed1").expect("同会话消费应成功");
         assert_eq!(consumed.source_id, "int_01ABC");
         assert_eq!(
-            store.consume(&id, "seed1").unwrap_err(),
+            store
+                .consume(&id, "seed1")
+                .expect_err("一次性凭据重放必须失败"),
             "approval_not_found"
         );
     }
@@ -465,7 +479,7 @@ mod tests {
         let pending = json!({
             "pending_interaction": { "id": "int_01ABC", "kind": "ask", "details": {} }
         });
-        store.issue_views("seed1", &pending).unwrap();
+        store.issue_views("seed1", &pending).expect("签发应成功");
         store.clear();
         assert!(store.issue_views("seed1", &json!(null)).is_ok());
     }
@@ -475,17 +489,23 @@ mod tests {
         let store = ChallengeStore::default();
         let bad = json!({ "pending_interaction": { "id": "", "kind": "ask", "details": {} } });
         assert_eq!(
-            store.issue_views("seed1", &bad).unwrap_err(),
+            store
+                .issue_views("seed1", &bad)
+                .expect_err("畸形 payload 必须被拒"),
             "invalid_pending_interaction"
         );
         let bad_kind = json!({ "pending_interaction": { "id": "int_x", "kind": "permission", "details": {} } });
         assert_eq!(
-            store.issue_views("seed1", &bad_kind).unwrap_err(),
+            store
+                .issue_views("seed1", &bad_kind)
+                .expect_err("未知 kind 必须被拒"),
             "invalid_pending_interaction"
         );
         let bad_tool = json!({ "pending_permission": { "tool_name": "x" } });
         assert_eq!(
-            store.issue_views("seed1", &bad_tool).unwrap_err(),
+            store
+                .issue_views("seed1", &bad_tool)
+                .expect_err("缺 tool_call_id 必须被拒"),
             "invalid_pending_permission"
         );
     }
@@ -506,7 +526,9 @@ mod tests {
             "pending_interaction": { "id": "int_overflow", "kind": "ask", "details": {} }
         });
         assert_eq!(
-            store.issue_views("seed1", &overflow).unwrap_err(),
+            store
+                .issue_views("seed1", &overflow)
+                .expect_err("超出待审批上限必须被拒"),
             "approval_limit"
         );
     }

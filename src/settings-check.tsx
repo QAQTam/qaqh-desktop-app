@@ -87,6 +87,8 @@ const probe = {
   calls: [] as RpcCall[],
   saves: [] as Record<string, unknown>[],
   config: baseConfig(),
+  /** 置 true 后 LAN 重启请求返回 `daemon_busy`,用来走查强制重启确认面板。 */
+  lanBusy: false,
 };
 
 /** 假宿主的 merge patch 应用:与 daemon 同语义——缺字段不动,`"****"`/空串密钥保持。 */
@@ -128,6 +130,66 @@ function serviceRpc(method: string, params: Record<string, unknown>): unknown {
   }
 }
 
+/**
+ * 假宿主的 daemon 局域网面:字段与 `src-tauri/src/lan.rs` 的 lan_view 同形。
+ * 夹具验的是前端语义与观感,所以「重启」只翻转内存状态,不真起进程。
+ */
+const lan = {
+  running: true,
+  active: false,
+  endpoint: "http://127.0.0.1:61746",
+  lan_endpoint: null as string | null,
+  tls_fingerprint: null as string | null,
+  pid: 45368,
+};
+
+const lanView = (): Record<string, unknown> => ({
+  ...lan,
+  daemon_version: "2.0.0-beta.3",
+  protocol_version: 1,
+  app_protocol_version: 1,
+});
+
+const lanRestartGuard = (): void => {
+  if (probe.lanBusy) throw new Error("daemon_busy");
+};
+
+function lanEnable(bindIp: string, port: number | null): Record<string, unknown> {
+  lanRestartGuard();
+  const host = bindIp.trim() === "" ? "192.168.1.23" : bindIp.trim();
+  lan.active = true;
+  lan.running = true;
+  lan.pid += 1;
+  lan.lan_endpoint = `https://${host}:${port ?? 64413}`;
+  lan.tls_fingerprint = "sha256:8a5f1c2b9d4e7f60aa12b34c5d6e7f80";
+  return lanView();
+}
+
+function lanDisable(): Record<string, unknown> {
+  lanRestartGuard();
+  lan.active = false;
+  lan.pid += 1;
+  lan.lan_endpoint = null;
+  lan.tls_fingerprint = null;
+  return lanView();
+}
+
+const pairingTicket = (): Record<string, unknown> => {
+  const baseUrl = (lan.lan_endpoint ?? "https://192.168.1.23:64413").replace(/\/$/, "");
+  return {
+    qr_payload: JSON.stringify({
+      v: 1,
+      kind: "qaqh-pair",
+      base_url: baseUrl,
+      pairing_token: "fixture-one-time-token",
+      tls_fp: lan.tls_fingerprint ?? "",
+      host_name: "QAQH-DEV",
+    }),
+    expires_in_ms: 120_000,
+    base_url: baseUrl,
+  };
+};
+
 const callbacks = new Map<number, (payload: unknown) => void>();
 let nextCallbackId = 1;
 
@@ -147,6 +209,24 @@ const internals = {
     if (cmd === "service_rpc") return serviceRpc(String(args.method), (args.params ?? {}) as Record<string, unknown>);
     if (cmd === "session_list") return [];
     if (cmd === "timeline_status") return null;
+    if (cmd === "daemon_lan_status") return lanView();
+    if (cmd === "daemon_lan_enable") return lanEnable(String(args.bindIp ?? ""), (args.port as number | null | undefined) ?? null);
+    if (cmd === "daemon_lan_disable") return lanDisable();
+    if (cmd === "pairing_create") return pairingTicket();
+    if (cmd === "devices_list") {
+      return {
+        devices: [
+          {
+            device_id: "dev_seed_1",
+            name: "我的手机",
+            platform: "mobile",
+            scope: "interact",
+            created_at_ms: Date.now() - 86_400_000,
+            last_seen_ms: Date.now() - 3_600_000,
+          },
+        ],
+      };
+    }
     // 插件命令(event/opener/window)在夹具里都是空转:结构合法即可。
     return null;
   },

@@ -1,0 +1,23 @@
+#!/bin/sh
+# 提交前质量闸（渲染层）：类型 + 单测 + 构建。
+#
+# 为什么要有它：c0faf11 带着 20 个 tsc 错误进了主干——只跑了 vite build，
+# 而 classList / keyed For 在 solid rc.13 里改了形态，类型不过的地方运行时也是坏的。
+#
+# 启用（一次性，需要你自己执行——本仓不代改 git 配置）：
+#   git config core.hooksPath .githooks
+#
+# 壳侧闸需要 sidecar，默认不进钩子（否则没放 binaries 时提交全被拦）：
+#   just check-shell / just gate
+set -e
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+if [ ! -d node_modules ]; then
+    echo "pre-commit: 缺 node_modules，先跑 pnpm install --frozen-lockfile" >&2
+    exit 1
+fi
+
+echo "pre-commit: just check（typecheck + 单测 + 构建）"
+just check

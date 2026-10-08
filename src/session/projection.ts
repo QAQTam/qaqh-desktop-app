@@ -15,7 +15,7 @@
 import type { ActivityState as DomainActivityState } from "../api/qaqh/ActivityState";
 import type { SessionActivityState } from "../api/qaqh/SessionActivityState";
 
-export type ProjectionAction = "activity" | "approvals" | "todos" | "compacted";
+export type ProjectionAction = "activity" | "approvals" | "todos" | "compacted" | "sessions" | "session_deleted";
 
 /** 拆好的一层投影:频道 + delta kind + 字段体 + 资源类别。 */
 export interface ProjectionDelta {
@@ -65,6 +65,13 @@ export function projectionActions(delta: ProjectionDelta): ProjectionAction[] {
       if (kind === "activity") return ["activity"];
       if (kind === "interaction_requested" || kind === "interaction_resolved" || kind === "interaction_expired") return ["approvals"];
       if (kind === "tool_finished") return ["approvals"];
+      // MetaDelta 也在 control 频道上:`projection_stream_key` 把
+      // `ProjectionSlot::Meta|Mailbox|Team` 全映射成 `RingingChannel::Control`
+      // (replay.rs:166-168),所以按 `case "meta"` 分支是死代码。标题生成/重命名
+      // 与删除事实是后端唯一的会话元数据推送面(`SessionMetaChanged` 那个
+      // DomainEvent 自 v1 广播退役后不再上线)。
+      if (kind === "title_changed" || kind === "metadata_changed") return ["sessions"];
+      if (kind === "deleted") return ["session_deleted"];
       return [];
     case "tool":
       // Tool 频道承载三种 slot 的投影:ControlDelta::ToolIntent、TimelineDelta
