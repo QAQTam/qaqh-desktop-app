@@ -71,6 +71,23 @@ just check-shell
 版本走。15 (Sequoia) 对应 Safari 18,整条 CSS 面都在支持内;反过来停在 12/13 的机器
 会让 42 处 `color-mix()` 静默失效,叠上 `transparent: true` 的窗口就是黑底。
 
+## 打包与版本
+
+版本号**单源**是根 `Cargo.toml` 的 `[workspace.package] version`;`tauri.conf.json >
+version` 是它的镜像(NSIS 包名与 exe 的 FILEVERSION 取那一处)。两处不许漂移——
+`just build-verify` 会当场比,不等就红。设置页「关于」显示的是
+`<version>-<git 短 sha>`,脏工作树再缀 `-dirty`,由 `src-tauri/build.rs` 注入。
+
+`just desktop-build` 前后各有一道闸(`scripts/build-guard.mjs`),存在理由是同一个坑:
+包名钉死在版本号上,版本又长期不 bump,于是打包前任何一步失败,上一次的安装包都会
+原地留着、文件名一模一样,"我编译了但装上还是旧 UI"在产物层面无法自证。
+
+- `just build-pre`:删掉 `target/release/bundle` 下的旧产物(没产物就是没成功),并断言
+  已安装实例没在运行——壳有托盘 + single-instance,窗口关了进程不退,`qaqh-daemon`
+  还锁着安装目录里的 exe,这时 NSIS 覆盖必败或静默跳过。**打包前先从托盘退出。**
+- `just build-verify`:核验壳二进制里嵌的前端入口 hash 就是当前 `out/renderer` 的那两个
+  文件名,再打印每个安装包的大小与 mtime。对不上就是旧包,报错会指出该重跑哪一条。
+
 ## 数据单源(架构契约)
 
 | 事实 | 唯一来源 | 前端角色 |

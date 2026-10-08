@@ -93,6 +93,20 @@ verify-backend rev=BACKEND_CONTRACT_REV:
     git -C ../qaqh-backend merge-base --is-ancestor {{rev}} HEAD
     @echo "ok: contract {{rev}} is present"
 
+# ── 打包新鲜度闸 ──────────────────────────────────────
+#
+# 存在理由:NSIS 包名钉死在版本号上,而版本长期不 bump——`desktop-build` 里任何一步
+# 在打包前失败,上一次的安装包都原地留着、文件名一模一样,"编译了但装上还是旧 UI"
+# 在产物层面无法自证。判据与报错见 scripts/build-guard.mjs。
+
+# 打包前:删旧 bundle(没产物就是没成功)+ 断言已安装实例没在跑(exe 被锁则覆盖必败)。
+build-pre:
+    node scripts/build-guard.mjs pre
+
+# 打包后:核验壳里嵌的是当前 out/renderer 的入口 hash,且安装包不比壳旧。
+build-verify:
+    node scripts/build-guard.mjs post
+
 # 桌面开发：契约断言 → 后端仓建 daemon(debug) → 放置 sidecar → pnpm tauri dev。
 [windows]
 desktop-dev:
@@ -102,13 +116,15 @@ desktop-dev:
     pnpm install --frozen-lockfile
     pnpm tauri dev
 
-# 自包含安装包：渲染层闸 + 契约断言 + 后端 daemon(release) + sidecar + tauri build。
+# 自包含安装包：渲染层闸 + 契约断言 + 清旧包 + daemon(release) + sidecar + tauri build + 核验。
 [windows]
 desktop-build: renderer-build
     just verify-backend
+    just build-pre
     cargo build --manifest-path ../qaqh-backend/Cargo.toml --release -p qaqh-daemon
     just place-sidecar release
     pnpm tauri build
+    just build-verify
 
 # 缺了它 cargo 会在长编译中途报 E0463(std not found),前面几百秒的依赖编译全白扔。
 # 断言 rustup 装了 Intel mac 的 x86_64-apple-darwin std。
@@ -135,6 +151,8 @@ desktop-dev:
 desktop-build: renderer-build
     just verify-backend
     just verify-mac-target
+    just build-pre
     cargo build --manifest-path ../qaqh-backend/Cargo.toml --release -p qaqh-daemon --target {{MAC_X64_TARGET}}
     just place-sidecar release {{MAC_X64_TARGET}}
     pnpm tauri build --target {{MAC_X64_TARGET}}
+    just build-verify
