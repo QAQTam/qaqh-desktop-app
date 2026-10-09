@@ -10,8 +10,9 @@ import { workDurationMs } from "../lib/time";
 import type { SessionStore } from "../session/store";
 import type { Step, Turn, Wait } from "../session/types";
 import { turnSegments, type TurnSegment, type WorkSegment } from "./segments";
+import { sessionCatalog } from "../tabs/store";
 
-const WorkStep: Component<{ step: Accessor<Step>; turn: Turn }> = (props) => {
+const WorkStep: Component<{ step: Accessor<Step>; turn: Turn; cwd?: string | null }> = (props) => {
   const thinking = createMemo(() => { const step = props.step(); return step.kind === "thinking" ? step : null; });
   const tool = createMemo(() => { const step = props.step(); return step.kind === "tool" ? step : null; });
   const [thinkingOverride, setThinkingOverride] = createSignal<boolean | null>(null);
@@ -65,15 +66,19 @@ const WorkStep: Component<{ step: Accessor<Step>; turn: Turn }> = (props) => {
           </Collapse>
         </div>
       </Match>
-      <Match when={tool() != null}><StepRow step={tool()!} turn={props.turn} /></Match>
+      <Match when={tool() != null}><StepRow step={tool()!} turn={props.turn} cwd={props.cwd} /></Match>
     </Switch>
   );
 };
 
-const WorkGroup: Component<{ group: WorkSegment; turn: Turn; waits: Wait[] }> = (props) => {
+const WorkGroup: Component<{ group: WorkSegment; turn: Turn; waits: Wait[]; cwd?: string | null }> = (props) => {
   const [override, setOverride] = createSignal<boolean | null>(null);
   // 回复边界自动收起一次;之后用户仍可展开这个已完成工作段。
-  createEffect(() => props.group.closed, (closed) => { if (closed) setOverride(null); });
+  let wasClosed = untrack(() => props.group.closed);
+  createEffect(() => props.group.closed, (closed) => {
+    if (closed && !wasClosed) setOverride(null);
+    wasClosed = closed;
+  });
   const open = () => override() ?? !props.group.closed;
   const groups = createMemo(() => {
     const steps = props.group.steps;
@@ -98,9 +103,10 @@ const WorkGroup: Component<{ group: WorkSegment; turn: Turn; waits: Wait[] }> = 
       <button type="button" class="collapsed-row" aria-expanded={open() ? "true" : "false"} onClick={() => setOverride(!open())}>
         <Show when={open()} fallback={<IconChevronRight />}><IconChevronDown /></Show><span>{label()}</span>
       </button>
-      <Collapse open={open()} instant={override() == null}>
+      {/* 回复边界的自动收起也播放回收动画；历史闭合段初次挂载仍不挂详情。 */}
+      <Collapse open={open()}>
         <div class="timeline turn-steps">
-          <For each={groups()} keyed={(group) => group.key}>{(group) => <div class="work-step-group"><For each={group().steps} keyed={(step) => step.id}>{(step) => <WorkStep step={step} turn={props.turn} />}</For></div>}</For>
+          <For each={groups()} keyed={(group) => group.key}>{(group) => <div class="work-step-group"><For each={group().steps} keyed={(step) => step.id}>{(step) => <WorkStep step={step} turn={props.turn} cwd={props.cwd} />}</For></div>}</For>
           <For each={waits()}>{(wait) => <div class="timeline-row wait"><span class="timeline-label">{wait.kind === "approval" ? STR.waitApproval(formatWorkDuration(Math.max(0, (wait.to ?? wait.from) - wait.from))) : STR.waitAnswer(formatWorkDuration(Math.max(0, (wait.to ?? wait.from) - wait.from)))}</span></div>}</For>
         </div>
       </Collapse>
@@ -108,12 +114,12 @@ const WorkGroup: Component<{ group: WorkSegment; turn: Turn; waits: Wait[] }> = 
   );
 };
 
-const SegmentView: Component<{ segment: Accessor<TurnSegment>; turn: Turn; waits: Wait[] }> = (props) => {
+const SegmentView: Component<{ segment: Accessor<TurnSegment>; turn: Turn; waits: Wait[]; cwd?: string | null }> = (props) => {
   const work = createMemo(() => { const segment = props.segment(); return segment.kind === "work" ? segment : null; });
   const text = createMemo(() => { const segment = props.segment(); return segment.kind === "text" ? segment.step : null; });
   return (
     <Switch>
-      <Match when={work() != null}><WorkGroup group={work()!} turn={props.turn} waits={props.waits} /></Match>
+      <Match when={work() != null}><WorkGroup group={work()!} turn={props.turn} waits={props.waits} cwd={props.cwd} /></Match>
       <Match when={text() != null}>
         <div data-text-id={text()!.id} class={{ "turn-answer": text()!.id === props.turn.answerStepId, "turn-intermediate": text()!.id !== props.turn.answerStepId }}>
           <Markdown text={() => text()!.text} revision={text()!.id} streaming={props.turn.status === "running" && text()!.endedAt == null} />
@@ -124,6 +130,7 @@ const SegmentView: Component<{ segment: Accessor<TurnSegment>; turn: Turn; waits
 };
 
 export const TurnView: Component<{ turn: Turn; waits: Wait[]; store: SessionStore }> = (props) => {
+  const cwd = createMemo(() => sessionCatalog().find((session) => session.session_id === props.store.seed)?.cwd);
   const segments = createMemo(() => {
     const steps = props.turn.steps;
     steps.length;
@@ -133,7 +140,7 @@ export const TurnView: Component<{ turn: Turn; waits: Wait[]; store: SessionStor
   return (
     <section class="turn">
       <div class="turn-user"><div class="bubble">{props.turn.user.text}</div></div>
-      <For each={segments()} keyed={(segment) => segment.key}>{(segment) => <SegmentView segment={segment} turn={props.turn} waits={props.waits} />}</For>
+      <For each={segments()} keyed={(segment) => segment.key}>{(segment) => <SegmentView segment={segment} turn={props.turn} waits={props.waits} cwd={cwd()} />}</For>
       <Show when={props.turn.status === "aborted" && props.turn.steps.length === 0}><div class="turn-aborted">{STR.interrupted}</div></Show>
       <Show when={props.turn.status === "failed" && props.turn.error != null}><div class="turn-error">{props.turn.error!.message}</div></Show>
     </section>

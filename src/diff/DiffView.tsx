@@ -208,7 +208,7 @@ const VirtualRows: Component<{ rows: DiffRow[]; row: (row: DiffRow) => JSX.Eleme
   );
 };
 
-export const DiffFileView: Component<{ file: ParsedFile }> = (props) => {
+export const DiffFileView: Component<{ file: ParsedFile; hidePath?: boolean }> = (props) => {
   const file = () => props.file;
   const rows = createMemo(() => flattenFileRows(file()));
   const totalLines = () => fileTotalLines(file());
@@ -320,13 +320,15 @@ export const DiffFileView: Component<{ file: ParsedFile }> = (props) => {
         class="diff-file-head"
         aria-expanded={expanded() ? "true" : "false"}
         onClick={() => setExpanded(!expanded())}
-        title={file().path}
+        title={props.hidePath ? undefined : file().path}
       >
         <span class="diff-path">
+          <Show when={!props.hidePath} fallback="差异">
           <Show when={file().oldPath != null}>
             {file().oldPath} → {file().path}
           </Show>
           <Show when={file().oldPath == null}>{file().path}</Show>
+          </Show>
         </span>
         <span class="diff-stat">
           <b class="diff-stat-add">+{file().stats.add}</b>
@@ -343,7 +345,7 @@ export const DiffFileView: Component<{ file: ParsedFile }> = (props) => {
   );
 };
 
-export const DiffList: Component<{ diffText: string }> = (props) => {
+export const DiffList: Component<{ diffText: string; hideSingleFilePath?: boolean }> = (props) => {
   const files = createMemo(() => {
     try {
       return parseUnifiedDiff(props.diffText);
@@ -354,7 +356,7 @@ export const DiffList: Component<{ diffText: string }> = (props) => {
   return (
     <Show when={files().length > 0}>
       <div class="diff-list">
-        <For each={files()}>{(file) => <DiffFileView file={file} />}</For>
+        <For each={files()}>{(file) => <DiffFileView file={file} hidePath={props.hideSingleFilePath && files().length === 1} />}</For>
       </div>
     </Show>
   );

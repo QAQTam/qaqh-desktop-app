@@ -14,7 +14,7 @@
  */
 import { createMemo, createSignal } from "solid-js";
 import { transport } from "../lib/transport";
-import { applyConfigTheme } from "../lib/theme";
+import { applyTheme, storedTheme } from "../lib/theme";
 import { toast } from "../ui/toast";
 import type { ConfigDto } from "../api/qaqh/ConfigDto";
 import {
@@ -58,7 +58,7 @@ async function fetchConfig(): Promise<void> {
     const dto = await transport.rpc<ConfigDto>("config.load");
     setBaseline(dto);
     setDraft(structuredClone(dto));
-    applyConfigTheme(dto.theme);
+    applyTheme(storedTheme());
     setRequireBypass(false);
     setBypassAck("");
     setConfirmDiscard(false);
@@ -121,7 +121,7 @@ export function discard(): void {
   const base = baseline();
   if (base != null) setDraft(structuredClone(base));
   // 放弃编辑 = 主题回到基线值(编辑中是即时预览)。
-  applyConfigTheme(base?.theme);
+  applyTheme(storedTheme());
   setConfirmDiscard(false);
   setRequireBypass(false);
   setBypassAck("");
@@ -206,7 +206,7 @@ export const deleteProfile = (name: string): Promise<void> =>
 export function setField<K extends keyof ConfigDto>(key: K, value: ConfigDto[K]): void {
   setDraft((prev) => (prev == null ? prev : { ...prev, [key]: value }));
   // 主题即时预览:改下拉立刻生效,保存落盘、放弃回滚(discard)。
-  if (key === "theme") applyConfigTheme(value as string | null);
+  if (key === "theme") applyTheme(value as string | null);
   setNote(null);
 }
 
@@ -215,6 +215,14 @@ export function setSubagent<K extends keyof ConfigDto["subagent"]>(
   value: ConfigDto["subagent"][K],
 ): void {
   setDraft((prev) => (prev == null ? prev : { ...prev, subagent: { ...prev.subagent, [key]: value } }));
+  setNote(null);
+}
+
+export function setExec<K extends keyof ConfigDto["exec"]>(
+  key: K,
+  value: ConfigDto["exec"][K],
+): void {
+  setDraft((prev) => (prev == null ? prev : { ...prev, exec: { ...prev.exec, [key]: value } }));
   setNote(null);
 }
 

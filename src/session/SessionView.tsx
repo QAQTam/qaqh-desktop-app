@@ -11,22 +11,40 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type Component } from "solid-js";
 import IconArrowDown from "~icons/lucide/arrow-down";
 import { TurnView } from "../turn/TurnView";
-import { TodoPanel } from "../todo/TodoPanel";
 import { anchorScrollTop, clampPlaceholderHeight, EVICT_SCREENS, shouldLoadOlder, TURN_WINDOW } from "../session/pagination";
 import { STR } from "../lib/strings";
-import type { SessionStore } from "../session/store";
+import type { SessionStore, CompactState } from "../session/store";
 import { gapHeight, type Slot, type Wait } from "../session/types";
 import type { Tab } from "../tabs/store";
+
+/** 「保留 N/M 回合」进度;没有过程事件(未镜像进 v2)时为空串,卡片退化为纯状态。 */
+function compactProgress(state: CompactState): string {
+  if (state.phase !== "running" || state.turnsTotal == null) return "";
+  return STR.compactProgress(state.turnsKeeping ?? 0, state.turnsTotal);
+}
+
+/** 终态补充信息:合并了几个回合、摘要多少字。 */
+function compactMeta(state: CompactState): string {
+  if (state.phase !== "done") return "";
+  const parts: string[] = [];
+  if (state.turnsRemoved != null) parts.push(STR.compactTurnsRemoved(state.turnsRemoved));
+  if (state.summaryChars != null) parts.push(STR.compactSummaryChars(state.summaryChars));
+  return parts.join(" · ");
+}
 
 export const SessionView: Component<{ tab: Tab }> = (props) => {
   let scroller: HTMLDivElement | undefined;
   const [pinned, setPinned] = createSignal(true);
   const [unseen, setUnseen] = createSignal(false);
-  const [todoOpen, setTodoOpen] = createSignal(false);
   const [activeNavKey, setActiveNavKey] = createSignal<string | null>(null);
   const [hoveredNavKey, setHoveredNavKey] = createSignal<string | null>(null);
   const store = props.tab.store;
   const state = () => store.state[0];
+  /** 压缩卡片只在非 idle 时渲染;`Show` 的回调因此能拿到收窄后的联合类型。 */
+  const compactCard = () => {
+    const current = store.compact[0]();
+    return current.phase === "idle" ? null : current;
+  };
   const slots = createMemo(() => {
     state().structureVersion;
     // keying 只读普通结构快照,避免 For 订阅 50 个 store 槽位的 100+ 叶子。
@@ -281,7 +299,7 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
   );
 
   return (
-    <div id="session" class={{ "todo-open": todoOpen() }}>
+    <div id="session">
       <div
         id="messages"
         ref={scroller}
@@ -310,6 +328,41 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
           )}</For></div>}
         </For>
       </div>
+      <Show when={compactCard()}>
+        {(compact) => {
+          // JSX 里的条件不会收窄联合类型,这几处显式收窄后再给 Show 用。
+          const headline = (): string => {
+            const current = compact();
+            if (current.phase === "running") return STR.compacting;
+            if (current.phase === "failed") return STR.compactFailed;
+            if (current.phase === "skipped") {
+              return current.status === "cancelled" ? STR.compactCancelled : STR.compactSkipped;
+            }
+            return STR.compacted;
+          };
+          const summary = (): string => {
+            const current = compact();
+            return current.phase === "running" ? current.summary : "";
+          };
+          return (
+            <div class={`compact-card ${compact().phase}`} role="status" aria-live="polite">
+              <div class="compact-card-head">
+                <span class="compact-card-mark" aria-hidden="true" />
+                <strong>{headline()}</strong>
+                <Show when={compactProgress(compact())}>
+                  <span class="compact-card-progress">{compactProgress(compact())}</span>
+                </Show>
+                <Show when={compactMeta(compact())}>
+                  <span class="compact-card-progress">{compactMeta(compact())}</span>
+                </Show>
+              </div>
+              <Show when={summary() !== ""}>
+                <pre class="compact-card-summary">{summary()}</pre>
+              </Show>
+            </div>
+          );
+        }}
+      </Show>
       <Show when={navItems().length > 1}>
         <nav class="turn-navigator" aria-label="当前已加载的用户消息">
           <For each={navItems()} keyed={(item) => item.key}>{(item, index) => (
@@ -341,7 +394,6 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
           )}</For>
         </nav>
       </Show>
-      <TodoPanel store={store} onOpenChange={setTodoOpen} />
       <Show when={!pinned() && unseen()}>
         <button
           type="button"

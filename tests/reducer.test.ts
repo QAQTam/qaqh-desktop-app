@@ -1,6 +1,6 @@
 /** 事件 reducer(spec §1.3 允许的纯逻辑单测:事件 reducer 与 seq 去重)。 */
 import { describe, expect, test } from "vitest";
-import { applyEntry, applySnapshot, buildTurn, emptySession, prependPage, recomputeDerived } from "../src/session/reducer";
+import { applyEntry, applySnapshot, buildTurn, emptySession, outputFromDisplay, prependPage, recomputeDerived } from "../src/session/reducer";
 import { isWorkStep } from "../src/session/types";
 import type { SessionState, TimelineEntryWire } from "../src/session/types";
 
@@ -26,6 +26,28 @@ function rawTurn(
 }
 
 const slotKeys = (state: SessionState): string[] => state.slots.map((slot) => slot.key);
+
+test("显式 body:none 不应复活旧输出；缺失/unknown 仍兼容 legacy", () => {
+  const legacy = { text: "raw stdout", stderr: "raw stderr" };
+  expect(outputFromDisplay({ body: { kind: "none" } }, legacy)).toBeUndefined();
+  expect(outputFromDisplay(undefined, legacy)).toBe(legacy);
+  expect(outputFromDisplay({ body: { kind: "unknown" } }, legacy)).toBe(legacy);
+});
+
+test("exec 接受终态 progress 尾窗和同状态输出重刷新", () => {
+  const state = emptySession();
+  applyEntry(state, entry(1, "t1", { type: "block_opened", block: { block_id: "e1", kind: "tool", tool: { name: "exec", state: "running", progress: "initial" } } }));
+  applyEntry(state, entry(2, "t1", { type: "tool_progress", block_id: "e1", chunk: "x".repeat(20_000) }));
+  const step = state.turns.t1!.steps[0]!;
+  if (step.kind !== "tool") throw new Error("expect tool");
+  expect(step.progressTail?.length).toBe(16 * 1024);
+  expect(step.progressTruncated).toBe(true);
+  applyEntry(state, entry(3, "t1", { type: "tool_updated", block_id: "e1", tool: { name: "exec", state: "succeeded", progress: "final ordered tail", display: { body: { kind: "shell", output: "first final", exit_code: 0, truncated: false } } } }));
+  expect(step.progressTail).toBe("final ordered tail");
+  expect(step.output?.text).toBe("first final");
+  applyEntry(state, entry(4, "t1", { type: "tool_updated", block_id: "e1", tool: { name: "exec", state: "succeeded", display: { body: { kind: "shell", output: "refreshed", exit_code: 0, truncated: false } } } }));
+  expect(step.output?.text).toBe("refreshed");
+});
 
 describe("applyEntry:回合生命周期", () => {
   test("turn_opened/block_opened/text_delta 推进 Turn 并提升作答", () => {

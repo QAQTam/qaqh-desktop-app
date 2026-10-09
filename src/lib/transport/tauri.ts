@@ -16,6 +16,8 @@ import { listen, type Event, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   type Ack,
   type ApprovalView,
+  attachmentRefsOf,
+  type AttachmentUploadWire,
   isTauriRuntime,
   type StreamHandlers,
   type TimelinePageResponse,
@@ -59,7 +61,8 @@ export class TauriTransport implements TransportBackend {
     const type = typeof command.type === "string" ? command.type : "";
     if (channel === "conversation" && type === "conversation_send_message") {
       const text = typeof command.text === "string" ? command.text : "";
-      const ack = await invoke<Ack>("send_message", { seed: sessionId ?? this.requireSeed("send_message"), text });
+      const attachments = attachmentRefsOf(command);
+      const ack = await invoke<Ack>("send_message", { seed: sessionId ?? this.requireSeed("send_message"), text, attachments });
       if (ack.status === "rejected") throw rejectAck(ack);
       return ack;
     }
@@ -68,8 +71,15 @@ export class TauriTransport implements TransportBackend {
       if (ack.status === "rejected") throw rejectAck(ack);
       return ack;
     }
+    if (channel === "conversation" && type === "conversation_compact") {
+      // ack 只代表命令进队;终态由 CompactFinished(compaction_applied)决定。
+      const ack = await invoke<Ack>("compact_context", { seed: sessionId ?? this.requireSeed("compact_context") });
+      if (ack.status === "rejected") throw rejectAck(ack);
+      return ack;
+    }
     if (channel === "control" && type === "session_create") {
-      const ack = await invoke<Ack>("create_session");
+      const cwd = typeof command.cwd === "string" && command.cwd.trim() !== "" ? command.cwd : null;
+      const ack = await invoke<Ack>("create_session", { cwd });
       if (ack.status === "rejected") throw rejectAck(ack);
       return ack;
     }
@@ -93,6 +103,18 @@ export class TauriTransport implements TransportBackend {
   }
 
   // ── Tauri 专属面(TauriHostSurface) ──────────────────────────────────────────
+
+  pickDirectory(): Promise<string | null> {
+    return invoke<string | null>("pick_directory");
+  }
+
+  pickAttachments(): Promise<string[]> {
+    return invoke<string[]>("pick_attachments");
+  }
+
+  uploadAttachment(seed: string, path: string): Promise<AttachmentUploadWire> {
+    return invoke<AttachmentUploadWire>("upload_attachment", { seed, path });
+  }
 
   /** 订阅宿主转发事件;返回反订阅函数(store 切换/销毁时调用)。 */
   async subscribe(handlers: StreamHandlers): Promise<() => void> {

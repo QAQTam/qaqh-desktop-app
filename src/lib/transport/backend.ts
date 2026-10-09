@@ -6,6 +6,7 @@
  * store/组件只面向本接口;连接管理由宿主事件驱动(见 `StreamHandlers`)。
  */
 
+import type { ContentRef } from "../../api/qaqh/ContentRef";
 import type { RingingCommandAck } from "../../api/qaqh/RingingCommandAck";
 import type { TimelineSnapshot } from "../../api/qaqh/TimelineSnapshot";
 
@@ -54,6 +55,22 @@ export type TodoItemWire = {
   evidence?: string;
 };
 
+/**
+ * `upload_attachment` 的返回体 = 线类型 `ContentRef` + 两个纯展示字段。
+ * 文件名/字节数由宿主在读盘时顺手带回(daemon 的 `POST /ringing/v2/content`
+ * 只回 content_id/media_type/sha256/truncated,没有名字)。
+ */
+export type AttachmentUploadWire = ContentRef & { name: string; size: number };
+
+/**
+ * 从命令里取出待发附件引用。空数组等同携带——会被序列化成 `attachments: []`,
+ * 所以这里直接收敛成 null,让命令与「本来就没有附件」逐字同形。
+ */
+export function attachmentRefsOf(command: Record<string, unknown>): ContentRef[] | null {
+  const value = command.attachments;
+  return Array.isArray(value) && value.length > 0 ? (value as ContentRef[]) : null;
+}
+
 /** 宿主事件的订阅面(事件 payload 与现行 SSE 帧同形)。 */
 export interface StreamHandlers {
   onTimelineEntry(seed: string, entry: Record<string, any>): void;
@@ -83,6 +100,18 @@ export interface TransportBackend {
 
   /** Timeline 快照/翻页;`query` 形如 `?limit=30&before_index=12`。 */
   timelinePage(seed: string, query?: string): Promise<TimelinePageResponse>;
+
+  /** 原生目录选择(新建会话的目标工作区);null = 用户取消或该形态无对话框。 */
+  pickDirectory(): Promise<string | null>;
+
+  /** 原生多选附件对话框;空数组 = 用户取消或该形态无对话框。 */
+  pickAttachments(): Promise<string[]>;
+
+  /**
+   * 上传单个本地附件。字节读取与上传都在宿主侧完成(命令里不允许出现本地路径),
+   * 返回的引用直接进 `send_message` 的 `attachments`。
+   */
+  uploadAttachment(seed: string, path: string): Promise<AttachmentUploadWire>;
 }
 
 /** Tauri 宿主专属面。 */

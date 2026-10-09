@@ -14,6 +14,7 @@
  */
 import type { ConfigDto } from "../api/qaqh/ConfigDto";
 import type { ConfigPatch } from "../api/qaqh/ConfigPatch";
+import type { ExecDto } from "../api/qaqh/ExecDto";
 import type { SubagentDto } from "../api/qaqh/SubagentDto";
 import type { SubagentPatch } from "../api/qaqh/SubagentPatch";
 
@@ -34,8 +35,8 @@ export type ConfigPatchWire = Optionalize<Omit<ConfigPatch, "subagent">> & {
 
 /** 允许值来自 ConfigPatch::validate()(lib.rs:283-288);空串不在其中——别发。 */
 export const REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
-/** BYOK 的三条 wire——没有 provider 目录可查,协议由用户直接声明。 */
-export const WIRE_PROTOCOLS = ["openai", "responses", "anthropic"] as const;
+/** BYOK 的四条 wire——没有 provider 目录可查,协议由用户直接声明。 */
+export const WIRE_PROTOCOLS = ["openai", "responses", "anthropic", "gemini"] as const;
 
 /** "" = 跟随系统(apply_patch:lang/theme/tokenizerPath 空串 = 清除)。 */
 export const THEME_OPTIONS = [
@@ -113,6 +114,16 @@ export function buildSubagentPatch(baseline: SubagentDto, draft: SubagentDto): S
   return Object.keys(raw).length === 0 ? null : (raw as SubagentPatchWire);
 }
 
+/** exec 段:defaultShell 空串/"auto" = 平台自动探测;只在真改动时整段发出。 */
+export function buildExecPatch(
+  baseline: ExecDto,
+  draft: ExecDto,
+): { defaultShell: string } | null {
+  const shell = norm(draft.defaultShell);
+  if (shell === norm(baseline.defaultShell)) return null;
+  return { defaultShell: shell };
+}
+
 /** baseline 与 draft 的差 → Merge Patch;没有差异时得到 `{}`。 */
 export function buildPatch(baseline: ConfigDto, draft: ConfigDto): ConfigPatchWire {
   const raw: Sink = {};
@@ -124,18 +135,15 @@ export function buildPatch(baseline: ConfigDto, draft: ConfigDto): ConfigPatchWi
   changed(raw, "wire", baseline.wire, draft.wire);
   keepIfBlank(raw, "reasoningEffort", baseline.reasoningEffort, draft.reasoningEffort);
   // 空串 = 清除
-  clearable(raw, "lang", baseline.lang, draft.lang);
-  clearable(raw, "theme", baseline.theme, draft.theme);
   clearable(raw, "tokenizerPath", baseline.tokenizerPath, draft.tokenizerPath);
-  // 原样赋值(空串自有语义:跟随系统字体);掩码字面量后端也会忽略,前端同样不发
-  const font = norm(draft.fontFamily);
-  if (font !== norm(baseline.fontFamily) && font !== MASK) raw["fontFamily"] = font;
   changed(raw, "maxTokens", baseline.maxTokens, draft.maxTokens);
   changed(raw, "contextLength", baseline.contextLength, draft.contextLength);
   changed(raw, "autoCompactThreshold", baseline.autoCompactThreshold, draft.autoCompactThreshold);
   changed(raw, "complianceEnabled", baseline.complianceEnabled, draft.complianceEnabled);
-  changed(raw, "notificationsEnabled", baseline.notificationsEnabled, draft.notificationsEnabled);
   changed(raw, "permissionLevel", baseline.permissionLevel, draft.permissionLevel);
+  changed(raw, "sessionIdleUnloadSecs", baseline.sessionIdleUnloadSecs, draft.sessionIdleUnloadSecs);
+  const exec = buildExecPatch(baseline.exec, draft.exec);
+  if (exec != null) raw["exec"] = exec;
   const subagent = buildSubagentPatch(baseline.subagent, draft.subagent);
   if (subagent != null) raw["subagent"] = subagent;
   return raw as ConfigPatchWire;

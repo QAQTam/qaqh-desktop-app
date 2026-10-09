@@ -3,6 +3,12 @@ import { describe, expect, test } from "vitest";
 import { primaryArg, primaryArgFull } from "../src/tools/registry";
 
 describe("primaryArgFull:空 Other label 必须回退到入参", () => {
+  test("未知入参不能将源码或原始 JSON 泄露到摘要/title", () => {
+    const args = JSON.stringify({ old_str: "old source", new_str: "new source" });
+    expect(primaryArg(args, undefined)).toBe("");
+    expect(primaryArg(args, { summary: "修改配置" })).toBe("修改配置");
+    expect(primaryArg('{"filename":"src/config.rs","new_str":"source"}', undefined)).toBe("src/config.rs");
+  });
   test("缺失 header 字段不能让渲染抛错", () => {
     expect(primaryArg(undefined, { header: { kind: "shell" } } as any)).toBe("");
     expect(primaryArg('{"path":"/fallback"}', { header: { kind: "path" } } as any)).toBe("/fallback");

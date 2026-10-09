@@ -63,8 +63,31 @@ function recompute(animate = true): void {
 }
 
 /** config 的 theme 值进来(空串 = 跟随系统);config.load 与每次改动都会调用。 */
-export function applyConfigTheme(value: string | null | undefined, animate = true): void {
+/**
+ * 主题是**本应用窗口的本地偏好**(localStorage),不写 daemon 配置:
+ * 桌面壳是唯一消费方(daemon 的 `theme` 字段只服务其它客户端,见
+ * `qaqh-config-api` 的 ConfigDto 注释),把它放进后端只会让「改外观」触发
+ * 一次无谓的 config.save 热载广播。
+ */
+const THEME_STORAGE_KEY = "qaqh.theme";
+
+/** 本地主题偏好;null = 从未设置过(冷启动以 daemon 现值为初值做一次性迁移)。 */
+export function storedTheme(): string | null {
+  try {
+    return localStorage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    // 隐私模式等禁用 localStorage:按未设置处理。
+    return null;
+  }
+}
+
+export function applyTheme(value: string | null | undefined, animate = true): void {
   configTheme = value ?? "";
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, configTheme);
+  } catch {
+    // 存不下不影响本次应用。
+  }
   recompute(animate);
 }
 

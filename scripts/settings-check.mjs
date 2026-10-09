@@ -96,7 +96,10 @@ function connect(url) {
 const BOOTSTRAP = `
 window.__t = {
   wait: (ms) => new Promise((r) => setTimeout(r, ms)),
-  modal: () => document.querySelector(".settings-modal"),
+  // 浮层根类名是 settings-page(SettingsView.tsx:121);此处曾写 settings-modal,
+  // 自改类名起夹具一直取不到浮层,首步与 Esc/零会话几步长期假红。
+  modal: () => document.querySelector(".settings-page"),
+  // label 与 src/lib/strings.ts 的 STR.settings* 文案保持一致;改文案要同步这里。
   field: (label) => [...document.querySelectorAll(".field")]
     .find((item) => item.querySelector(".field-label")?.textContent === label)
     ?.querySelector("input,select"),
@@ -126,8 +129,12 @@ const steps = [
   {
     name: "Ctrl+, 打开浮层并读一次 config.load",
     code: `
-      __t.key(",", { ctrlKey: true });
-      await __t.wait(600);
+      // 首帧后 App 还在挂全局监听(实测约 1.1s),这一发 Ctrl+, 会掉在监听之前——
+      // 重试到浮层出现为止,断言的本意是「Ctrl+, 能打开」,不是「600ms 内能打开」。
+      for (let attempt = 0; attempt < 20 && __t.modal() == null; attempt += 1) {
+        __t.key(",", { ctrlKey: true });
+        await __t.wait(250);
+      }
       // 2026-10-06 起宿主启动时会多拉一次 config.load(主题预取),故 ≥1。
       return { ok: __t.modal() != null && __t.calls("config.load").length >= 1,
                detail: { modal: __t.modal() != null, loads: __t.calls("config.load").length } };
@@ -139,30 +146,31 @@ const steps = [
       const sections = document.querySelectorAll(".settings-section").length;
       const inputs = document.querySelectorAll(".settings-body input, .settings-body select").length;
       const readonlyTables = document.querySelectorAll(".readonly-table").length;
-      // 2026-10-06 起 8 个分区:BYOK/档案/权限/上下文/外观/子代理/设备配对/MCP-LSP。
-      return { ok: sections === 8 && inputs >= 26 && readonlyTables === 2
-                 && __t.value("model") === "ox-alpha-free" && __t.value("maxTokens") === "96000",
-               detail: { sections, inputs, readonlyTables, model: __t.value("model"), maxTokens: __t.value("maxTokens") } };
+      // 2026-10-08 起 10 个分区:BYOK/档案/权限/上下文/运行时/外观/子代理/设备配对/MCP-LSP/关于。
+      // 新增或删除分区要同步这里——计数是「整页真的渲染出来了」的冒烟,不是契约。
+      return { ok: sections === 10 && inputs >= 26 && readonlyTables === 3
+                 && __t.value("模型") === "ox-alpha-free" && __t.value("最大输出令牌") === "96000",
+               detail: { sections, inputs, readonlyTables, model: __t.value("模型"), maxTokens: __t.value("最大输出令牌") } };
     `,
   },
   {
     name: "改 model 只发这一项(Merge Patch 最小化)",
     code: `
-      __t.type("model", "ox-beta");
+      __t.type("模型", "ox-beta");
       await __t.wait(200);
       const foot = __t.foot();
       __t.click(".primary-mini");
       await __t.wait(600);
       const patch = __t.lastSave();
       return { ok: foot.includes("1 项") && JSON.stringify(Object.keys(patch ?? {})) === '["model"]'
-                 && patch?.model === "ox-beta" && __t.value("model") === "ox-beta",
+                 && patch?.model === "ox-beta" && __t.value("模型") === "ox-beta",
                detail: { foot, patchKeys: Object.keys(patch ?? {}), saved: __t.saves().length } };
     `,
   },
   {
     name: "清空 model 不产生改动(后端「空串 = 保持现值」)",
     code: `
-      __t.type("model", "");
+      __t.type("模型", "");
       await __t.wait(200);
       return { ok: __t.foot().includes("没有改动") && __t.saves().length === 1, detail: { foot: __t.foot(), saves: __t.saves().length } };
     `,
@@ -183,13 +191,13 @@ const steps = [
   {
     name: "BYOK 端点改动:endpoint + wire 各发一项",
     code: `
-      __t.pick("wire", "anthropic");
+      __t.pick("协议", "anthropic");
       await __t.wait(250);
-      __t.type("endpoint", "https://other.example/v1");
+      __t.type("接口地址", "https://other.example/v1");
       await __t.wait(250);
       const foot = __t.foot();
-      const wire = __t.value("wire");
-      const endpoint = __t.value("endpoint");
+      const wire = __t.value("协议");
+      const endpoint = __t.value("接口地址");
       __t.click(".primary-mini");
       await __t.wait(600);
       const patch = __t.lastSave() ?? {};
@@ -225,7 +233,7 @@ const steps = [
   {
     name: "脏草稿下拒绝对 profile 动手(不静默覆盖草稿)",
     code: `
-      __t.type("model", "dirt-while-profile");
+      __t.type("模型", "dirt-while-profile");
       await __t.wait(200);
       const before = __t.calls("profile.delete").length;
       // 目标必须是非活动 profile:活动档的删除按钮本来就 disabled。
@@ -242,21 +250,21 @@ const steps = [
       const loads = __t.calls("config.load").length;
       [...document.querySelectorAll(".settings-foot-actions .ghost-mini")].find((b) => b.textContent.includes("重新读取"))?.click();
       await __t.wait(600);
-      return { ok: __t.calls("config.load").length > loads && __t.value("model") === "ox-beta",
-               detail: { model: __t.value("model"), loads: __t.calls("config.load").length } };
+      return { ok: __t.calls("config.load").length > loads && __t.value("模型") === "ox-beta",
+               detail: { model: __t.value("模型"), loads: __t.calls("config.load").length } };
     `,
   },
   {
     name: "Esc 关闭遇脏草稿 → 先问放弃/留下",
     code: `
-      __t.type("model", "esc-dirty");
+      __t.type("模型", "esc-dirty");
       await __t.wait(200);
       __t.key("Escape");
       await __t.wait(300);
       const asked = document.querySelector(".settings-discard") != null && __t.modal() != null;
       [...document.querySelectorAll(".settings-discard .ghost-mini")].find((b) => b.textContent.includes("继续编辑"))?.click();
       await __t.wait(200);
-      const stayed = __t.modal() != null && __t.value("model") === "esc-dirty";
+      const stayed = __t.modal() != null && __t.value("模型") === "esc-dirty";
       [...document.querySelectorAll(".settings-foot-actions .ghost-mini")].find((b) => b.textContent.includes("重新读取"))?.click();
       await __t.wait(600);
       __t.key("Escape");
@@ -353,7 +361,7 @@ try {
   await cdp.evaluate(`(() => { const __t = window.__t; return (async () => {
     if (__t.modal() == null) __t.key(",", { ctrlKey: true });
     await __t.wait(700);
-    __t.type("model", "ox-two"); __t.pick("theme", "dark");
+    __t.type("模型", "ox-two"); __t.pick("主题", "dark");
     document.querySelector(".settings-body").scrollTop = 0;
     await __t.wait(400); return "shot-ready";
   })(); })()`);

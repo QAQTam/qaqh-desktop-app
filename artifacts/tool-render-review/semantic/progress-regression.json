@@ -1,0 +1,152 @@
+{
+  "steps": [
+    {
+      "name": "boot",
+      "heapMb": 20,
+      "slots": 50,
+      "loadedTurns": 50,
+      "placeholders": 0,
+      "retainedChars": 2117514,
+      "domNodes": 4365,
+      "mountedChars": 359834,
+      "turns": 50,
+      "toolDetails": 0,
+      "timelines": 0,
+      "tables": 50,
+      "codeBlocks": 100,
+      "diffNodes": 0,
+      "distToBottom": 0,
+      "scrollTop": 38262,
+      "scrollHeight": 38908,
+      "horizontalOverflow": 0,
+      "pageRequests": 1,
+      "oldestIndex": 150,
+      "hasMore": true,
+      "runningTurns": 0,
+      "failedTurns": 8,
+      "watermark": 2000,
+      "detail": {
+        "mountMs": 508,
+        "bootChurn": {
+          "added": 507,
+          "removed": 0
+        },
+        "hidden": false,
+        "longTasks": [
+          109,
+          279,
+          62
+        ]
+      }
+    },
+    {
+      "name": "progressSmall",
+      "heapMb": 41,
+      "slots": 51,
+      "loadedTurns": 50,
+      "placeholders": 1,
+      "retainedChars": 2081330,
+      "domNodes": 4316,
+      "mountedChars": 352762,
+      "turns": 50,
+      "toolDetails": 1,
+      "timelines": 1,
+      "tables": 49,
+      "codeBlocks": 99,
+      "diffNodes": 0,
+      "distToBottom": 0,
+      "scrollTop": 38504,
+      "scrollHeight": 39150,
+      "horizontalOverflow": 0,
+      "pageRequests": 1,
+      "oldestIndex": 150,
+      "hasMore": true,
+      "runningTurns": 1,
+      "failedTurns": 7,
+      "watermark": 2153,
+      "detail": {
+        "name": "progressStream:merged",
+        "mode": "merged",
+        "linesPerChunk": 1,
+        "cadence": {
+          "frames": 70,
+          "p50": 16.6,
+          "p95": 17.9,
+          "max": 20.1,
+          "janks": 0
+        },
+        "elapsedMs": 1198,
+        "tailChars": 5356,
+        "fedChunks": 150,
+        "progressWrites": 61,
+        "churn": {
+          "added": 99,
+          "removed": 3
+        },
+        "slots": 51,
+        "loadedTurns": 50,
+        "runningTurns": 1,
+        "failedTurns": 7,
+        "activeTurnKey": "t202",
+        "oldestIndex": 150,
+        "hasMore": true,
+        "watermark": 2153,
+        "retainedChars": 2081330,
+        "domNodes": 4316,
+        "mountedChars": 352762,
+        "turns": 50,
+        "placeholders": 1,
+        "toolHeads": 1,
+        "toolDetails": 1,
+        "timelines": 1,
+        "codeBlocks": 99,
+        "tables": 49,
+        "diffNodes": 0,
+        "scrollHeight": 39150,
+        "scrollTop": 38504,
+        "clientHeight": 646,
+        "distToBottom": 0,
+        "horizontalOverflow": 0,
+        "longTasks": [
+          109,
+          279,
+          62
+        ],
+        "pageRequests": 1
+      }
+    }
+  ],
+  "diagnostics": [
+    {
+      "key": "STRICT_READ_UNTRACKED|[STRICT_READ_UNTRACKED] Reactive value \"previewActiveSeed\" read directly in <SessionView> will not update. Move it into ",
+      "count": 1,
+      "line": "[STRICT_READ_UNTRACKED] Reactive value \"previewActiveSeed\" read directly in <SessionView> will not update. Move it into a tracking scope (JSX, a memo, or an effect's compute function).",
+      "stack": "console.<computed>@client:357 ← reportDiagnostic@dev-shared-BVhWeZgS.js?v=e5b3e634:624 ← warnStrictReadUntracked@dev-shared-BVhWeZgS.js?v=e5b3e634:645 ← read@dev-shared-BVhWeZgS.js?v=e5b3e634:4218 ← anon@stress.tsx?t=1791524957891:327 ← previewActiveTab@stress.tsx?t=1791524957891:327"
+    },
+    {
+      "key": "STRICT_READ_UNTRACKED|[STRICT_READ_UNTRACKED] Reactive value \"activeNavKey\" read directly in an effect callback will not update. Move it into ",
+      "count": 106,
+      "line": "[STRICT_READ_UNTRACKED] Reactive value \"activeNavKey\" read directly in an effect callback will not update. Move it into a tracking scope (JSX, a memo, or an effect's compute function).",
+      "stack": "console.<computed>@client:357 ← reportDiagnostic@dev-shared-BVhWeZgS.js?v=e5b3e634:624 ← warnStrictReadUntracked@dev-shared-BVhWeZgS.js?v=e5b3e634:645 ← read@dev-shared-BVhWeZgS.js?v=e5b3e634:4218 ← anon@SessionView.tsx?t=1791524957891:80 ← runEffect@solid.dev-Crw3eCdf.js?v=e5b3e634:1134"
+    },
+    {
+      "key": "HOT_SCOPE_TIME|[HOT_SCOPE_TIME] memo \"<For>\" spent 8.1ms of compute inside one 1000ms window (budget 8ms). Latest cause: \"content\" (der",
+      "count": 1,
+      "line": "[HOT_SCOPE_TIME] memo \"<For>\" spent 8.1ms of compute inside one 1000ms window (budget 8ms). Latest cause: \"content\" (derived)",
+      "stack": "console.<computed>@client:357 ← reportDiagnostic@dev-shared-BVhWeZgS.js?v=e5b3e634:624 ← checkHotTime@solid-js_attribution.js?v=20b6aa16:554 ← recordRerun@solid-js_attribution.js?v=20b6aa16:639 ← recomputeEnd@solid-js_attribution.js?v=20b6aa16:2226 ← recompute@dev-shared-BVhWeZgS.js?v=e5b3e634:3431"
+    }
+  ],
+  "perf": [],
+  "environment": {
+    "browser": {
+      "protocolVersion": "1.3",
+      "product": "Edg/154.0.4258.62",
+      "revision": "@49f7c5590dad654f33b924537ccc8be227c5a43a",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0",
+      "jsVersion": "15.4.11.9"
+    },
+    "gpuRequested": false,
+    "target": "http://127.0.0.1:5173/stress.html",
+    "recordedAt": "2026-10-09T05:49:18.677Z"
+  }
+}

@@ -81,7 +81,7 @@ describe("projectionActions:channel × kind 路由(频道真相见 replay.rs:151
     ["control interaction_expired", at("control", "interaction_expired"), ["approvals"]],
     // E1 回归锁:ControlDelta::ToolFinished 落 control(replay.rs:158-161 只把
     // ToolIntent 特判到 tool),以前记在 tool 频道 = 永远不刷新。
-    ["control tool_finished", at("control", "tool_finished"), ["approvals"]],
+    ["control tool_finished", at("control", "tool_finished"), ["approvals", "todos"]],
     // E2 回归锁:dashboard_updated 是 qaqh-domain 的 DomainEvent 词表,v2 起不上线
     // (ClientV2Payload = ProjectionPayload),匹配它等于死分支。
     ["control dashboard_updated 已下线", at("control", "dashboard_updated"), []],
@@ -102,9 +102,13 @@ describe("projectionActions:channel × kind 路由(频道真相见 replay.rs:151
     ["tool tool_finished 不在此频道", at("tool", "tool_finished"), []],
     ["tool tool_result 无需刷新", at("tool", "tool_result"), []],
     // conversation 频道 = ConversationDelta
-    ["conversation turn_finished", at("conversation", "turn_finished"), ["approvals"]],
-    ["conversation turn_interrupted", at("conversation", "turn_interrupted"), ["approvals"]],
+    ["conversation turn_finished", at("conversation", "turn_finished"), ["approvals", "todos"]],
+    ["conversation turn_interrupted", at("conversation", "turn_interrupted"), ["approvals", "todos"]],
     ["conversation compaction_applied", at("conversation", "compaction_applied"), ["compacted"]],
+    // 压缩三态:由 ringing/compact_mirror.rs 镜像进 conversation 频道,同占可替换槽。
+    ["conversation compact_started", at("conversation", "compact_started"), ["compact_started"]],
+    ["conversation compact_progress", at("conversation", "compact_progress"), ["compact_progress"]],
+    ["conversation compact_finished", at("conversation", "compact_finished"), ["compact_finished"]],
     ["conversation tool_finished 不在此频道", at("conversation", "tool_finished"), []],
     // 未知/缺失
     ["空频道", at("", "activity"), []],

@@ -3,6 +3,9 @@
 //! 架构:webview( Solid 渲染层)↔ 类型化 IPC ↔ Rust 宿主 ↔ `qaqh-client` ↔
 //! daemon(sidecar 或共享在跑实例)。daemon token 只存在于宿主进程内存。
 
+// 只在 debug 构建里挂载:`browser_preview::serve` 的唯一调用点也在
+// `#[cfg(debug_assertions)]` 下,release 保留整个模块只会报一堆 dead_code。
+#[cfg(debug_assertions)]
 mod browser_preview;
 mod challenge;
 mod commands;
@@ -92,6 +95,7 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(daemon::HostState::new())
         .invoke_handler(tauri::generate_handler![
             set_window_theme,
@@ -101,7 +105,11 @@ pub fn run() {
             commands::respond_approval,
             commands::send_message,
             commands::cancel_turn,
+            commands::compact_context,
             commands::create_session,
+            commands::pick_directory,
+            commands::pick_attachments,
+            commands::upload_attachment,
             commands::timeline_page,
             commands::session_bootstrap,
             commands::service_rpc,

@@ -6,12 +6,14 @@
 import type {
   Ack,
   ApprovalView,
+  AttachmentUploadWire,
   StreamHandlers,
   TimelinePageResponse,
   TimelineStatusWire,
   TransportBackend,
   TauriHostSurface,
 } from "./backend";
+import { attachmentRefsOf } from "./backend";
 
 type HostDiagnostics = {
   onIncompatible?: (details: Record<string, any>) => void;
@@ -85,12 +87,21 @@ export class BrowserPreviewTransport implements TransportBackend, TauriHostSurfa
   command(channel: "control" | "conversation", command: Record<string, unknown>, sessionId?: string): Promise<Ack> {
     const type = typeof command.type === "string" ? command.type : "";
     if (channel === "conversation" && type === "conversation_send_message") {
-      return invoke<Ack>("send_message", { seed: sessionId ?? this.requireSeed("send_message"), text: command.text ?? "" });
+      return invoke<Ack>("send_message", {
+        seed: sessionId ?? this.requireSeed("send_message"),
+        text: command.text ?? "",
+        attachments: attachmentRefsOf(command),
+      });
     }
     if (channel === "conversation" && type === "conversation_cancel") {
       return invoke<Ack>("cancel_turn", { seed: sessionId ?? this.requireSeed("cancel_turn") });
     }
-    if (channel === "control" && type === "session_create") return invoke<Ack>("create_session");
+    if (channel === "conversation" && type === "conversation_compact") {
+      return invoke<Ack>("compact_context", { seed: sessionId ?? this.requireSeed("compact_context") });
+    }
+    if (channel === "control" && type === "session_create") {
+      return invoke<Ack>("create_session", { cwd: typeof command.cwd === "string" && command.cwd.trim() !== "" ? command.cwd : null });
+    }
     return Promise.reject(new Error(`command not allowed in browser preview: ${channel}/${type || "(untyped)"}`));
   }
 
@@ -136,6 +147,20 @@ export class BrowserPreviewTransport implements TransportBackend, TauriHostSurfa
 
   sessionBootstrap(seed: string): Promise<unknown> {
     return invoke("session_bootstrap", { seed });
+  }
+
+  /** 预览桥固定回 null(无原生窗口),前端按「用户取消」处理。 */
+  pickDirectory(): Promise<string | null> {
+    return invoke<string | null>("pick_directory");
+  }
+
+  /** 预览桥固定回空数组(无原生窗口);上传路径因此不会被触发。 */
+  pickAttachments(): Promise<string[]> {
+    return invoke<string[]>("pick_attachments");
+  }
+
+  uploadAttachment(seed: string, path: string): Promise<AttachmentUploadWire> {
+    return invoke<AttachmentUploadWire>("upload_attachment", { seed, path });
   }
 
   timelineStatus(seed: string): Promise<TimelineStatusWire | null> {

@@ -35,6 +35,8 @@ function dto(overrides: Partial<ConfigDto> = {}): ConfigDto {
     activeProfile: "default",
     profiles: ["default"],
     complianceEnabled: false,
+    exec: { defaultShell: null },
+    sessionIdleUnloadSecs: 0,
     subagent: {
       model: "",
       baseUrl: "",
@@ -83,22 +85,29 @@ describe("buildPatch", () => {
     expect(isPatchEmpty(patch)).toBe(true);
   });
 
-  test("lang/theme/tokenizerPath 是反向语义:改成空串要显式发出(= 清除)", () => {
-    const patch = buildPatch(dto({ lang: "zh", theme: "dark", tokenizerPath: "/tmp/tok.json" }), dto());
-    expect(patch.lang).toBe("");
-    expect(patch.theme).toBe("");
+  test("tokenizerPath 是反向语义:改成空串要显式发出(= 清除)", () => {
+    const patch = buildPatch(dto({ tokenizerPath: "/tmp/tok.json" }), dto());
     expect(patch.tokenizerPath).toBe("");
   });
 
-  test("theme 从 null 到 dark 发出值;null 与空串在基线里等价,不算改动", () => {
-    expect(buildPatch(dto(), dto({ theme: "dark" })).theme).toBe("dark");
-    expect(buildPatch(dto({ theme: "" }), dto({ theme: null })).theme).toBeUndefined();
+  test("theme 不进写模型:主题是桌面壳本地偏好(localStorage)", () => {
+    // 后端仍保留读模型字段给其它客户端,但写模型刻意不含它——所以改主题
+    // 不该产生任何 patch,更不该触发 daemon 的 config.save 热载广播。
+    expect(buildPatch(dto(), dto({ theme: "dark" }))).toEqual({});
+    expect(buildPatch(dto({ theme: "dark" }), dto({ theme: null }))).toEqual({});
   });
 
-  test("布尔与数值只在变化时发,notificationsEnabled 翻回原值不算改动", () => {
-    const patch = buildPatch(dto(), dto({ notificationsEnabled: false, maxTokens: 32000 }));
-    expect(patch).toEqual({ notificationsEnabled: false, maxTokens: 32000 });
-    expect(buildPatch(dto(), dto({ notificationsEnabled: true })).notificationsEnabled).toBeUndefined();
+  test("exec 段:只在真改动时整段发出,空串也算将 defaultShell 清成自动探测", () => {
+    expect(buildPatch(dto(), dto()).exec).toBeUndefined();
+    expect(buildPatch(dto(), dto({ exec: { defaultShell: "pwsh" } })).exec).toEqual({ defaultShell: "pwsh" });
+    // 空串是合法值(回到平台自动探测),不是"未改动"。
+    expect(buildPatch(dto({ exec: { defaultShell: "pwsh" } }), dto()).exec).toEqual({ defaultShell: "" });
+  });
+
+  test("布尔与数值只在变化时发,complianceEnabled 翻回原值不算改动", () => {
+    const patch = buildPatch(dto(), dto({ complianceEnabled: true, maxTokens: 32000, sessionIdleUnloadSecs: 900 }));
+    expect(patch).toEqual({ complianceEnabled: true, maxTokens: 32000, sessionIdleUnloadSecs: 900 });
+    expect(buildPatch(dto(), dto({ complianceEnabled: false })).complianceEnabled).toBeUndefined();
   });
 
   test("子代理段:无变化整段缺席;有变化只装子段差异", () => {
@@ -143,8 +152,8 @@ describe("validatePatch", () => {
     expect(validatePatch({ maxTokens: 96000 })).toBeNull();
   });
 
-  test("wire 只认三条 BYOK 协议(没有 provider 目录可兜底)", () => {
-    for (const wire of ["openai", "responses", "anthropic"]) {
+  test("wire 只认四条 BYOK 协议(没有 provider 目录可兜底)", () => {
+    for (const wire of ["openai", "responses", "anthropic", "gemini"]) {
       expect(validatePatch({ wire })).toBeNull();
     }
     expect(validatePatch({ wire: "deepseek" })).toContain("wire");

@@ -1,4 +1,4 @@
-/** Bottom session capsule. Session status comes from the reducer/store facts. */
+/** Session switcher. Capacity follows its allocated region, not the outer window. */
 import { createEffect, createSignal, For, onSettled, Show, type Component } from "solid-js";
 import IconPlus from "~icons/lucide/plus";
 import IconX from "~icons/lucide/x";
@@ -40,10 +40,11 @@ export const TabBar: Component<{
   onCreate: () => void;
 }> = (props) => {
   let moreButton: HTMLButtonElement | undefined;
+  let capsule: HTMLDivElement | undefined;
   const tabRefs = new Map<string, HTMLButtonElement>();
   const menuSelectRefs = new Map<string, HTMLButtonElement>();
   const menuCloseRefs = new Map<string, HTMLButtonElement>();
-  const [viewportWidth, setViewportWidth] = createSignal(window.innerWidth);
+  const [availableWidth, setAvailableWidth] = createSignal(0);
   const [recentIds, setRecentIds] = createSignal<string[]>([]);
   const [menuOpen, setMenuOpen] = createSignal(false);
 
@@ -56,9 +57,16 @@ export const TabBar: Component<{
   );
 
   onSettled(() => {
-    const resize = (): void => { setViewportWidth(window.innerWidth); };
-    window.addEventListener("resize", resize);
-    return () => window.removeEventListener("resize", resize);
+    const region = capsule?.parentElement;
+    if (region == null) return;
+    const measure = (): void => {
+      const style = getComputedStyle(region);
+      setAvailableWidth(region.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(region);
+    return () => observer.disconnect();
   });
   onSettled(() => {
     const onPointerDown = (event: PointerEvent): void => {
@@ -83,8 +91,8 @@ export const TabBar: Component<{
   const visibleTabs = (): Tab[] => {
     const all = props.tabs;
     const active = all.find((tab) => tab.id === props.activeId);
-    if (viewportWidth() < 640) return active == null ? [] : [active];
-    const capsuleWidth = Math.min(760, viewportWidth() - 32);
+    if (availableWidth() < 400) return active == null ? [] : [active];
+    const capsuleWidth = Math.min(760, availableWidth());
     const capacity = Math.max(1, Math.min(4, Math.floor((capsuleWidth - 130) / 126)));
     const recency = recentIds();
     const recent = [...all].sort((a, b) => recency.indexOf(a.id) - recency.indexOf(b.id));
@@ -157,7 +165,7 @@ export const TabBar: Component<{
   };
 
   return (
-    <div class="session-capsule">
+    <div class="session-capsule" ref={capsule}>
       <div class="tab-scroll" role="tablist" aria-label="会话">
         <For each={visibleTabs()}>
           {(tab) => (

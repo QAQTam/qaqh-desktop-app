@@ -37,6 +37,7 @@ import {
   setBypassAck,
   setConfirmDiscard,
   setField,
+  setExec,
   setSubagent,
 } from "./store";
 import { Field, Section, Switch, TextInput } from "./controls";
@@ -50,6 +51,7 @@ const NAV = [
   { id: "section-profiles", label: "档案预设" },
   { id: "section-permission", label: "权限档位" },
   { id: "section-context", label: "上下文" },
+  { id: "section-runtime", label: "运行时" },
   { id: "section-appearance", label: "外观" },
   { id: "section-subagent", label: "子代理" },
   { id: "section-pairing", label: "设备配对" },
@@ -203,7 +205,7 @@ export const SettingsView: Component = () => {
                   </Section>
 
                   <Section id="section-context" title="上下文与压缩">
-                    <Field label="autoCompactThreshold" hint="0 = 关闭自动压缩;合法区间 [0, 1]。">
+                    <Field label={STR.settingsAutoCompact} hint={STR.settingsAutoCompactHint}>
                       <TextInput
                         value={String(config().autoCompactThreshold)}
                         onInput={(value) => {
@@ -212,7 +214,7 @@ export const SettingsView: Component = () => {
                         }}
                       />
                     </Field>
-                    <Field label="tokenizerPath" hint="空 = 未设置(内置分词)。" wide>
+                    <Field label={STR.settingsTokenizer} hint={STR.settingsTokenizerHint} wide>
                       <TextInput
                         value={config().tokenizerPath ?? ""}
                         onInput={(value) => setField("tokenizerPath", value)}
@@ -220,14 +222,34 @@ export const SettingsView: Component = () => {
                       />
                     </Field>
                     <Switch
-                      label="complianceEnabled"
+                      label={STR.settingsCompliance}
+                      hint={STR.settingsComplianceHint}
                       checked={config().complianceEnabled}
                       onToggle={(value) => setField("complianceEnabled", value)}
                     />
                   </Section>
 
+                  <Section id="section-runtime" title="运行时">
+                    <Field label={STR.settingsDefaultShell} hint={STR.settingsDefaultShellHint}>
+                      <TextInput
+                        value={config().exec.defaultShell ?? ""}
+                        onInput={(value) => setExec("defaultShell", value)}
+                        placeholder="auto"
+                      />
+                    </Field>
+                    <Field label={STR.settingsIdleUnload} hint={STR.settingsIdleUnloadHint}>
+                      <TextInput
+                        value={String(config().sessionIdleUnloadSecs)}
+                        onInput={(value) => {
+                          const parsed = toInt(value);
+                          if (parsed != null) setField("sessionIdleUnloadSecs", parsed);
+                        }}
+                      />
+                    </Field>
+                  </Section>
+
                   <Section id="section-appearance" title="外观" desc={STR.settingsThemeNote}>
-                    <Field label="theme">
+                    <Field label={STR.settingsTheme}>
                       <select
                         class="field-input"
                         value={config().theme ?? ""}
@@ -246,35 +268,24 @@ export const SettingsView: Component = () => {
                         <option value="solid">Solid</option>
                       </select>
                     </Field>
-                    <Field label="lang" hint="空 = 跟随系统;后端不校验取值。">
-                      <TextInput value={config().lang ?? ""} onInput={(value) => setField("lang", value)} placeholder="zh" />
-                    </Field>
-                    <Field label="fontFamily" hint="空 = 系统默认字体。" wide>
-                      <TextInput value={config().fontFamily} onInput={(value) => setField("fontFamily", value)} />
-                    </Field>
                     <p class="settings-section-desc">
                       界面内嵌 HarmonyOS Sans SC 与 Cascadia Code；字体许可与来源见{" "}
                       <a href="/fonts/THIRD-PARTY-NOTICES.txt">第三方字体说明</a>。
                     </p>
-                    <Switch
-                      label="notificationsEnabled"
-                      checked={config().notificationsEnabled}
-                      onToggle={(value) => setField("notificationsEnabled", value)}
-                    />
                   </Section>
 
                   <Section
                     id="section-subagent"
                     title="子代理"
-                    desc="留空 = 保持现值;数值字段受后端值域校验(maxTokens/timeoutSecs > 0,maxDepth 1..=16)。"
+                    desc={STR.settingsSubagentDesc}
                   >
-                    <Field label="model">
+                    <Field label={STR.settingsSubagentModel} hint={STR.settingsSubagentNewOnlyHint}>
                       <TextInput value={config().subagent.model} onInput={(value) => setSubagent("model", value)} />
                     </Field>
-                    <Field label="baseUrl">
+                    <Field label={STR.settingsSubagentBaseUrl} hint={STR.settingsSubagentNewOnlyHint}>
                       <TextInput value={config().subagent.baseUrl} onInput={(value) => setSubagent("baseUrl", value)} />
                     </Field>
-                    <Field label="apiKey" hint={`当前:${config().subagent.apiKeySet ? "已配置" : "未配置"}`}>
+                    <Field label={STR.settingsSubagentApiKey} hint={STR.settingsSubagentApiKeyHint(config().subagent.apiKeySet)}>
                       <TextInput
                         type="password"
                         value={subKey()}
@@ -285,7 +296,7 @@ export const SettingsView: Component = () => {
                         }}
                       />
                     </Field>
-                    <Field label="maxTokens">
+                    <Field label={STR.settingsSubagentMaxTokens} hint={STR.settingsSubagentNewOnlyHint}>
                       <TextInput
                         value={String(config().subagent.maxTokens)}
                         onInput={(value) => {
@@ -294,7 +305,7 @@ export const SettingsView: Component = () => {
                         }}
                       />
                     </Field>
-                    <Field label="timeoutSecs">
+                    <Field label={STR.settingsSubagentTimeout} hint={STR.settingsSubagentNewOnlyHint}>
                       <TextInput
                         value={String(config().subagent.timeoutSecs)}
                         onInput={(value) => {
@@ -303,7 +314,7 @@ export const SettingsView: Component = () => {
                         }}
                       />
                     </Field>
-                    <Field label="maxDepth">
+                    <Field label={STR.settingsSubagentMaxDepth} hint={STR.settingsSubagentMaxDepthHint}>
                       <TextInput
                         value={String(config().subagent.maxDepth)}
                         onInput={(value) => {
@@ -312,7 +323,7 @@ export const SettingsView: Component = () => {
                         }}
                       />
                     </Field>
-                    <Field label="messageInFlightPerPair" hint="0 = 不限">
+                    <Field label={STR.settingsSubagentInFlight} hint={STR.settingsSubagentInFlightHint}>
                       <TextInput
                         value={String(config().subagent.messageInFlightPerPair)}
                         onInput={(value) => {
@@ -321,7 +332,7 @@ export const SettingsView: Component = () => {
                         }}
                       />
                     </Field>
-                    <Field label="messageOutboundPerSender" hint="0 = 不限">
+                    <Field label={STR.settingsSubagentOutbound} hint={STR.settingsSubagentOutboundHint}>
                       <TextInput
                         value={String(config().subagent.messageOutboundPerSender)}
                         onInput={(value) => {
@@ -330,7 +341,7 @@ export const SettingsView: Component = () => {
                         }}
                       />
                     </Field>
-                    <Field label="defaultTools" hint="逗号分隔;留空 = 全部工具可用。" wide>
+                    <Field label={STR.settingsSubagentTools} hint={STR.settingsSubagentToolsHint} wide>
                       <TextInput
                         value={toolsInput()}
                         placeholder="read, write"

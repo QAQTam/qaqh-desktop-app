@@ -96,7 +96,8 @@ function ensureTool(turn: Turn, blockId: string, seq: number, tool: TimelineTool
     // metrics 挂在 display 上(TimelineTool 顶层没有 metrics 槽)。
     elapsedMs: tool?.display?.metrics?.elapsed_ms,
     permission: normalizePermission(tool?.permission),
-    progressTruncated: tool?.progress_truncated === true,
+    progressTail: tool?.progress?.slice(-PROGRESS_WINDOW),
+    progressTruncated: tool?.progress_truncated === true || (tool?.progress?.length ?? 0) > PROGRESS_WINDOW,
   };
   if (step.status === "running" || step.status === "pending") step.startedAt = now();
   insertBySeq(turn, step);
@@ -181,6 +182,9 @@ export function outputFromDisplay(display: ToolDisplay | undefined, legacy: Tool
   const body = display?.body;
   if (!body) return legacy;
   switch (body.kind) {
+    case "none":
+      // 显式无展示内容，不是缺失投影；不能复活 legacy 原始输出。
+      return undefined;
     case "text":
       return { text: body.text, truncated: body.truncated };
     case "diff":
@@ -291,6 +295,10 @@ export function applyEntry(draft: SessionState, entry: TimelineEntryWire): Sessi
       step.display = rawTool.display ?? step.display;
       step.elapsedMs = rawTool.display?.metrics?.elapsed_ms ?? step.elapsedMs;
       step.permission = normalizePermission(rawTool.permission) ?? step.permission;
+      if (rawTool.progress != null) {
+        step.progressTail = rawTool.progress.slice(-PROGRESS_WINDOW);
+        step.progressTruncated = rawTool.progress_truncated === true || rawTool.progress.length > PROGRESS_WINDOW;
+      }
       const nextState = normalizeToolStatus(rawTool.state);
       if (nextState !== step.status) {
         step.status = nextState;
@@ -301,9 +309,12 @@ export function applyEntry(draft: SessionState, entry: TimelineEntryWire): Sessi
           // 终态时刻优先用后端发射时盖的 epoch ms(Tauri 侧 daemon 与 webview 同机,
           // 比「客户端收到」准);归档 rebuild 不带该槽 → 回退本地采样。
           step.endedAt = rawTool.completed_at_ms ?? ts;
-          step.output = deriveOutput(rawTool, step.display);
-          if (nextState === "error") step.error = failureText(rawTool.failure, "");
         }
+      }
+      if (isTerminalToolStatus(nextState)) {
+        // 终态重投影/重刷新也替换旧输出，不能只在状态第一次变化时更新。
+        step.output = deriveOutput(rawTool, step.display);
+        if (nextState === "error") step.error = failureText(rawTool.failure, "");
       } else if (!step.output) {
         // 运行中也可能先到 display/output 快照。
         const output = deriveOutput(rawTool, step.display);
@@ -318,7 +329,7 @@ export function applyEntry(draft: SessionState, entry: TimelineEntryWire): Sessi
       if (!chunk) break;
       const next = (step.progressTail ?? "") + chunk;
       step.progressTail = next.length > PROGRESS_WINDOW ? next.slice(-PROGRESS_WINDOW) : next;
-      step.progressTruncated = step.progressTruncated || event.truncated === true;
+      step.progressTruncated = step.progressTruncated || event.truncated === true || next.length > PROGRESS_WINDOW;
       break;
     }
     case "tool_estimated": {

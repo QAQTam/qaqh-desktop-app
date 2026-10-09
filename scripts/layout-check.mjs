@@ -88,9 +88,9 @@ try {
     await send("Page.navigate", { url: base });
     await waitFor("Boolean(document.querySelector('#app.tauri-shell .messages-empty')) && document.fonts.status === 'loaded'");
     let g = await geometry();
-    assert.equal(g.top, null, "Native messages view should not reserve a visible titlebar");
-    assert.equal(g.workspace.top, 0, "Messages must use all available native height");
-    assert.ok(g.workspace.height > height - 70, "Messages must fill the shell");
+    assert.ok(g.top != null, "Native messages view must render the shared titlebar");
+    assert.ok(g.workspace.top >= g.top.bottom, "Messages must start below the titlebar");
+    assert.ok(g.workspace.height > height - 110, "Messages must fill the shell below the titlebar");
 
     // Render actual Markdown inside a paint-contained turn in the actual message scroller.
     await evaluate(`(async () => {
@@ -106,8 +106,36 @@ try {
       await document.fonts.ready;
     })()`);
     const typography = await evaluate("(() => { const s = getComputedStyle(document.querySelector('.md-host')); return { size: s.fontSize, height: s.lineHeight }; })()");
-    assert.equal(typography.size, "14px", "Message body must use the requested 14px font");
-    assert.equal(typography.height, "22.4px", "Message body must use 1.6 line spacing");
+    assert.equal(typography.size, "16px", "Markdown body must use the Primer 16px baseline");
+    assert.equal(typography.height, "24px", "Markdown body must use the Primer 1.5 line spacing");
+    const matrix = await evaluate(`(async () => {
+      const { renderMarkdownHtml } = await import('/src/markdown/render.ts');
+      const tick = String.fromCharCode(96);
+      const source = ['# H1', '## H2', '### H3', '#### H4', '##### H5', '###### H6',
+        '正文 **强调** ' + tick + 'inline' + tick, '    const n = 1;', '| A | B |\\n| --- | --- |\\n| 一 | 二 |'].join('\\n\\n');
+      const results = [];
+      for (const kind of ['turn-intermediate', 'turn-answer']) {
+        const wrapper = document.createElement('div'); wrapper.className = kind;
+        const probe = document.createElement('div'); probe.className = 'md-host'; probe.innerHTML = renderMarkdownHtml(source);
+        wrapper.append(probe); document.querySelector('#messages').append(wrapper);
+        const result = {};
+        for (const selector of ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'p code', 'pre', 'pre code', 'table', 'strong']) {
+          const style = getComputedStyle(probe.querySelector(selector));
+          result[selector] = { size: parseFloat(style.fontSize), leading: parseFloat(style.lineHeight), weight: style.fontWeight };
+        }
+        results.push(result); wrapper.remove();
+      }
+      return results;
+    })()`);
+    assert.deepEqual(matrix[0], matrix[1], "Intermediate and final Markdown must have identical typography");
+    const expected = { h1: [32, 40], h2: [24, 30], h3: [20, 25], h4: [16, 20], h5: [14, 17.5], h6: [13.6, 17],
+      p: [16, 24], 'p code': [13.6, 20.4], pre: [13.6, 19.72], 'pre code': [13.6, 19.72], table: [16, 24] };
+    for (const [selector, [size, leading]] of Object.entries(expected)) {
+      assert.ok(Math.abs(matrix[0][selector].size - size) < .05, `${selector} must match Primer font size`);
+      assert.ok(Math.abs(matrix[0][selector].leading - leading) < .05, `${selector} must match Primer line height`);
+    }
+    assert.equal(matrix[0].strong.weight, '600', "Emphasis must not alter the font size");
+    assert.equal(await evaluate("document.querySelector('.session-tabs-region')"), null, "Goal capsule must remain unrendered");
     const markers = await evaluate(`(() => {
       const canvas = document.createElement('canvas');
       const context = canvas.getContext('2d');
@@ -145,7 +173,8 @@ try {
     await capture(`settings-${width}`);
     await evaluate("document.querySelector('.titlebar-back').click()");
     await waitFor("Boolean(document.querySelector('.workspace-messages'))");
-    assert.equal((await geometry()).workspace.top, 0, "Returning to messages must restore the full-height native layout");
+    const restored = await geometry();
+    assert.ok(restored.top != null && restored.workspace.top >= restored.top.bottom, "Returning to messages must keep the shared titlebar");
     console.log(`PASS native shell ${width}x${height}: messages, list markers, tools, settings, back navigation`);
   }
 
@@ -156,7 +185,7 @@ try {
   await evaluate(`(() => {
     const internals = window.__TAURI_INTERNALS__;
     const original = internals.invoke.bind(internals);
-    const probe = window.__composerProbe = { sessions: [], creates: 0, sends: [], failCreate: true, failSend: false, deferSend: false, release: null };
+    const probe = window.__composerProbe = { sessions: [], creates: 0, sends: [], failCreate: true, failSend: false, deferSend: false, release: null, workspaces: [], workspaceCalls: [] };
     const callbacks = new Map();
     const listeners = new Map();
     let listenerId = 0;
@@ -194,6 +223,16 @@ try {
         if (probe.deferSend) await new Promise(resolve => { probe.release = resolve; });
         return { status: 'accepted' };
       }
+      if (cmd === 'service_rpc') {
+        // 工作区名录 + 两个组织写面(归属只活在桩里,断言看调用参数与分组结果)。
+        if (args.method === 'workspace.list') return structuredClone(probe.workspaces);
+        if (args.method === 'workspace.move_session' || args.method === 'workspace.detach') {
+          probe.workspaceCalls.push({ method: args.method, params: args.params });
+          const target = probe.sessions.find((session) => session.session_id === args.params.session_id);
+          if (target != null) target.workspace_id = args.method === 'workspace.detach' ? null : args.params.workspace_id;
+          return null;
+        }
+      }
       return original(cmd, args);
     };
   })()`);
@@ -205,14 +244,14 @@ try {
   const clickSend = () => evaluate("document.querySelector('#composer .send').click()");
   const key = (key, options = "") => evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, bubbles: true, ${options} }))`);
 
-  assert.equal(await evaluate("document.querySelector('.tab-add').disabled"), false, "Empty shell must expose an enabled create action");
+  assert.equal(await evaluate("document.querySelector('.message-create').disabled"), false, "Session list must expose an enabled create action");
   await capture("composer-empty-shell");
   await typeDraft("你好，先写草稿再新建对话");
   await evaluate("document.querySelector('.messages-empty-copy button').click()");
   await waitFor("Boolean(document.querySelector('.connection-notice')) && !document.querySelector('.messages-empty-copy button').disabled");
   assert.equal(await evaluate("document.querySelector('#composer textarea').value"), "你好，先写草稿再新建对话", "Failed creation must preserve the draft");
   await evaluate("window.__composerProbe.failCreate = false; document.querySelector('.messages-empty-copy button').click()");
-  await waitFor("Boolean(document.querySelector('.tab.active')) && !document.querySelector('#composer .send').disabled");
+  await waitFor("Boolean(document.querySelector('#panel-tab-composer-2')) && !document.querySelector('#composer .send').disabled");
   assert.equal(await evaluate("document.querySelector('#composer textarea').value"), "你好，先写草稿再新建对话", "New session must inherit the empty-shell draft");
   await clickSend();
   await waitFor("document.querySelector('#composer textarea').value === '' && document.querySelector('#composer .send').disabled");
@@ -244,7 +283,7 @@ try {
   assert.equal(await evaluate("document.querySelector('#composer textarea').value"), "等待发送确认时写的下一条草稿", "Rejected send must preserve its draft");
   await evaluate("window.__composerProbe.failSend = false");
   await key("t", "ctrlKey: true");
-  await waitFor("document.querySelectorAll('.tab').length === 2 && window.__composerProbe.creates === 3");
+  await waitFor("Boolean(document.querySelector('#panel-tab-composer-3')) && window.__composerProbe.creates === 3");
   await typeDraft("第二个会话的草稿");
   await waitFor("!document.querySelector('#composer .send').disabled");
   await clickSend();
@@ -252,13 +291,61 @@ try {
   await key("Tab", "ctrlKey: true, shiftKey: true");
   await waitFor("document.querySelector('#composer textarea').value === '等待发送确认时写的下一条草稿'");
   await key("w", "ctrlKey: true");
-  await waitFor("document.querySelectorAll('.tab').length === 1");
+  await waitFor("Boolean(document.querySelector('#panel-tab-composer-3')) && document.querySelector('#composer textarea').value === ''");
   await key("w", "ctrlKey: true");
   await waitFor("Boolean(document.querySelector('.messages-empty-copy button'))");
   await key("t", "ctrlKey: true");
-  await waitFor("Boolean(document.querySelector('.tab.active')) && window.__composerProbe.creates === 4");
+  await waitFor("Boolean(document.querySelector('#panel-tab-composer-4')) && window.__composerProbe.creates === 4");
   await capture("composer-created-session");
   console.log("PASS composer: empty-session create/retry, reactive drafts, successful clear, whitespace/IME guards, duplicate-send prevention, late/rejected acknowledgements, tab isolation, Ctrl+T with no tabs");
+
+  // 侧栏工作区归属:会话行的「…」菜单 → workspace.move_session / workspace.detach。
+  // 只断言「发了什么参数 + 分组怎么变」;seed 由宿主注入与否是 Rust 侧的事。
+  await evaluate(`(() => {
+    const probe = window.__composerProbe;
+    probe.workspaces = [
+      { id: 'w1', title: '后端', path: 'E:\\\\qaqh-backend', order: 0 },
+      { id: 'w2', title: '桌面壳', path: 'E:\\\\qaqh-desktop-app', order: 1 },
+    ];
+    probe.sessions[0].workspace_id = 'w1';
+    window.dispatchEvent(new Event('focus'));
+  })()`);
+  const groupTitles = () => evaluate("[...document.querySelectorAll('.message-workspace-title')].map((el) => el.textContent)");
+  const awaitGroup = (title) => waitFor(`[...document.querySelectorAll('.message-workspace-title')].map((el) => el.textContent).includes(${JSON.stringify(title)})`);
+  const rowMenu = () => evaluate("[...document.querySelectorAll('.message-session-menu button')].map((el) => ({ text: el.innerText, checked: el.getAttribute('aria-checked') }))");
+  const openRowMenu = async () => {
+    await evaluate("document.querySelector('.message-session-more').click()");
+    await waitFor("Boolean(document.querySelector('.message-session-menu'))");
+  };
+  await awaitGroup('后端');
+  const seed = await evaluate("window.__composerProbe.sessions[0].session_id");
+  const rows = await evaluate("document.querySelectorAll('.message-session-item').length");
+  assert.ok(rows >= 2, "Fixture needs several sessions to exercise grouping");
+  assert.equal(await evaluate("document.querySelectorAll('.message-session-more').length"), rows, "Every session row must expose a workspace action once a workspace exists");
+
+  await openRowMenu();
+  const menuItems = await rowMenu();
+  const checkedItems = menuItems.filter((item) => item.checked === 'true');
+  assert.equal(checkedItems.length, 1, `Exactly one workspace must read as current, got ${JSON.stringify(menuItems)}`);
+  assert.ok(checkedItems[0].text.includes('后端'), "Current workspace must be checked");
+  await capture("sidebar-workspace-menu");
+
+  await evaluate("[...document.querySelectorAll('.message-session-menu button')].find((el) => el.innerText.includes('桌面壳')).click()");
+  await waitFor("window.__composerProbe.workspaceCalls.length === 1");
+  assert.deepEqual(await evaluate("window.__composerProbe.workspaceCalls[0]"), { method: "workspace.move_session", params: { session_id: seed, workspace_id: "w2" } });
+  assert.equal(await evaluate("document.querySelector('.message-session-menu')"), null, "Choosing a workspace must close the row menu");
+  await awaitGroup('桌面壳');
+
+  await openRowMenu();
+  await evaluate("[...document.querySelectorAll('.message-session-menu button')].find((el) => el.innerText.includes('移出工作区')).click()");
+  await waitFor("window.__composerProbe.workspaceCalls.length === 2");
+  assert.deepEqual(await evaluate("window.__composerProbe.workspaceCalls[1]"), { method: "workspace.detach", params: { session_id: seed } });
+  await awaitGroup('未分组');
+  await openRowMenu();
+  assert.equal((await rowMenu()).some((item) => item.text.includes('移出工作区')), false, "Ungrouped session must not offer detach");
+  await evaluate("document.querySelector('.message-session-more').click()");
+  assert.deepEqual(await groupTitles(), ['未分组'], "A workspace left with no session must not render an empty group");
+  console.log("PASS workspace: row menu moves a session between workspaces, detaches it to 未分组, and hides detach once ungrouped");
 
   // Reuse the existing message timeline: exactly one four-line thinking scroller,
   // with full history, and no second rendering beside the composer.
@@ -275,7 +362,7 @@ try {
   assert.equal(await evaluate("document.querySelector('.thinking-chain')"), null, "Bottom thinking strip must be removed");
   assert.equal(await evaluate("document.querySelectorAll('.thinking-full').length"), 1, "The existing timeline must render each reasoning block once");
   const reasoningBounds = () => evaluate(`(() => {
-    const selectors = ['.workspace-content', '.session-tabs-region', '.session-column', '#session', '#messages', '#composer', '.thinking-full'];
+    const selectors = ['.workspace-content', '.session-column', '#session', '#messages', '#composer', '.thinking-full'];
     const result = {};
     for (const selector of selectors) {
       const r = document.querySelector(selector).getBoundingClientRect();
@@ -300,7 +387,7 @@ try {
       await waitFor(`document.querySelector('.thinking-full')?.textContent === ${JSON.stringify(text)}`);
       await waitFor("(() => { const el = document.querySelector('.thinking-full'); return el.scrollHeight - el.scrollTop - el.clientHeight <= 2; })()");
       const after = await reasoningBounds();
-      for (const selector of ['.session-tabs-region', '.session-column', '#session', '#messages', '#composer', '.thinking-full']) {
+      for (const selector of ['.session-column', '#session', '#messages', '#composer', '.thinking-full']) {
         assert.ok(Math.abs(after[selector].left - before[selector].left) < 1, `Long ${name} reasoning must not move ${selector}: ${JSON.stringify({ before: before[selector], after: after[selector] })}`);
         assert.ok(Math.abs(after[selector].width - before[selector].width) < 1, `Long ${name} reasoning must not expand ${selector}: ${JSON.stringify({ before: before[selector], after: after[selector] })}`);
         assert.ok(after[selector].right <= after['.workspace-content'].right + 1, `${selector} must remain inside the workspace`);

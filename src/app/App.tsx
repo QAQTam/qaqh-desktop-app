@@ -15,7 +15,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import IconArrowLeft from "~icons/lucide/arrow-left";
 import IconX from "~icons/lucide/x";
-import { TabBar } from "../tabs/TabBar";
+// TabBar is reserved for the future Goal capsule; session navigation lives in MessageSidebar.
 import { MessageSidebar } from "./MessageSidebar";
 import { GlobalNav, type GlobalSection } from "./GlobalNav";
 import { ToolsPage } from "./ToolsPage";
@@ -25,20 +25,27 @@ import {
   activateTab,
   boot as bootTabs,
   bootError,
+  chooseNewSessionFolder,
   closeTab,
   createSession,
   creating,
+  detachSessionFromWorkspace,
   draftOf,
   focusToken,
+  moveSessionToWorkspace,
+  newSessionCwd,
   openSession,
   pollSessions,
   setBootError,
   setDraftOf,
+  setNewSessionCwd,
   sessionCatalog,
   tabs,
   type Tab,
+  workspaceCatalog,
 } from "../tabs/store";
 import { SessionView } from "../session/SessionView";
+import { WorkspacePanel } from "../workspace/WorkspacePanel";
 import { Composer, type SendBlockReason } from "../composer/Composer";
 import { ApprovalStack } from "../approval/ApprovalCards";
 import { SettingsView } from "../settings/SettingsView";
@@ -49,7 +56,7 @@ import {
 } from "../settings/store";
 import { STR } from "../lib/strings";
 import { isTauriRuntime, listenHostDiagnostics, openExternalUrl, transport, tauriHost } from "../lib/transport";
-import { applyConfigTheme } from "../lib/theme";
+import { applyTheme, storedTheme } from "../lib/theme";
 import { toast, ToastHost } from "../ui/toast";
 import "../styles/app.css";
 
@@ -106,11 +113,17 @@ const App: Component = () => {
     };
     window.addEventListener("focus", onFocus);
 
-    // 启动即取一次主题配置(失败静默:跟随系统),避免「设置过深色但重开是浅色」。
-    void transport
-      .rpc<{ theme: string | null }>("config.load")
-      .then((config) => applyConfigTheme(config.theme, false))
-      .catch(() => {});
+    // 主题:本地偏好优先(即时生效,不闪);从未设置过才取一次 daemon 现值
+    // 做迁移——老用户的主题存在 daemon 配置里,不能因为搬迁丢掉。
+    const stored = storedTheme();
+    if (stored != null) {
+      applyTheme(stored, false);
+    } else {
+      void transport
+        .rpc<{ theme: string | null }>("config.load")
+        .then((config) => applyTheme(config.theme, false))
+        .catch(() => {});
+    }
 
     // Tauri:外链一律走系统浏览器;宿主诊断事件(兼容性失败/宿主错误)。
     let unlistenHost: (() => void) | null = null;
@@ -191,7 +204,7 @@ const App: Component = () => {
         const id = activeId();
         if (id != null) {
           void closeTab(id);
-          requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".tab.active")?.focus());
+          requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".message-session-item.active")?.focus());
         }
       } else if (event.key === "Tab") {
         event.preventDefault();
@@ -307,19 +320,27 @@ const App: Component = () => {
     }
   };
 
+  /** 输入区的工作区选择:两处 Composer(空态页 / 会话页)共用同一份选择。 */
+  const workspacePicker = {
+    workspaces: () => workspaceCatalog(),
+    workspacePath: () => newSessionCwd(),
+    onWorkspace: (path: string | null): void => { setNewSessionCwd(path); },
+    onBrowseWorkspace: (): void => { void chooseNewSessionFolder(); },
+  };
+
   return (
-    <div id="app" class={{ "tauri-shell": inTauri, "has-topbar": !inTauri || settingsOpen() || section() !== "messages" }}>
-      <Show when={!inTauri || settingsOpen() || section() !== "messages"}>
-        <header id="top">
-          <Show when={settingsOpen() || section() !== "messages"}>
-            <button type="button" class="titlebar-back" aria-label="返回消息" title="返回消息" onClick={() => navigateSection("messages")}>
-              <IconArrowLeft />
-            </button>
-          </Show>
-          <Show when={!inTauri}><div class="titlebar-brand">QAQH</div></Show>
-          <div class="titlebar-session-title">{settingsOpen() ? "设置" : section() === "tools" ? "工具" : "消息"}</div>
-        </header>
-      </Show>
+    <div id="app" class={{ "tauri-shell": inTauri }}>
+      {/* 三页(消息/工具/设置)共用同一条 40px 标题栏:返回按钮只在非根页面出现。
+          消息页此前在原生壳里整行塌掉,切页会让左侧导航与内容整体跳 40px。 */}
+      <header id="top">
+        <Show when={settingsOpen() || section() !== "messages"}>
+          <button type="button" class="titlebar-back" aria-label="返回消息" title="返回消息" onClick={() => navigateSection("messages")}>
+            <IconArrowLeft />
+          </button>
+        </Show>
+        <Show when={!inTauri}><div class="titlebar-brand">QAQH</div></Show>
+        <div class="titlebar-session-title">{settingsOpen() ? "设置" : section() === "tools" ? "工具" : "消息"}</div>
+      </header>
       <GlobalNav
         active={settingsOpen() ? "settings" : section()}
         onNavigate={navigateSection}
@@ -332,9 +353,15 @@ const App: Component = () => {
             sessions={sessionCatalog()}
             activeSeed={activeTab()?.seed ?? null}
             onSelect={(seed) => { setSection("messages"); void openSession(seed); }}
+            onCreate={() => { void createSession(); }}
+            creating={creating()}
+            canCreate={hostIncompatible() == null}
+            onMove={(seed, workspaceId) => { void moveSessionToWorkspace(seed, workspaceId); }}
+            onDetach={(seed) => { void detachSessionFromWorkspace(seed); }}
           />
         </Show>
         <div class="workspace-content">
+        {/* Reserved for Goal. Do not render the old session capsule for now.
         <div class="session-tabs-region">
         <TabBar
           tabs={tabs()}
@@ -353,6 +380,7 @@ const App: Component = () => {
           }}
         />
         </div>
+        */}
         <main id="main">
           <Show when={hostIncompatible() != null}>
             <div class="host-banner" role="alert">
@@ -396,6 +424,7 @@ const App: Component = () => {
                   focusToken={0}
                   autoFocus={false}
                   placeholder={STR.emptyComposer}
+                  {...workspacePicker}
                 />
               </div>
             }>
@@ -406,8 +435,8 @@ const App: Component = () => {
                   <div
                     class="session-column"
                     id={`panel-${tab.id}`}
-                    role="tabpanel"
-                    aria-labelledby={`tab-${tab.id}`}
+                    role="region"
+                    aria-label={tab.store.title[0]() ?? STR.newTab}
                   >
                     <SessionView tab={tab} />
                     <Show when={tab.store.pending[0]().length > 0}>
@@ -424,23 +453,22 @@ const App: Component = () => {
                       onSend={(text) => send(tab, text)}
                       onStop={() => void tab.store.cancelTurn().catch(() => {})}
                       focusToken={focusToken()}
+                      metrics={() => tab.store.composerMetrics[0]()}
+                      onCompact={() => void tab.store.compactContext().catch(() => {})}
+                      compactPhase={() => tab.store.compact[0]().phase}
+                      onPickAttachments={() => void tab.store.addAttachments().catch((error) => {
+                        toast(`${STR.attachmentFailed}：${String(error instanceof Error ? error.message : error)}`, "err");
+                      })}
+                      attachments={() => tab.store.pendingAttachments[0]()}
+                      onRemoveAttachment={(id) => tab.store.removeAttachment(id)}
+                      {...workspacePicker}
                     />
+                    <WorkspacePanel store={tab.store} />
                   </div>
                 </Show>
               )}
             </For>
             </Show>
-          </Show>
-          {/* The session switcher remains available on the Tools page, so keep its
-              selected tab's controlled panel in the accessibility tree contract. */}
-          <Show when={section() === "tools" && activeTab() != null}>
-            <div
-              class="session-column"
-              id={`panel-${activeTab()!.id}`}
-              role="tabpanel"
-              aria-labelledby={`tab-${activeTab()!.id}`}
-              hidden
-            />
           </Show>
           <Show when={section() === "tools"}><ToolsPage /></Show>
         </main>

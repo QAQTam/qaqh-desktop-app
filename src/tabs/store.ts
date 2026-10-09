@@ -10,7 +10,9 @@
  */
 import { createSignal, createStore } from "solid-js";
 import { transport } from "../lib/transport";
+import { STR } from "../lib/strings";
 import { SessionStore } from "../session/store";
+import { toast } from "../ui/toast";
 
 export interface Tab {
   id: string;
@@ -45,13 +47,21 @@ export type SidebarSession = {
 export type SidebarWorkspace = { id: string; title: string; path: string; order: number; missing_dir?: boolean };
 const [sessionCatalog, setSessionCatalog] = createSignal<SidebarSession[]>([]);
 const [workspaceCatalog, setWorkspaceCatalog] = createSignal<SidebarWorkspace[]>([]);
+/**
+ * 新建会话的目标工作区(`cwd`),null = 未指定 → daemon 默认(未分组)。
+ *
+ * 只作用于**新建**:已开会话的 cwd 钉在 `SessionMeta.cwd` 上,改它要走
+ * `workspace.set`,是另一条路径。选择保持粘性——建完不重置,输入区一直显示
+ * 当前目标,免得连开几个会话时猜「这次会落哪」。
+ */
+const [newSessionCwd, setNewSessionCwd] = createSignal<string | null>(null);
 const [drafts, setDrafts] = createStore<Record<string, string>>({});
 /** 焦点令牌:切标签/新建时 +1,Composer 响应后聚焦。 */
 const [focusToken, setFocusToken] = createSignal(0);
 /** Serialize singleton-host attach calls; rapid tab changes must settle on the latest tab. */
 let activationQueue: Promise<void> = Promise.resolve();
 
-export { tabs, activeId, bootError, creating, focusToken, sessionCatalog, workspaceCatalog };
+export { tabs, activeId, bootError, creating, focusToken, sessionCatalog, workspaceCatalog, newSessionCwd, setNewSessionCwd };
 export const setBootError = (value: string | null): void => {
   setBootErrorSignal(value);
 };
@@ -68,6 +78,11 @@ function addTab(seed: string): Tab {
   // 会话元数据变更接给标签层:store 只有已 attach 的那条流,所以这里只管活动
   // 会话的即时刷新,后台会话仍靠 pollSessions 的列表重拉兜底。
   tab.store.onSessionsChanged = () => { void pollSessions(); };
+  tab.store.onSessionTitleChanged = (title) => {
+    setSessionCatalog((list) => list.map((item) =>
+      String(item.session_id) === seed ? { ...item, title } : item,
+    ));
+  };
   tab.store.onSessionDeleted = () => { void dropSession(seed); };
   setTabs((list) => [...list, tab]);
   return tab;
@@ -119,13 +134,24 @@ export async function closeTab(tabId: string): Promise<void> {
   }
 }
 
-/** 新建会话:控制通道 SessionCreate → 轮询 sessions 找新 seed(≤6s)。 */
+/**
+ * 新建会话:控制通道 SessionCreate → 轮询 sessions 找新 seed(≤6s)。
+ *
+ * `cwd` 取输入区的目标工作区(`newSessionCwd`);daemon 透传给 `session.new`,
+ * 落 `SessionMeta.cwd` 并触发 workspace 自动归属(`grouping.rs:278` 只认已注册
+ * 工作区,所以「选文件夹」那条路先在 `chooseNewSessionFolder` 里注册)。
+ */
 export async function createSession(): Promise<void> {
   if (creating()) return;
   setCreating(true);
   try {
     const before = new Set((await transport.sessions()).map((item) => String(item.session_id)));
-    await transport.command("control", { channel: "control", type: "session_create", close_current: false });
+    await transport.command("control", {
+      channel: "control",
+      type: "session_create",
+      close_current: false,
+      cwd: newSessionCwd(),
+    });
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 300));
       const list = await transport.sessions();
@@ -141,6 +167,66 @@ export async function createSession(): Promise<void> {
     setBootError(String(error instanceof Error ? error.message : error));
   } finally {
     setCreating(false);
+  }
+}
+
+/**
+ * 注册目录为工作区(`workspace.create`)。后端按 canonical 路径查重,重复注册
+ * 返回既有条目,所以「再选一次同一个文件夹」是幂等的。
+ */
+export async function registerWorkspace(path: string): Promise<SidebarWorkspace | null> {
+  try {
+    const created = await transport.rpc<SidebarWorkspace>("workspace.create", { path });
+    await pollSessions();
+    return created;
+  } catch (error) {
+    toast(`${STR.workspaceRegisterFailed}：${error instanceof Error ? error.message : String(error)}`, "err");
+    return null;
+  }
+}
+
+/**
+ * 原生选目录 → 注册 → 设为新建会话的目标。
+ *
+ * 取消(null)静默返回:浏览器预览没有原生对话框,固定回 null,不该在这里弹错。
+ * 注册失败仍把选中路径设为目标——目录被删之类的注册失败,不该连「按这个目录
+ * 开会话」一起否掉,那种会话只是落进「未分组」。
+ */
+export async function chooseNewSessionFolder(): Promise<void> {
+  let picked: string | null = null;
+  try {
+    picked = await transport.pickDirectory();
+  } catch (error) {
+    toast(`${STR.workspacePickerFailed}：${error instanceof Error ? error.message : String(error)}`, "err");
+    return;
+  }
+  if (picked == null) return;
+  const workspace = await registerWorkspace(picked);
+  setNewSessionCwd(workspace?.path ?? picked);
+}
+
+/**
+ * 把会话移入指定工作区(`workspace.move_session`):只改组织归属,不碰会话的
+ * `SessionMeta.cwd`——运行目录归 `workspace.set`,是另一条路径。
+ *
+ * seed 由参数显式给(不靠宿主注入的活动会话):侧栏能对任意一条会话操作。
+ */
+export async function moveSessionToWorkspace(seed: string, workspaceId: string): Promise<void> {
+  try {
+    await transport.rpc("workspace.move_session", { session_id: seed, workspace_id: workspaceId });
+    await pollSessions();
+  } catch (error) {
+    toast(`${STR.moveSessionFailed}：${error instanceof Error ? error.message : String(error)}`, "err");
+  }
+}
+
+/** 把会话移出工作区 → 未分组(`workspace.detach`)。 */
+export async function detachSessionFromWorkspace(seed: string): Promise<void> {
+  try {
+    await transport.rpc("workspace.detach", { session_id: seed });
+    await pollSessions();
+  } catch (error) {
+    toast(`${STR.detachSessionFailed}：${error instanceof Error ? error.message : String(error)}`, "err");
   }
 }
 

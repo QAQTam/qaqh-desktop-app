@@ -15,7 +15,16 @@
 import type { ActivityState as DomainActivityState } from "../api/qaqh/ActivityState";
 import type { SessionActivityState } from "../api/qaqh/SessionActivityState";
 
-export type ProjectionAction = "activity" | "approvals" | "todos" | "compacted" | "sessions" | "session_deleted";
+export type ProjectionAction =
+  | "activity"
+  | "approvals"
+  | "todos"
+  | "compacted"
+  | "compact_started"
+  | "compact_progress"
+  | "compact_finished"
+  | "sessions"
+  | "session_deleted";
 
 /** 拆好的一层投影:频道 + delta kind + 字段体 + 资源类别。 */
 export interface ProjectionDelta {
@@ -64,12 +73,15 @@ export function projectionActions(delta: ProjectionDelta): ProjectionAction[] {
       // 只把 ToolIntent 特判到 tool),工具终态要在这里接。
       if (kind === "activity") return ["activity"];
       if (kind === "interaction_requested" || kind === "interaction_resolved" || kind === "interaction_expired") return ["approvals"];
-      if (kind === "tool_finished") return ["approvals"];
+      // Todo writes still emit legacy DashboardUpdated, which actor.rs no longer
+      // broadcasts. Until the producer persists WorkspaceResourceChanged(todo),
+      // use the durable tool terminal fact to invalidate the RPC read model.
+      // ToolFinished has no tool name, so do not infer one from output text.
+      if (kind === "tool_finished") return ["approvals", "todos"];
       // MetaDelta 也在 control 频道上:`projection_stream_key` 把
       // `ProjectionSlot::Meta|Mailbox|Team` 全映射成 `RingingChannel::Control`
-      // (replay.rs:166-168),所以按 `case "meta"` 分支是死代码。标题生成/重命名
-      // 与删除事实是后端唯一的会话元数据推送面(`SessionMetaChanged` 那个
-      // DomainEvent 自 v1 广播退役后不再上线)。
+      // (replay.rs:166-168),所以按 `case "meta"` 分支是死代码。标题更新经
+      // v2 Meta SSE 推送，不依赖已退役的 SessionMetaChanged v1 广播。
       if (kind === "title_changed" || kind === "metadata_changed") return ["sessions"];
       if (kind === "deleted") return ["session_deleted"];
       return [];
@@ -80,8 +92,15 @@ export function projectionActions(delta: ProjectionDelta): ProjectionAction[] {
       if (kind === "workspace_resource_changed") return resourceKind === "todo" ? ["todos"] : [];
       return [];
     case "conversation":
-      if (kind === "turn_finished" || kind === "turn_interrupted") return ["approvals"];
+      if (kind === "turn_finished" || kind === "turn_interrupted") return ["approvals", "todos"];
       if (kind === "compaction_applied") return ["compacted"];
+      // 压缩三态(过程事件)。后端 `ringing/compact_mirror.rs` 把 v1 Ringing
+      // 的 CompactStarted/Progress/Finished 镜像进 conversation 频道,这是过程
+      // 数据的唯一出口;三条同占可替换槽 `conversation:compact:{id}`,重连时
+      // 只重放最新一帧。
+      if (kind === "compact_started") return ["compact_started"];
+      if (kind === "compact_progress") return ["compact_progress"];
+      if (kind === "compact_finished") return ["compact_finished"];
       return [];
     default:
       return [];

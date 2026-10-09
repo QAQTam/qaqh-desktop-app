@@ -35,4 +35,10 @@ reasoning_tokens: number,
  * Whether the provider actually returned cache usage fields. This keeps a
  * genuine zero-percent hit rate distinct from unsupported/missing data.
  */
-cache_usage_reported?: boolean | null, };
+cache_usage_reported?: boolean | null, 
+/**
+ * Provider-native integer fields that have no neutral name yet
+ * (`credit`, `completion_thinking_tokens`, …). Captured once at the gate
+ * (`qaqh_gate::usage`), display-only, and empty for most endpoints.
+ */
+extras?: { [key in string]: number }, };

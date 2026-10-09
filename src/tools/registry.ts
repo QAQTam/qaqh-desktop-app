@@ -2,14 +2,15 @@
  * 工具注册表(spec §8.1):折叠行的「主参数」与展示名。
  *
  * 事实来源优先级:后端 display 投影(header/summary,权威)→ 入参 args 的
- * 键位回退(未注册工具回退为 args 的第一个字符串值)。展示层绝不改写参数
- * 含义——argv 展开仅按空格连接用于单行预览,完整入参在展开态原样呈现。
+ * 键位回退。未知工具不把原始 JSON/任意第一个字符串当摘要（可能是源码）。
+ * 展示层绝不改写参数含义——argv 展开仅用于预览,完整入参在二次折叠中保留。
  */
 import { parseJsonish } from "../session/reducer";
 import type { TimelineToolDisplay } from "../api/qaqh/TimelineToolDisplay";
 
 const LABELS: Record<string, string> = {
   exec: "执行命令",
+  exec_command: "执行命令",
   bash: "执行命令",
   shell: "执行命令",
   read: "读取文件",
@@ -67,14 +68,14 @@ export function primaryArgFull(argsJson: string | undefined, display: TimelineTo
   if (args != null) {
     if (typeof args.command === "string" && args.command) return args.command;
     if (Array.isArray(args.argv)) return args.argv.map(String).join(" ");
-    for (const key of ["path", "file_path", "query", "pattern", "url", "name"]) {
+    for (const key of ["path", "file_path", "file", "filename", "query", "pattern", "url", "name"]) {
       if (typeof args[key] === "string" && args[key]) return args[key];
     }
     if (Array.isArray(args.items) || Array.isArray(args.todos)) {
       return `${(args.items ?? args.todos).length} 项`;
     }
   }
-  return argsJson ?? "";
+  return display?.summary ?? "";
 }
 
 /** 折叠行主参数(单行截断仅为视觉,CSS ellipsis;title 给完整值)。 */

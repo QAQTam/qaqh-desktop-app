@@ -21,6 +21,9 @@ const PRESET_TEMPLATES = [
   { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com", wire: "openai" },
   { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", wire: "responses" },
   { id: "anthropic", label: "Anthropic", baseUrl: "https://api.anthropic.com", wire: "anthropic" },
+  // Gemini 的 `:generateContent` 路径由 wire 补;endpoint 必须自带版本前缀
+  // (`/v1beta` 不属于 wire 路径),漏掉会打到无版本的 `/models/...`。
+  { id: "gemini", label: "Google Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", wire: "gemini" },
   { id: "zhipu", label: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", wire: "openai" },
   { id: "moonshot", label: "Kimi (Moonshot)", baseUrl: "https://api.moonshot.cn/v1", wire: "openai" },
   { id: "custom", label: "自定义", baseUrl: "", wire: "openai" },
@@ -56,9 +59,9 @@ export const ProfileManager: Component = () => {
       <Section
         id="section-byok"
         title="模型与端点(BYOK)"
-        desc="填六个字段 → 保存,立即生效(热载,无需重启)。endpoint 与 model 清空不生效(后端语义:空串 = 保持现值)。"
+        desc={STR.settingsByokDesc}
       >
-        <Field label="从模板新建" wide hint="只预填 endpoint 与 wire;API key 与模型 id 始终自己填。">
+        <Field label={STR.settingsTemplate} wide hint={STR.settingsTemplateHint}>
           <select
             class="field-input"
             value=""
@@ -73,10 +76,10 @@ export const ProfileManager: Component = () => {
             <For each={PRESET_TEMPLATES}>{(template) => <option value={template.id}>{template.label}</option>}</For>
           </select>
         </Field>
-        <Field label="endpoint" wide hint="scheme + host + 可选前缀;wire 的规范路径自动补">
+        <Field label={STR.settingsEndpoint} wide hint={STR.settingsEndpointHint}>
           <TextInput value={config().baseUrl} onInput={(value) => setField("baseUrl", value)} placeholder="https://…" />
         </Field>
-        <Field label="wire">
+        <Field label={STR.settingsWire}>
           <select
             class="field-input"
             value={config().wire}
@@ -85,7 +88,7 @@ export const ProfileManager: Component = () => {
             <For each={[...WIRE_PROTOCOLS]}>{(wire) => <option value={wire}>{wire}</option>}</For>
           </select>
         </Field>
-        <Field label="model">
+        <Field label={STR.settingsModel}>
           <TextInput value={config().model} onInput={(value) => setField("model", value)} placeholder="模型 id" />
         </Field>
         <Field label="API key" hint={STR.settingsNoDelete} wide>
@@ -112,7 +115,7 @@ export const ProfileManager: Component = () => {
             </button>
           </div>
         </Field>
-        <Field label="reasoningEffort">
+        <Field label={STR.settingsReasoningEffort}>
           <select
             class="field-input"
             value={config().reasoningEffort}
@@ -122,7 +125,7 @@ export const ProfileManager: Component = () => {
           </select>
         </Field>
         <Field
-          label="maxTokens"
+          label={STR.settingsMaxTokens}
           error={config().maxTokens <= 0 ? "必须是大于 0 的整数" : undefined}
         >
           <TextInput
@@ -134,8 +137,8 @@ export const ProfileManager: Component = () => {
           />
         </Field>
         <Field
-          label="contextLength"
-          hint="端点声明的窗口 = 本地压缩分母"
+          label={STR.settingsContextLength}
+          hint={STR.settingsContextLengthHint}
           error={config().contextLength <= 0 ? "必须是大于 0 的整数" : undefined}
         >
           <TextInput

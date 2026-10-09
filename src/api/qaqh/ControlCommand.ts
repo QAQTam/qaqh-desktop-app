@@ -22,4 +22,4 @@ custom_tools?: Array<string>, } | { "type": "session_resume", session_id: string
 /**
  * 允许接管的「已死」holder（daemon 依据 lease 存活判定给出）。
  */
-stale_holder?: string | null, } | { "type": "driver_release", client_session_id: string, expected_epoch?: number | null, } | { "type": "plan_review_respond", interaction_id: string, approved: boolean, message?: string | null, autonomous: boolean, } | { "type": "skills_activate", name: string, } | { "type": "skills_reload" } | { "type": "skills_operation", operation_id: string, action: string, name: string, };
+stale_holder?: string | null, } | { "type": "driver_release", client_session_id: string, expected_epoch?: number | null, } | { "type": "plan_review_respond", interaction_id: string, approved: boolean, message?: string | null, autonomous: boolean, } | { "type": "skills_activate", name: string, } | { "type": "skills_reload" } | { "type": "skills_operation", operation_id: string, action: string, name: string, } | { "type": "publish_resource_changed", resource_kind: string, };

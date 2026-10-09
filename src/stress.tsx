@@ -10,6 +10,7 @@ import { createSignal, Show, untrack } from "solid-js";
 import { SessionStore } from "./session/store";
 import { applyEntry } from "./session/reducer";
 import { SessionView } from "./session/SessionView";
+import { WorkspacePanel } from "./workspace/WorkspacePanel";
 import { Composer } from "./composer/Composer";
 import { ApprovalStack } from "./approval/ApprovalCards";
 import { GlobalNav } from "./app/GlobalNav";
@@ -18,9 +19,9 @@ import IconArrowLeft from "~icons/lucide/arrow-left";
 import { ToolsPage } from "./app/ToolsPage";
 import { SettingsView } from "./settings/SettingsView";
 import { reload as reloadSettings } from "./settings/store";
-import { TabBar } from "./tabs/TabBar";
+// Session capsule is reserved for Goal, matching the production shell.
 import { setSessionMaterial, type SessionMaterial } from "./lib/visual";
-import { applyConfigTheme, type ResolvedTheme } from "./lib/theme";
+import { applyTheme, type ResolvedTheme } from "./lib/theme";
 import { transport } from "./lib/transport";
 import type { ConfigDto } from "./api/qaqh/ConfigDto";
 import type { ApprovalView } from "./lib/transport";
@@ -292,7 +293,9 @@ if (isVisualPreview) {
     fontFamily: "",
     theme: previewParams.get("theme") === "dark" ? "dark" : "light",
     notificationsEnabled: true,
-    activeProfile: "视觉验收",
+    exec: { defaultShell: "pwsh" },
+  sessionIdleUnloadSecs: 1800,
+  activeProfile: "视觉验收",
     profiles: ["视觉验收", "本地模型"],
     complianceEnabled: true,
     subagent: {
@@ -459,9 +462,46 @@ function feed(turnId: string, event: Record<string, unknown>, seq?: number): voi
 const report: Array<Record<string, unknown>> = [];
 
 const scenarios = {
+  /** 真 TurnView：assistant 文本边界动画、卸载与回复节点稳定性。 */
+  async workCollapse(): Promise<Record<string, unknown>> {
+    const id = `collapse-${liveSeq}`;
+    feed(id, { type: "turn_opened", user_text: "工作段回收动画验收" });
+    feed(id, { type: "block_opened", block: { block_id: "command", kind: "tool", tool: { name: "exec", state: "running" } } });
+    feed(id, { type: "tool_updated", block_id: "command", tool: { name: "exec", state: "succeeded", display: { body: { kind: "shell", output: "检查完成\n结果已就绪", exit_code: 0, truncated: false } } } });
+    await frames(10);
+    const slot = document.querySelector<HTMLElement>(`[data-slot-key="${CSS.escape(id)}"]`)!;
+    const group = slot.querySelector<HTMLElement>(".work-group")!;
+    const collapse = group.querySelector<HTMLElement>(":scope > .collapse")!;
+    const initialHeight = collapse.getBoundingClientRect().height;
+    if (initialHeight <= 0) throw new Error("工作段未展开");
+    feed(id, { type: "block_opened", block: { block_id: "reply", kind: "text", state: "open" } });
+    feed(id, { type: "text_delta", block_id: "reply", fragment_seq: 0, delta: "已完成检查，以下是结果。" });
+    const heights: number[] = [];
+    for (let i = 0; i < 24; i++) {
+      await frames(1);
+      heights.push(Math.round(collapse.getBoundingClientRect().height * 100) / 100);
+    }
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const animated = heights.some((height) => height > 1 && height < initialHeight - 1);
+    if (!reduced && !animated) throw new Error(`自动回收未出现中间帧: ${JSON.stringify(heights)}`);
+    if (collapse.querySelector(".tool-head")) throw new Error("动画后工具子树未卸载");
+    if (collapse.getBoundingClientRect().height > 1) throw new Error("工作段未收起");
+    const reply = slot.querySelector("[data-text-id='reply'] .md-host");
+    if (!reply) throw new Error("回复未挂载");
+    feed(id, { type: "text_delta", block_id: "reply", fragment_seq: 1, delta: " 回复继续流式更新。" });
+    await frames(10);
+    if (slot.querySelector("[data-text-id='reply'] .md-host") !== reply) throw new Error("流式回复被重挂");
+    group.querySelector<HTMLButtonElement>(".collapsed-row")!.click();
+    await frames(18);
+    if (!collapse.querySelector(".tool-head")) throw new Error("用户无法重新展开工作段");
+    feed(id, { type: "turn_sealed", state: "completed" });
+    await frames(10);
+    if (group.querySelector(".collapsed-row")?.getAttribute("aria-expanded") !== "true") throw new Error("完成事件重置用户展开态");
+    return { initialHeight, heights, animated, reduced, unloaded: true, replyStable: true, manualReopen: true, ...metrics() };
+  },
   /** Theme switcher for visual review of the Web/Tauri surface. */
   theme(mode: ResolvedTheme): { theme: ResolvedTheme; owner: "web" } {
-    applyConfigTheme(mode);
+    applyTheme(mode);
     return { theme: mode, owner: "web" };
   },
   async thinking(): Promise<Record<string, unknown>> {
@@ -845,7 +885,7 @@ const scenarios = {
     };
     let acted = 0;
     if (target === "dock") {
-      const head = document.querySelector<HTMLElement>(".todo-head");
+      const head = document.querySelector<HTMLElement>(".workspace-panel-head");
       for (let i = 0; i < times && head != null; i += 1) {
         head.click();
         await settle(20); // 260ms 过渡 @60Hz ≈ 16 帧
@@ -880,7 +920,8 @@ const scenarios = {
     feed(id, { type: "turn_opened", user_text: `第 ${id.slice(1)} 问：跑个长任务` });
     feed(id, { type: "block_opened", block: { block_id: blockId, kind: "tool", tool: { name: "exec", state: "running" } } });
     await frames(4);
-    document.querySelector<HTMLElement>(`[data-slot-key="${CSS.escape(id)}"] .tool-head`)?.click();
+    const progressHead = document.querySelector<HTMLElement>(`[data-slot-key="${CSS.escape(id)}"] .tool-head`);
+    if (progressHead?.getAttribute("aria-expanded") !== "true") progressHead?.click();
     await frames(6);
     const el = messagesEl();
     let progressWrites = 0;
@@ -974,9 +1015,105 @@ const scenarios = {
 
 // URL switches make visual review reproducible without changing production preferences.
 const previewTheme = previewParams.get("theme");
-if (previewTheme === "light" || previewTheme === "dark") applyConfigTheme(previewTheme, false);
+if (previewTheme === "light" || previewTheme === "dark") applyTheme(previewTheme, false);
 const previewMaterial = previewParams.get("material");
 if (previewMaterial === "glass" || previewMaterial === "solid") setSessionMaterial(previewMaterial);
+
+/**
+ * 上下文面板/压缩卡片的夹具驱动。
+ *
+ * 生产里这两个 UI 由 usage 流 + 后端镜像的 compact_* 事件驱动;这里用查询参数
+ * 给出确定性状态,供视觉评审与截图矩阵复现:`?compact=running|done|failed`。
+ * 面板本身只要 `metrics.contextPercent` 非空就会出现(与压缩无关)。
+ */
+const previewCompact = previewParams.get("compact");
+/** `?attach=` → 待发附件的确定性夹具态(ready|uploading|failed)。 */
+const previewAttach = previewParams.get("attach");
+const FIXTURE_SUMMARY = [
+  "## 已压缩的早期上下文",
+  "",
+  "- 统一布局与内容对齐:正文列 760px 居中,面板浮层不占列宽。",
+  "- 收拢圆角、字体与表面层级:去掉一套多余的阴影变量。",
+  "- 检查亮暗主题与动效细节:脉冲点仅在 running 态出现。",
+].join("\n");
+const fixtureMetrics = {
+  tokensPerSecond: 46.2,
+  contextPercent: 34,
+  cacheHitPercent: 88,
+  extras: { completion_thinking_tokens: 32, credit: 4 },
+};
+
+/** `?compact=` → 夹具的确定性压缩态(idle 时返回 idle,卡片不渲染)。 */
+function fixtureCompactState(): import("./session/store").CompactState {
+  if (previewCompact === "running") {
+    return { phase: "running", compactId: "fixture", turnsTotal: 12, turnsKeeping: 4, summary: FIXTURE_SUMMARY };
+  }
+  if (previewCompact === "done") {
+    return { phase: "done", completedAt: Date.now(), summaryChars: FIXTURE_SUMMARY.length, turnsRemoved: 8 };
+  }
+  if (previewCompact === "failed") {
+    return { phase: "failed" };
+  }
+  if (previewCompact === "skipped") {
+    return { phase: "skipped", status: "skipped" };
+  }
+  return { phase: "idle" };
+}
+
+/**
+ * 面板按钮的演示:点一下跑一遍 started → progress… → finished(生产由后端事件
+ * 驱动)。进度帧按线上口径发**累积全文快照**——真桥每 256 字符合并一帧,这里为
+ * 让动画看得清把步长调小,但"整段替换"的语义必须一致,否则夹具会教坏 reducer。
+ */
+function simulateCompact(): void {  const target = previewActiveTab().store;
+  target.compact[1]({ phase: "running", compactId: "fixture", turnsTotal: 12, turnsKeeping: 4, summary: "" });
+  const step = 24;
+  let shown = 0;
+  const timer = setInterval(() => {
+    shown += step;
+    if (shown >= FIXTURE_SUMMARY.length) {
+      clearInterval(timer);
+      target.compact[1]({ phase: "done", completedAt: Date.now(), summaryChars: FIXTURE_SUMMARY.length, turnsRemoved: 8 });
+      return;
+    }
+    const snapshot = FIXTURE_SUMMARY.slice(0, shown);
+    target.compact[1]((current) => current.phase === "running" ? { ...current, summary: snapshot } : current);
+  }, 40);
+}
+
+/** `?attach=` → 夹具的确定性附件态(与生产同一套 chip 类,只是不走真上传)。 */
+function fixtureAttachments(): import("./session/store").PendingAttachment[] {
+  const ref = (id: string, mediaType: string) => ({ content_id: id, media_type: mediaType, sha256: id, truncated: false });
+  if (previewAttach === "ready") {
+    return [
+      { id: "E:/shots/approval-dark.png", name: "approval-dark.png", size: 284512, mediaType: "image/png", state: "ready", reference: ref("sha256:9f2c1a", "image/png"), error: null },
+      { id: "E:/qaqh-desktop-app/docs/ui-visual-spec.md", name: "ui-visual-spec.md", size: 18432, mediaType: "text/markdown", state: "ready", reference: ref("sha256:41abe7", "text/markdown"), error: null },
+    ];
+  }
+  if (previewAttach === "uploading") {
+    return [{ id: "E:/shots/compact-card.png", name: "compact-card.png", size: 0, mediaType: "", state: "uploading", reference: null, error: null }];
+  }
+  if (previewAttach === "failed") {
+    return [{ id: "E:/missing/archive.zip", name: "archive.zip", size: 0, mediaType: "", state: "failed", reference: null, error: "上传失败:413 payload too large" }];
+  }
+  return [];
+}
+
+/**
+ * `+` 按钮的演示:推一个 uploading chip,再翻成 ready——生产的这一段是宿主
+ * 「读盘 + POST /ringing/v2/content」,夹具用定时器替掉往返。
+ */
+function simulateAttach(): void {
+  const target = previewActiveTab().store;
+  const id = "E:/shots/pasted-clipboard.png";
+  if (target.pendingAttachments[0]().some((item) => item.id === id)) return;
+  target.pendingAttachments[1]((current) => [...current, { id, name: "pasted-clipboard.png", size: 0, mediaType: "", state: "uploading", reference: null, error: null }]);
+  setTimeout(() => {
+    target.pendingAttachments[1]((current) => current.map((item) => item.id === id
+      ? { ...item, size: 155648, mediaType: "image/png", state: "ready", reference: { content_id: "sha256:be71d0", media_type: "image/png", sha256: "sha256:be71d0", truncated: false } }
+      : item));
+  }, 600);
+}
 
 // ── 启动 ─────────────────────────────────────────────────────────────────────
 
@@ -1014,9 +1151,11 @@ render(
           <MessageSidebar sessions={previewSessions} workspaces={previewWorkspaces} activeSeed={previewActiveSeed()} onSelect={setPreviewActiveSeed} />
         </Show>
         <div class="workspace-content">
+        {/* Future Goal capsule; no session tabs in the current shell.
         <div class="session-tabs-region">
           <TabBar tabs={fixtureTabs} activeId={previewActiveTab().id} creating={false} canCreate={false} onSelect={(id) => { const selected = fixtureTabs.find((item) => item.id === id); if (selected) setPreviewActiveSeed(selected.seed); }} onClose={() => {}} onCreate={() => {}} />
         </div>
+        */}
         <main id="main">
           <Show when={currentView() === "tools"}>
             <ToolsPage />
@@ -1024,7 +1163,7 @@ render(
             <div id="messages" hidden />
           </Show>
           <Show when={currentView() !== "tools"}>
-            <div class="session-column" id={`panel-${previewActiveTab().id}`} role="tabpanel" aria-labelledby={`tab-${previewActiveTab().id}`}>
+            <div class="session-column" id={`panel-${previewActiveTab().id}`} role="region" aria-label="当前会话">
               <SessionView tab={previewActiveTab()} />
               <Show when={previewActiveTab().store.pending[0]().length > 0}>
                 <ApprovalStack pending={previewActiveTab().store.pending[0]()} respond={async () => { previewActiveTab().store.pending[1]([]); }} />
@@ -1037,8 +1176,15 @@ render(
                 onSend={() => { setDraft(""); }}
                 onStop={() => {}}
                 focusToken={0}
+                metrics={() => fixtureMetrics}
+                onCompact={simulateCompact}
+                compactPhase={() => previewActiveTab().store.compact[0]().phase}
+                onPickAttachments={simulateAttach}
+                attachments={() => previewActiveTab().store.pendingAttachments[0]()}
+                onRemoveAttachment={(id) => previewActiveTab().store.removeAttachment(id)}
                 showDesignControls
               />
+              <WorkspacePanel store={previewActiveTab().store} />
             </div>
           </Show>
         </main>
@@ -1061,6 +1207,9 @@ void (async () => {
   }
   await store.resnapshot();
   if (previewView === "approval") store.todos[1]([]);
+  // 确定性压缩态:视觉评审要在同一视图下复现"正在压缩/已压缩/失败"。
+  previewActiveTab().store.compact[1](fixtureCompactState());
+  previewActiveTab().store.pendingAttachments[1](fixtureAttachments());
   await frames(2);
   const mountMs = Math.round(performance.now() - bootStart);
   await frames(30);

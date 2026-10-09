@@ -11,7 +11,7 @@ use qaqh_client::{
     ClientV2CommandAck, CommandOptions, ConversationCommand, ConversationInputPurpose,
     RingingCommand, RingingCommandAckStatus,
 };
-use qaqh_types::SessionListEntry;
+use qaqh_types::{ContentRef, SessionListEntry};
 
 use crate::challenge::{command_for, command_options};
 use crate::daemon::{self, HostState};
@@ -26,13 +26,18 @@ const SERVICE_METHODS: &[&str] = &[
     "session.get_activity",
     "workspace.get",
     "workspace.list",
+    // 组织语义的注册面:`workspace.create` 把「选文件夹」注册进工作区名录,
+    // 之后带该 cwd 的新会话才会被 `attach_by_cwd` 归到组里(`grouping.rs:278`)。
+    "workspace.create",
+    // 组织语义的移动面(`grouping.rs:295/317`):只改 UI 归属,不碰 `SessionMeta.cwd`。
+    // 侧栏能操作任意一条会话,所以目标 seed 由参数显式给,见 `service_requires_session`。
+    "workspace.move_session",
+    "workspace.detach",
     "fs.list",
     "fs.read",
     "todo.status",
     "todo.list",
     "plan.read",
-    "plan.context_stats",
-    "stats.token_usage",
     "git.diff",
     "git.branch",
     "git.branches",
@@ -52,6 +57,14 @@ const SERVICE_METHODS: &[&str] = &[
 ///
 /// config.*/profile.* 一律豁免:配置是 daemon 全局态,与活动会话无关。注入会
 /// 在无活动 seed 时(引导失败/零会话)直接报 `no_active_seed`,设置浮层就打不开了。
+/// `workspace.create` 同理豁免:注册名录是会话无关的组织操作,而且「先选目录、
+/// 再建会话」的入口本来就发生在零会话的空态页。
+///
+/// `workspace.move_session` / `workspace.detach` 也豁免,但理由不同:它们是
+/// **自带目标 seed** 的会话级写(daemon 侧 `WRITE_SEEDED`,按参数里的 seed 做归属
+/// 校验)。注入会把「宿主当前活动会话」塞进去,而侧栏要移动的往往是别的会话;
+/// 且 `or_insert` 只有在调用方没给 seed 时才生效——一旦漏传就会静默移动活动会话,
+/// 与其留这个坑,不如让缺参数在 daemon 侧直接报错。
 fn service_requires_session(method: &str) -> bool {
     !matches!(
         method,
@@ -59,6 +72,9 @@ fn service_requires_session(method: &str) -> bool {
             | "session.list"
             | "session.activity"
             | "workspace.list"
+            | "workspace.create"
+            | "workspace.move_session"
+            | "workspace.detach"
             | "config.load"
             | "config.save"
             | "profile.apply"
@@ -236,9 +252,17 @@ pub async fn respond_approval(
     ack_to_result(ack).map(|_| ())
 }
 
-/// `(seed, text) → ack`。
+/// `(seed, text, attachments) → ack`。
+///
+/// `attachments` 是**已上传内容引用**(`ContentRef`),不是本地路径——
+/// 上传由 `upload_attachment` 完成,命令里永远不出现宿主路径。
 #[tauri::command]
-pub async fn send_message(app: AppHandle, seed: String, text: String) -> Result<Value, String> {
+pub async fn send_message(
+    app: AppHandle,
+    seed: String,
+    text: String,
+    attachments: Option<Vec<ContentRef>>,
+) -> Result<Value, String> {
     let client = daemon::ensure_connected(&app).await?;
     let ack = client
         .send_command(
@@ -246,7 +270,7 @@ pub async fn send_message(app: AppHandle, seed: String, text: String) -> Result<
             RingingCommand::Conversation(ConversationCommand::ConversationSendMessage {
                 text,
                 images: Vec::new(),
-                attachments: None,
+                attachments,
                 message_id: None,
                 input_purpose: ConversationInputPurpose::TriggerTurn,
                 as_system: false,
@@ -275,16 +299,37 @@ pub async fn cancel_turn(app: AppHandle, seed: String) -> Result<Value, String> 
     ack_to_result(ack)
 }
 
-/// `() → ack`。新 seed 由前端轮询 sessions diff 发现(与现状一致)。
+/// `(seed) → ack`。手动压缩上下文。
+///
+/// ack 只代表命令进队(`ConversationCompact` 的既有语义:accepted ≠ 成功),
+/// 终态由 v2 的 `compaction_applied` / `compact_finished` 决定。
 #[tauri::command]
-pub async fn create_session(app: AppHandle) -> Result<Value, String> {
+pub async fn compact_context(app: AppHandle, seed: String) -> Result<Value, String> {
+    let client = daemon::ensure_connected(&app).await?;
+    let ack = client
+        .send_command(
+            Some(&seed),
+            RingingCommand::Conversation(ConversationCommand::ConversationCompact { turn_id: None }),
+            CommandOptions::default(),
+        )
+        .await
+        .map_err(string_of)?;
+    ack_to_result(ack)
+}
+
+/// `(cwd?) → ack`。新 seed 由前端轮询 sessions diff 发现(与现状一致)。
+///
+/// cwd = 输入区选中的工作区路径;daemon 拦截层透传给 `session.new`,落
+/// `SessionMeta.cwd` 并触发 workspace 自动归属。None = 未分组(沿用 daemon 默认)。
+#[tauri::command]
+pub async fn create_session(app: AppHandle, cwd: Option<String>) -> Result<Value, String> {
     let client = daemon::ensure_connected(&app).await?;
     let ack = client
         .send_command(
             None,
             RingingCommand::Control(qaqh_client::ControlCommand::SessionCreate {
                 close_current: false,
-                cwd: None,
+                cwd: cwd.filter(|path| !path.trim().is_empty()),
                 tool_mode: None,
                 custom_tools: Vec::new(),
             }),
@@ -293,6 +338,116 @@ pub async fn create_session(app: AppHandle) -> Result<Value, String> {
         .await
         .map_err(string_of)?;
     ack_to_result(ack)
+}
+
+/// `() → 选中目录 | null`(用户取消)。
+///
+/// 目录选择只能在原生侧做:webview 没有文件系统对话框,也不该拿到宿主路径面。
+/// 只回传一个绝对路径字符串,注册动作仍由前端显式走 `workspace.create`。
+#[tauri::command]
+pub async fn pick_directory(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("选择工作区目录")
+        .pick_folder(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx
+        .await
+        .map_err(|error| format!("directory picker closed unexpectedly: {error}"))?;
+    Ok(picked.map(|path| path.to_string()))
+}
+
+/// 选择附件:原生多选文件对话框,**只回传绝对路径**(与 `pick_directory` 同规矩)。
+/// 空数组 = 用户取消。
+#[tauri::command]
+pub async fn pick_attachments(app: AppHandle) -> Result<Vec<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("选择附件")
+        .add_filter("图片", &["png", "jpg", "jpeg", "gif", "webp"])
+        .add_filter("文档", &["pdf", "md", "txt", "json", "csv", "log"])
+        .add_filter("全部", &["*"])
+        .pick_files(move |paths| {
+            let _ = tx.send(paths);
+        });
+    let picked = rx
+        .await
+        .map_err(|error| format!("file picker closed unexpectedly: {error}"))?;
+    Ok(picked
+        .unwrap_or_default()
+        .into_iter()
+        .map(|path| path.to_string())
+        .collect())
+}
+
+/// 上传结果 = `ContentRef` + 两个纯展示字段(文件名/字节数,daemon 不回名字)。
+#[derive(Serialize)]
+struct UploadedAttachment {
+    #[serde(flatten)]
+    reference: ContentRef,
+    name: String,
+    size: u64,
+}
+
+/// 附件媒体类型。daemon 侧 `is_valid_media_type` 会拒含 CRLF/控制字符的值,
+/// 所以这里只发常量;未知后缀走二进制流而不是猜成文本。
+fn media_type_for(path: &std::path::Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("pdf") => "application/pdf",
+        Some("json") => "application/json",
+        Some("md") => "text/markdown",
+        Some("csv") => "text/csv",
+        Some("txt" | "log" | "rs" | "ts" | "tsx" | "js" | "py" | "toml" | "yaml" | "yml") => {
+            "text/plain"
+        }
+        _ => "application/octet-stream",
+    }
+}
+
+/// `(seed, path) → ref`。字节读取与上传都在宿主侧完成,webview 只拿到
+/// `ContentRef`(命令中不允许出现本地路径);返回体额外带文件名/字节数供 chip 展示。
+#[tauri::command]
+pub async fn upload_attachment(app: AppHandle, seed: String, path: String) -> Result<Value, String> {
+    let client = daemon::ensure_connected(&app).await?;
+    let file = std::path::PathBuf::from(&path);
+    let name = file
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(path.as_str())
+        .to_string();
+    let media_type = media_type_for(&file);
+    // 附件可能是几十 MB,读盘不能占着 async worker。
+    let data = tokio::task::spawn_blocking(move || std::fs::read(&file))
+        .await
+        .map_err(|error| format!("读取附件任务失败: {error}"))?
+        .map_err(|error| format!("读取附件失败 {path}: {error}"))?;
+    let size = data.len() as u64;
+    let reference = client
+        .upload_content(&seed, media_type, data)
+        .await
+        .map_err(string_of)?;
+    serde_json::to_value(UploadedAttachment {
+        reference,
+        name,
+        size,
+    })
+    .map_err(string_of)
 }
 
 /// `(seed, limit, before_index) → page(含 server_epoch/has_more/truncated_before)`。

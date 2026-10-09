@@ -100,13 +100,34 @@ async fn invoke(
             "send_message" => {
                 let seed = required_string(&args, "seed")?;
                 let text = required_string(&args, "text")?;
-                commands::send_message(app.clone(), seed, text).await
+                let attachments = args
+                    .get("attachments")
+                    .filter(|value| !value.is_null())
+                    .cloned()
+                    .map(serde_json::from_value)
+                    .transpose()
+                    .map_err(|error| format!("invalid attachments: {error}"))?;
+                commands::send_message(app.clone(), seed, text, attachments).await
             }
             "cancel_turn" => {
                 let seed = required_string(&args, "seed")?;
                 commands::cancel_turn(app.clone(), seed).await
             }
-            "create_session" => commands::create_session(app.clone()).await,
+            "create_session" => {
+                let cwd = args.get("cwd").and_then(Value::as_str).map(str::to_owned);
+                commands::create_session(app.clone(), cwd).await
+            }
+            // 原生文件夹对话框在浏览器预览里没有窗口可挂:回 `null`(=用户取消),
+            // 让夹具继续走「从已注册工作区里选」那条路,而不是把预览页打崩。
+            "pick_directory" => Ok(Value::Null),
+            // 同理:附件多选对话框也挂不上,回空数组(=用户取消)。上传路径因此
+            // 在预览里不会被触发,但命令面保持与桌面壳一致。
+            "pick_attachments" => Ok(json!([])),
+            "upload_attachment" => {
+                let seed = required_string(&args, "seed")?;
+                let path = required_string(&args, "path")?;
+                commands::upload_attachment(app.clone(), seed, path).await
+            }
             "timeline_page" => {
                 let seed = required_string(&args, "seed")?;
                 let limit = args

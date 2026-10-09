@@ -42,9 +42,17 @@ export const Section: ParentComponent<{ title: string; desc?: string; id?: strin
   </section>
 );
 
-export const Switch: Component<{ label: string; checked: boolean; onToggle: (value: boolean) => void }> = (props) => (
+export const Switch: Component<{
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onToggle: (value: boolean) => void;
+}> = (props) => (
   <label class="field switch">
     <input type="checkbox" checked={props.checked} onInput={(event) => props.onToggle(event.currentTarget.checked)} />
     <span>{props.label}</span>
+    <Show when={props.hint != null && props.hint !== ""}>
+      <span class="field-hint">{props.hint}</span>
+    </Show>
   </label>
 );

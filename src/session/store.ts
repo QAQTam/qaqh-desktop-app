@@ -9,7 +9,7 @@
  *
  * 数据单源:transcript 结构/文本只来自 timeline(宿主转发的快照+SSE 帧,
  * `watermark` 去重 + 缺口触发快照);审批只来自 approvals RPC(投影事件仅当
- * 刷新信号);会话标题/运行态来自 sessions 列表。
+ * 刷新信号);自动标题由 v2 Meta SSE 推送,会话目录与运行态由 sessions 列表对齐。
  */
 import { createSignal, createStore } from "solid-js";
 import { transport, tauriHost, type ApprovalView, type StreamHandlers, type TimelineStatusWire, type TodoItemWire } from "../lib/transport";
@@ -18,8 +18,53 @@ import { applyEntry, applySnapshot, emptySession, prependPage } from "./reducer"
 import { evictForWindow, fillGapHeights } from "./pagination";
 import type { SessionState, TimelineEntryWire, Wait } from "./types";
 import { normalizeActivity, projectionActions, readProjection, type SessionActivity } from "./projection";
+import { reduceCompact, type CompactState } from "./compact";
+import type { ConfigDto } from "../api/qaqh/ConfigDto";
+import type { ContentRef } from "../api/qaqh/ContentRef";
+import type { UsageInfo } from "../api/qaqh/UsageInfo";
 
 export type ConnectionKind = "connected" | "reconnecting" | "offline";
+
+/**
+ * 压缩的展示态机在 `./compact`(纯函数,带线上样本单测);这里只负责把它接到
+ * 投影事件上。命令 ack 只做乐观 running,`compaction_applied` 事实与
+ * `compact_finished` 事件都能独立收口——两种来源都能收敛。
+ */
+export type { CompactState } from "./compact";
+
+/**
+ * 待发附件。`id` 是宿主回传的绝对路径——只作本地键,**从不进任何命令**;
+ * 发送时带出去的是上传换回来的 `reference`。
+ */
+export interface PendingAttachment {
+  id: string;
+  name: string;
+  size: number;
+  mediaType: string;
+  state: "uploading" | "ready" | "failed";
+  reference: ContentRef | null;
+  error: string | null;
+}
+
+/** 路径末段;上传前的占位名(上传完成后用宿主回的真名)。 */
+function attachmentName(path: string): string {
+  return path.split(/[\\/]/).pop() || path;
+}
+
+export interface ComposerMetrics {
+  /** Last-turn completion throughput; tokens come from provider usage when available. */
+  tokensPerSecond: number | null;
+  contextPercent: number | null;
+  cacheHitPercent: number | null;
+  /** 上一轮端点回的原生 usage 整数项(`credit` 等未建模字段);没有就是空对象。 */
+  extras: Record<string, number>;
+}
+
+function cacheHitPercent(usage: UsageInfo): number | null {
+  if (usage.cache_usage_reported !== true) return null;
+  const total = usage.prompt_cache_hit_tokens + usage.prompt_cache_miss_tokens;
+  return total > 0 ? (usage.prompt_cache_hit_tokens / total) * 100 : null;
+}
 
 /** 一帧之内攒下来的同一种增量(按「种类 + 回合 + 块」归并)。 */
 interface PendingFragment {
@@ -45,6 +90,7 @@ export class SessionStore {
 
   connection = createSignal<ConnectionKind>("reconnecting");
   activity = createSignal<SessionActivity | null>(null);
+  composerMetrics = createSignal<ComposerMetrics>({ tokensPerSecond: null, contextPercent: null, cacheHitPercent: null, extras: {} });
   title = createSignal<string | null>(null);
   pending = createSignal<ApprovalView[]>([]);
   todos = createSignal<TodoItemWire[]>([]);
@@ -52,6 +98,10 @@ export class SessionStore {
   hasNewReply = createSignal(false);
   /** 「此前已压缩」分隔锚点回合 key;null = 渲染在顶部。 */
   compactedAfter = createSignal<string | null>(null);
+  /** 压缩进行态与流式摘要(见 `CompactState`);idle 时 HUD 只显示百分比。 */
+  compact = createSignal<CompactState>({ phase: "idle" });
+  /** 待发附件;上传成功前不允许发送(命令里只能出现 `ContentRef`)。 */
+  pendingAttachments = createSignal<PendingAttachment[]>([]);
   loadingOlder = createSignal(false);
 
   /**
@@ -59,6 +109,8 @@ export class SessionStore {
    * meta 频道只有已 attach 的会话才有流,后台会话的变更仍要等列表重拉。
    */
   onSessionsChanged: (() => void) | null = null;
+  /** 标签层注入的回调：v2 MetaDelta::TitleChanged 到达时就地更新侧栏标题。 */
+  onSessionTitleChanged: ((title: string) => void) | null = null;
   /** 标签层注入的回调:`MetaDelta::Deleted` 是权威终态,目录项与标签一起收掉。 */
   onSessionDeleted: (() => void) | null = null;
 
@@ -82,6 +134,17 @@ export class SessionStore {
   private waitFrom: { kind: Wait["kind"]; at: number } | null = null;
   private lastTurnCount: number | null = null;
   private disposed = false;
+  private todoRefresh: Promise<void> | null = null;
+  private todoRefreshPending = false;
+  private activeTurnStartedAt: number | null = null;
+  private activeAnswerBlockIds = new Set<string>();
+  private activeOutputStartedAt: number | null = null;
+  private activeOutputEndedAt: number | null = null;
+  private contextRefreshId = 0;
+  /** 分母:最近一次 `config.load` 读到的窗口。 */
+  private contextLength: number | null = null;
+  /** 分子:上一轮服务端 usage 的 `prompt_tokens`,即真正发出去的上下文。 */
+  private measuredContextTokens: number | null = null;
 
   constructor(seed: string) {
     this.seed = seed;
@@ -117,6 +180,7 @@ export class SessionStore {
     void this.refreshApprovals();
     void this.refreshTodos();
     void this.refreshActivity();
+    void this.refreshContextLength();
   }
 
   /** 失去活动资格(别的标签接管):退订宿主事件保状态(流由宿主在新 attach 时停)。 */
@@ -176,6 +240,7 @@ export class SessionStore {
       onProjectionReset: (seed) => {
         if (seed !== this.seed) return;
         // 宿主的 v2 流会自动以 snapshot cursor 重订阅;这里刷新派生信号即可。
+        this.onSessionsChanged?.();
         void this.refreshApprovals();
         void this.refreshTodos();
         void this.refreshActivity();
@@ -212,7 +277,9 @@ export class SessionStore {
   private applyTimelineStatus(status: TimelineStatusWire): void {
     if (status.session_id != null && status.session_id !== this.seed) return;
     if (status.status === "open") {
+      const reconnected = this.connection[0]() !== "connected";
       this.setConnection("connected");
+      if (reconnected) void this.refreshTodos();
     } else if (status.status === "closed") {
       this.setConnection("offline");
     } else {
@@ -232,6 +299,15 @@ export class SessionStore {
       return;
     }
     const event = entry.event;
+    if (event.type === "block_opened" && event.block.kind === "text") {
+      this.activeAnswerBlockIds.add(event.block.block_id);
+    } else if (event.type === "text_delta" && this.activeAnswerBlockIds.has(event.block_id)) {
+      const at = now();
+      this.activeOutputStartedAt ??= at;
+      this.activeOutputEndedAt = at;
+    } else if (event.type === "turn_sealed") {
+      this.activeAnswerBlockIds.clear();
+    }
     if (event.type === "text_delta" || event.type === "tool_progress") {
       // 高频增量按「种类 + 块」归并到帧末再写一次(spec §6/§10.2):每帧至多一次
       // store 写入,16KB 尾窗切片也一帧只做一遍。
@@ -343,6 +419,23 @@ export class SessionStore {
   private applyProjection(streamKey: unknown, payload: unknown): void {
     const delta = readProjection(streamKey, payload);
     if (!delta.channel || !delta.kind) return;
+    if (delta.channel === "conversation") {
+      if (delta.kind === "turn_started") {
+        this.activeTurnStartedAt = now();
+        this.activeAnswerBlockIds.clear();
+        this.activeOutputStartedAt = null;
+        this.activeOutputEndedAt = null;
+      }
+      if (delta.kind === "assistant_block_sealed" || delta.kind === "turn_finished") {
+        const usage = delta.body.usage as UsageInfo | null | undefined;
+        if (usage != null) this.updateComposerUsage(usage);
+        if (delta.kind === "turn_finished") {
+          this.activeTurnStartedAt = null;
+          this.activeAnswerBlockIds.clear();
+          void this.refreshContextLength();
+        }
+      }
+    }
     for (const action of projectionActions(delta)) {
       switch (action) {
         case "activity":
@@ -359,20 +452,79 @@ export class SessionStore {
           const slots = this.stateGet.slots;
           const anchor = slots.length > 0 ? slots[slots.length - 1]!.key : null;
           this.compactedAfter[1](anchor);
+          this.compact[1]((current) => reduceCompact(current, "compacted", delta.body, now()));
+          break;
+        }
+        case "compact_started":
+        case "compact_progress":
+        case "compact_finished": {
+          this.compact[1]((current) => reduceCompact(current, action, delta.body, now()));
           break;
         }
         case "sessions":
-          // `title_changed` 自带新标题,先就地写标签(零延迟),再让标签层按
-          // 「session.list 全量权威」的契约重拉一次对齐其余字段。
-          this.applySessionMeta({
-            title: typeof delta.body.title === "string" ? delta.body.title : null,
-          });
-          this.onSessionsChanged?.();
+          if (delta.kind === "title_changed" && typeof delta.body.title === "string") {
+            // v2 Meta SSE carries the value, so update the active tab and sidebar
+            // immediately without waiting for the periodic session.list poll.
+            this.applySessionMeta({ title: delta.body.title });
+            this.onSessionTitleChanged?.(delta.body.title);
+          } else {
+            this.onSessionsChanged?.();
+          }
           break;
         case "session_deleted":
           this.onSessionDeleted?.();
           break;
       }
+    }
+  }
+
+  private updateComposerUsage(usage: UsageInfo): void {
+    // Measure from the first to last streamed answer fragment, excluding tool and
+    // user-wait time. Fall back to the turn interval for replay/history-only paths.
+    const durationMs = this.activeOutputStartedAt != null && this.activeOutputEndedAt != null
+      ? this.activeOutputEndedAt - this.activeOutputStartedAt
+      : this.activeTurnStartedAt == null ? null : now() - this.activeTurnStartedAt;
+    const elapsedSeconds = durationMs == null ? null : Math.max(0.001, durationMs / 1_000);
+    // 服务端 usage 的 prompt_tokens 就是这一轮真正发出去的上下文(系统提示 + 工具
+    // schema + 历史),直接当占用真值;它只统计到本轮 prompt,答案那部分要等下一轮
+    // 才进 prompt,所以这个表盘天然滞后一轮。
+    this.measuredContextTokens = usage.prompt_tokens;
+    this.composerMetrics[1]((current) => ({
+      ...current,
+      tokensPerSecond: elapsedSeconds == null ? current.tokensPerSecond : usage.completion_tokens / elapsedSeconds,
+      cacheHitPercent: usage.cache_usage_reported === false
+        ? null
+        : cacheHitPercent(usage) ?? current.cacheHitPercent,
+      // 反映上一轮为准:端点这轮没报 extras 就清空,不留陈旧的芯片。
+      extras: usage.extras ?? {},
+    }));
+    this.publishContextPercent();
+  }
+
+  /** 百分比只有一个出口:分子是真值,没有真值(首轮之前)就不显示。 */
+  private publishContextPercent(): void {
+    const tokens = this.measuredContextTokens;
+    const length = this.contextLength;
+    this.composerMetrics[1]((current) => ({
+      ...current,
+      contextPercent: tokens == null || length == null || !Number.isFinite(length) || length <= 0
+        ? null
+        : Math.min(100, (tokens / length) * 100),
+    }));
+  }
+
+  /** 只取窗口这一个数当百分比分母;分子不由这里产生(来自 usage 流)。 */
+  private async refreshContextLength(): Promise<void> {
+    if (this.disposed) return;
+    const refreshId = ++this.contextRefreshId;
+    try {
+      const config = await transport.rpc<ConfigDto>("config.load");
+      if (this.disposed || refreshId !== this.contextRefreshId) return;
+      const length = config?.contextLength;
+      if (length != null && Number.isFinite(length) && length > 0) this.contextLength = length;
+      this.publishContextPercent();
+    } catch {
+      // Keep the last known window; metrics are an optional HUD.
     }
   }
 
@@ -388,14 +540,33 @@ export class SessionStore {
 
   // ── 待办(todo.list 单源) ────────────────────────────────────────────────────
 
-  /** 待办清单:只读 service RPC;刷新由 dashboard_updated 事件/激活/重置驱动。 */
-  async refreshTodos(): Promise<void> {
-    try {
-      const result = await transport.rpc<Record<string, any>>("todo.list", {}, this.seed);
-      const items = result?.items;
-      writeStable(this.todos, Array.isArray(items) ? (items as TodoItemWire[]) : []);
-    } catch {
-      return; // best-effort:下一轮信号再取
+  /** RPC remains authoritative. V2 facts invalidate it; legacy dashboard events
+   * are not broadcast. Coalesce bursts, retaining a trailing read if a mutation
+   * arrives during an in-flight request. Never commit a superseded response. */
+  refreshTodos(): Promise<void> {
+    if (this.disposed) return Promise.resolve();
+    this.todoRefreshPending = true;
+    if (this.todoRefresh != null) return this.todoRefresh;
+    this.todoRefresh = this.drainTodoRefresh().finally(() => {
+      this.todoRefresh = null;
+      // An invalidation can arrive between the last read and this finalizer.
+      if (this.todoRefreshPending && !this.disposed) void this.refreshTodos();
+    });
+    return this.todoRefresh;
+  }
+
+  private async drainTodoRefresh(): Promise<void> {
+    while (this.todoRefreshPending && !this.disposed) {
+      this.todoRefreshPending = false;
+      try {
+        const result = await transport.rpc<Record<string, unknown>>("todo.list", {}, this.seed);
+        if (this.disposed || this.todoRefreshPending) continue;
+        if (!Array.isArray(result?.items)) throw new Error("todo.list response is missing items");
+        writeStable(this.todos, result.items as TodoItemWire[]);
+      } catch (error) {
+        // Preserve the last successful list; make failures visible in diagnostics.
+        if (!this.disposed) console.warn("[qaqh-webui] todo.list refresh failed", error);
+      }
     }
   }
 
@@ -448,17 +619,94 @@ export class SessionStore {
   // ── 动作 ────────────────────────────────────────────────────────────────────
 
   async sendMessage(text: string): Promise<void> {
+    const attachments = this.pendingAttachments[0]()
+      .filter((item) => item.state === "ready" && item.reference != null)
+      .map((item) => item.reference as ContentRef);
     await transport.command("conversation", {
       channel: "conversation",
       type: "conversation_send_message",
       text,
       images: [],
       as_system: false,
+      attachments,
     }, this.seed);
+    // 投递失败会抛出,附件保持原样让用户重试。
+    this.pendingAttachments[1]([]);
+  }
+
+  /**
+   * 选附件并逐个上传。字节读取与上传都在宿主侧完成(见宿主 `upload_attachment`),
+   * 这里只维护 chip 状态。单个失败不影响其余:该 chip 转 failed 并留在列表里。
+   */
+  async addAttachments(): Promise<void> {
+    const paths = await transport.pickAttachments();
+    if (paths.length === 0) return;
+    const known = new Set(this.pendingAttachments[0]().map((item) => item.id));
+    const added: PendingAttachment[] = [];
+    for (const path of paths) {
+      if (known.has(path)) continue;
+      known.add(path);
+      added.push({
+        id: path,
+        name: attachmentName(path),
+        size: 0,
+        mediaType: "",
+        state: "uploading",
+        reference: null,
+        error: null,
+      });
+    }
+    if (added.length === 0) return;
+    this.pendingAttachments[1]((current) => [...current, ...added]);
+    await Promise.all(added.map(async (item) => {
+      try {
+        const uploaded = await transport.uploadAttachment(this.seed, item.id);
+        this.patchAttachment(item.id, {
+          name: uploaded.name,
+          size: uploaded.size,
+          mediaType: uploaded.media_type,
+          state: "ready",
+          reference: {
+            content_id: uploaded.content_id,
+            media_type: uploaded.media_type,
+            sha256: uploaded.sha256,
+            truncated: uploaded.truncated,
+          },
+        });
+      } catch (error) {
+        this.patchAttachment(item.id, {
+          state: "failed",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }));
+  }
+
+  removeAttachment(id: string): void {
+    this.pendingAttachments[1]((current) => current.filter((item) => item.id !== id));
+  }
+
+  private patchAttachment(id: string, patch: Partial<PendingAttachment>): void {
+    this.pendingAttachments[1]((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }
 
   async cancelTurn(): Promise<void> {
     await transport.command("conversation", { channel: "conversation", type: "conversation_cancel" }, this.seed);
+  }
+
+  /**
+   * 手动压缩上下文。ack 只代表进队,所以先乐观置 running,否则按钮点了要等
+   * 第一帧过程事件才有反馈;真实终态以 `compact_finished` / `compaction_applied`
+   * 为准。投递失败只是个失败态,原因只在控制台(`compact_finished` 不带原因)。
+   */
+  async compactContext(): Promise<void> {
+    this.compact[1]({ phase: "running", compactId: null, turnsTotal: null, turnsKeeping: null, summary: "" });
+    try {
+      await transport.command("conversation", { channel: "conversation", type: "conversation_compact" }, this.seed);
+    } catch (error) {
+      console.warn("[compact] 压缩命令投递失败", error);
+      this.compact[1]({ phase: "failed" });
+    }
   }
 
   async createSession(): Promise<void> {

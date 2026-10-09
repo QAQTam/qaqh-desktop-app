@@ -227,6 +227,12 @@ try {
   await perfSample("rate300", `window.__stress.scenarios.highRate(300, 6)`).then((detail) => { if (detail) out.steps.push({ name: "rate300", detail }); });
   await perfSample("rate900", `window.__stress.scenarios.highRate(900, 6)`).then((detail) => { if (detail) out.steps.push({ name: "rate900", detail }); });
   await step("checkpoint", `window.__stress.scenarios.checkpoint()`);
+  await step("workCollapse", `window.__stress.scenarios.workCollapse()`);
+  if (selected("workCollapseReduced")) {
+    await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+    await step("workCollapseReduced", `window.__stress.scenarios.workCollapse()`);
+    await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
+  }
   await step("thinking", `window.__stress.scenarios.thinking()`);
   await step("markdownCost", `window.__stress.scenarios.markdownCost()`);
   await step("progressStream:direct", `window.__stress.scenarios.progressStream("direct")`);

@@ -33,6 +33,8 @@ const baseConfig = (): ConfigDto => ({
   activeProfile: "default",
   profiles: ["default", "fast"],
   complianceEnabled: false,
+  exec: { defaultShell: null },
+  sessionIdleUnloadSecs: 0,
   subagent: {
     model: "om-two",
     baseUrl: "https://other.example/compat/v1",

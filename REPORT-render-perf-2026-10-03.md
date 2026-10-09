@@ -385,3 +385,18 @@ A/B 在同一个构建里跑（`direct` 模式由夹具直接逐条 `mutate`，�
 - **真机口径**：以上都是 headless Edge（60Hz 帧钟）+ DEV 构建。要坐实「≥120fps」，需在你的 120Hz 面板上用 WebView2 CDP（第 1 节 lane）跑同一套夹具：`perfSample` 的每帧成本与 `sampleFrames` 的帧间隔分布。
 - **布局侧未单独拆量**：`Markdown.draw()` 只计同步脚本耗时；表格/长段的 layout 由浏览器异步做，本轮只用「帧间隔无 >50ms」间接兜住。
 - 第 9.3 的 `slots` 无界已处理（§9.3 表格：201 → 55 槽、`IMMUTABLE_UPDATE_IN_STORE` 156 → 55）。
+
+---
+
+## 11. 2026-10-09 补充：工具输出文本上限与内存口径（复核）
+
+由「工具行摘要截断过早」这条 UI 反馈顺带复核的，两条结论 + 两条待办。
+
+**内存：有度量、无断言门。** `scripts/stress-cdp.mjs:163-168` 用 `--expose-gc --enable-precise-memory-info` 读 `usedJSHeapSize`，但只 `console.log` 并落进 `QAQH_REPORT` JSON，**不参与判定**；`QAQH_ASSERT=1` 的断言块（`:252-261`）只查 `lostChars / renderedCorrect / textIdentityLost / remainedCollapsed / janks / tableRows / diagnostics`，**不含 heap、domNodes、retainedChars**。`tests/` 里也没有任何堆断言。第 6 节 P1 的 `assertBudget(...)` 至今仍未落地。
+
+**新发现：唯一不限高的文本路径是工具输出。** 终态 `output` / `stderr` 走 `AnsiBlock`（`src/tools/StepRow.tsx:51-66`）→ `<pre class="tool-text">`，前端既不截断也不虚拟化；`.tool-text` / `.tool-command`（`src/styles/app.css:681-692`）**连 `max-height` 都没有**，而同一片区域的邻居全都有（`.tool-progress` `160px`（`:693`）、`.thinking-full` `6.4em`（`:641`）、`.diff-scroll` `min(60vh,480px)`（`:733`））。上限因此只来自后端 daemon：展示正文 `clamp_display_body` 保头 16K 字符（`CONTENT_BEARING_CHAR_LIMIT`），模型面 24K（`TOOL_MODEL_MAX_CHARS`），read 工具 400 行 / 24K 字符、>8 MiB 直接 `file_too_large`；且 `TimelineTool.output` 的契约注释已明确「`output` 就是前端能拿到的全部」，10 MiB 的内容外置在标准模式下永远够不到。
+
+于是**字符数在预算内、但行数极多**的文本会全量进 DOM 且不限高（例：2000 行 × 8 字符 ≈ 16K 字符，仍在 24K 预算之内）→ 转录被撑成几十屏。这与 §2.3「只增不减」同源，只是这次的代价在**高度**而不是 DOM 数量。read 的 400 行封顶意味着「读 2K 行」实际是 5 次调用 5 张卡，单卡不爆，但一回合内总量仍无上限（只有 §9 的 50 回合窗口淘汰兜底）。
+
+- [ ] `.tool-text` 加 `max-height` + 「展开全部」按钮，对齐 `.diff-scroll`（成本极低，堵住唯一不限高的路径）
+- [ ] `scripts/stress-cdp.mjs` 的 `QAQH_ASSERT` 块补 `heap` / `domNodes` / `retainedChars` 阈值，与第 6 节 P1 的 `assertBudget` 合并落一份 budget 基线
