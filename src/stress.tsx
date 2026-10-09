@@ -18,6 +18,8 @@ import { MessageSidebar } from "./app/MessageSidebar";
 import IconArrowLeft from "~icons/lucide/arrow-left";
 import { ToolsPage } from "./app/ToolsPage";
 import { SettingsView } from "./settings/SettingsView";
+import { simMemorySnapshot } from "./lib/memwatch-sim";
+import { openDevConsole } from "./lib/devmode";
 import { reload as reloadSettings } from "./settings/store";
 // Session capsule is reserved for Goal, matching the production shell.
 import { setSessionMaterial, type SessionMaterial } from "./lib/visual";
@@ -314,8 +316,19 @@ if (isVisualPreview) {
     lsp: { enabled: false, idleShutdownSecs: 300, servers: [] },
     tokenizerPath: null,
   };
-  transport.rpc = async <T = unknown>(method: string): Promise<T> => {
+  transport.rpc = async <T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> => {
     if (method === "config.load") return structuredClone(previewConfig) as T;
+    // 开发者控制台夹具:形状与 daemon 的 diagnostics.memory 快照同形且逐秒自走,
+    // 于是表格与环图能在浏览器里验收(见 lib/memwatch-sim.ts)。
+    if (method === "diagnostics.memory.start") return { enabled: true, started_at_ms: Date.now() } as T;
+    if (method === "diagnostics.memory.stop") return { enabled: false } as T;
+    if (method === "diagnostics.memory.snapshot") {
+      const after = typeof params.after_sequence === "number" ? params.after_sequence : null;
+      return simMemorySnapshot(after) as T;
+    }
+    if (method === "daemon.version") return "0.0.0-visual-fixture" as T;
+    if (method === "session.list") return [] as T;
+    if (method === "workspace.list") return { items: [] } as T;
     throw new Error(`visual preview does not mock ${method}`);
   };
 }
@@ -1203,6 +1216,8 @@ if (previewView !== "settings") churnReset();
 void (async () => {
   if (previewView === "settings") {
     await reloadSettings();
+    // 视觉验收要拍到控制台本身,而不是只拍到「关于」里那个后门入口。
+    if (previewParams.get("dev") === "1") openDevConsole();
     return;
   }
   await store.resnapshot();

@@ -51,6 +51,12 @@ const SERVICE_METHODS: &[&str] = &[
     "profile.apply",
     "profile.save_current",
     "profile.delete",
+    // 开发者控制台的内存探测面(daemon 侧 admin scope,service_methods.rs:126-128)。
+    // 采集是 opt-in:`start` 之前 daemon 不采样,`snapshot` 只是读环形缓冲——所以
+    // 这三个方法本身无副作用,放行不扩大写面。
+    "diagnostics.memory.start",
+    "diagnostics.memory.stop",
+    "diagnostics.memory.snapshot",
 ];
 
 /// 这些方法之外都要注入 active session_id(gateway 语义平移)。
@@ -80,6 +86,9 @@ fn service_requires_session(method: &str) -> bool {
             | "profile.apply"
             | "profile.save_current"
             | "profile.delete"
+            | "diagnostics.memory.start"
+            | "diagnostics.memory.stop"
+            | "diagnostics.memory.snapshot"
     )
 }
 
@@ -508,6 +517,31 @@ pub async fn service_rpc(
         .service_v2::<_, Value>(&method, params)
         .await
         .map_err(string_of)
+}
+
+/// `() → ProcessMemory`:**壳自己**这个进程的内存计数。
+///
+/// 复用 daemon 侧那份 psapi/procfs 实现(`qaqh-memwatch::global().snapshot()` 读的
+/// 就是调用方进程),字段与 `diagnostics.memory` 快照里的 `process` 完全同形——前端
+/// 因此能把「壳 / daemon / 界面进程组」拼进同一张表,而不是维护两套 DTO。
+/// macOS 上 memwatch 没有实现,由 `procgroup::shell_process_memory` 用
+/// `phys_footprint` 口径顶上(否则 mac 的「本机」面板第一行永远是空的)。
+///
+/// 两条口径要说清:`peak_resident_bytes` 是 psapi 的**进程全生命周期**峰值,不是本次
+/// 会话的;mac 那一档给的是 footprint,与 Windows 的工作集不能横着比。
+#[tauri::command]
+pub fn host_memory() -> Result<Value, String> {
+    serde_json::to_value(crate::procgroup::shell_process_memory()).map_err(string_of)
+}
+
+/// `() → ProcessGroup`:界面进程组——WebView2 起的各角色子进程各占多少。
+///
+/// 与 `host_memory` 的分工:那条是**壳自己**一个进程,这条是**引擎那一堆**进程
+/// (browser / renderer / gpu / …)。缺了它,「这软件吃多少内存」的答案就永远少一大块,
+/// 因为页面根本不在壳进程里。实现与平台分派见 `procgroup.rs`。
+#[tauri::command]
+pub async fn host_process_group(app: AppHandle) -> Result<Value, String> {
+    serde_json::to_value(crate::procgroup::collect(&app).await).map_err(string_of)
 }
 
 /// `(url) → ()`,仅 http/https,走系统浏览器。

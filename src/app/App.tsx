@@ -49,6 +49,7 @@ import { WorkspacePanel } from "../workspace/WorkspacePanel";
 import { Composer, type SendBlockReason } from "../composer/Composer";
 import { ApprovalStack } from "../approval/ApprovalCards";
 import { SettingsView } from "../settings/SettingsView";
+import { closeDevConsole, devConsoleOpen } from "../lib/devmode";
 import {
   open as settingsOpen,
   requestClose as requestSettingsClose,
@@ -176,6 +177,12 @@ const App: Component = () => {
         event.preventDefault();
         setQuitPrompt(undefined);
         setQuitConfirmStop(false);
+        return;
+      }
+      // 控制台在设置浮层之上:ESC 先退一层,而不是连设置一起关掉。
+      if (event.key === "Escape" && devConsoleOpen()) {
+        event.preventDefault();
+        closeDevConsole();
         return;
       }
       // 浮层开着时快捷键归浮层:Ctrl+T/W/Tab/1-9 不该在遮罩背后建会话、切标签。

@@ -14,6 +14,7 @@ import type {
   TauriHostSurface,
 } from "./backend";
 import { attachmentRefsOf } from "./backend";
+import { noteEvent, noteRpc } from "../devlog";
 
 type HostDiagnostics = {
   onIncompatible?: (details: Record<string, any>) => void;
@@ -107,7 +108,17 @@ export class BrowserPreviewTransport implements TransportBackend, TauriHostSurfa
 
   rpc<T = unknown>(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<T> {
     const scoped = sessionId == null ? params : { ...params, session_id: sessionId };
-    return invoke<T>("service_rpc", { method, params: scoped });
+    const startedAt = Date.now();
+    return invoke<T>("service_rpc", { method, params: scoped }).then(
+      (value) => {
+        noteRpc(method, startedAt, null);
+        return value;
+      },
+      (cause: unknown) => {
+        noteRpc(method, startedAt, cause);
+        throw cause;
+      },
+    );
   }
 
   timelinePage(seed: string, query = ""): Promise<TimelinePageResponse> {
@@ -123,6 +134,7 @@ export class BrowserPreviewTransport implements TransportBackend, TauriHostSurfa
 
   subscribe(handlers: StreamHandlers): Promise<() => void> {
     const unlisten = subscribeEvents(({ event, payload }) => {
+      noteEvent(event, payload);
       if (event === "timeline://entry") {
         const data = payload as { session_id?: string; entry?: Record<string, any> };
         if (typeof data.session_id === "string" && data.entry != null) handlers.onTimelineEntry(data.session_id, data.entry);

@@ -13,6 +13,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type Event, type UnlistenFn } from "@tauri-apps/api/event";
+import { noteEvent, noteRpc } from "../devlog";
 import {
   type Ack,
   type ApprovalView,
@@ -88,7 +89,18 @@ export class TauriTransport implements TransportBackend {
 
   rpc<T = unknown>(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<T> {
     const scoped = sessionId == null ? params : { ...params, session_id: sessionId };
-    return invoke<T>("service_rpc", { method, params: scoped });
+    const startedAt = Date.now();
+    // 开发者模式埋点:只旁听,成功值与错误传播路径都保持原样(失败原样再抛)。
+    return invoke<T>("service_rpc", { method, params: scoped }).then(
+      (value) => {
+        noteRpc(method, startedAt, null);
+        return value;
+      },
+      (cause: unknown) => {
+        noteRpc(method, startedAt, cause);
+        throw cause;
+      },
+    );
   }
 
   async timelinePage(seed: string, query = ""): Promise<TimelinePageResponse> {
@@ -120,7 +132,10 @@ export class TauriTransport implements TransportBackend {
   async subscribe(handlers: StreamHandlers): Promise<() => void> {
     const unlistens: UnlistenFn[] = [];
     const on = async <P>(name: string, run: (payload: P) => void): Promise<void> => {
-      unlistens.push(await listen<P>(name, (event: Event<P>) => run(event.payload)));
+      unlistens.push(await listen<P>(name, (event: Event<P>) => {
+        noteEvent(name, event.payload);
+        run(event.payload);
+      }));
     };
     await on<{ session_id: string; entry: Record<string, any> }>("timeline://entry", (payload) => {
       if (typeof payload?.session_id === "string") handlers.onTimelineEntry(payload.session_id, payload.entry);

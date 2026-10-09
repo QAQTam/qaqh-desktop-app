@@ -11,6 +11,10 @@
 import { render } from "@solidjs/web";
 import App from "./app/App";
 import type { ConfigDto } from "./api/qaqh/ConfigDto";
+import { simMemorySnapshot } from "./lib/memwatch-sim";
+import { openDevConsole } from "./lib/devmode";
+import { openSettings } from "./settings/store";
+import { openSession } from "./tabs/store";
 import type { McpServerDto } from "./api/qaqh/McpServerDto";
 import type { LspServerDto } from "./api/qaqh/LspServerDto";
 
@@ -125,6 +129,26 @@ function serviceRpc(method: string, params: Record<string, unknown>): unknown {
     case "profile.delete":
       probe.config.profiles = probe.config.profiles.filter((name) => name !== String(params.name));
       return null;
+    // 与宿主白名单同调(commands.rs:SERVICE_METHODS):这几条现在是真的放行的方法,
+    // 夹具不接就等于替真宿主放行它不曾放行过的东西——快照用 memwatch-sim 造。
+    case "daemon.version":
+      return "0.0.0-fixture";
+    case "session.list":
+      return [];
+    case "workspace.list":
+      // 裸数组(service.rs:417 `Ok(Value::Array(items))`),与 `todo.list` 的
+      // `{ items }` 不同形;侧栏按数组直接 `.map`,给成对象会当场halt掉反应式系统。
+      return [];
+    // `?dev=1` 会真开一个标签,store 激活时按宿主白名单拉待办;夹具缺这条就会刷一条
+    // 告警出来(真宿主放行,见 commands.rs:SERVICE_METHODS)。
+    case "todo.list":
+      return { items: [] };
+    case "diagnostics.memory.start":
+      return { enabled: true, started_at_ms: Date.now() };
+    case "diagnostics.memory.stop":
+      return { enabled: false };
+    case "diagnostics.memory.snapshot":
+      return simMemorySnapshot(typeof params.after_sequence === "number" ? params.after_sequence : null);
     default:
       // 宿主白名单(commands.rs 的 SERVICE_METHODS)之外的方法在这里也必须失败,
       // 否则夹具会替真实宿主放行它不曾放行的东西。
@@ -218,6 +242,37 @@ const internals = {
     if (cmd === "app_version") {
       return { version: "2.0.0-beta.4", commit: "fixture0", display: "2.0.0-beta.4-fixture0" };
     }
+    // 界面进程组(commands.rs::host_process_group 的替身)。形状照 procgroup.rs:
+    // 角色由「引擎」自报、字节量逐成员给;最后那条 utility 故意读不到,用来验
+    // 「失败不静默跳过」——它该进 excluded 而不是被少加。
+    if (cmd === "host_process_group") {
+      const wave = Math.round(Math.sin(Date.now() / 7_000) * 3_000_000);
+      return {
+        source: "webview2.pids+psapi",
+        error: null,
+        members: [
+          { pid: 4100, kind: "browser", resident_bytes: 96_000_000 + wave, private_bytes: 88_000_000, error: null },
+          { pid: 4120, kind: "renderer", resident_bytes: 168_000_000 + wave * 2, private_bytes: 150_000_000, error: null },
+          { pid: 4131, kind: "renderer", resident_bytes: 42_000_000, private_bytes: 36_000_000, error: null },
+          { pid: 4108, kind: "gpu", resident_bytes: 54_000_000, private_bytes: 47_000_000, error: null },
+          { pid: 4144, kind: "utility", resident_bytes: null, private_bytes: null, error: "OpenProcess(4144) failed: 拒绝访问" },
+        ],
+      };
+    }
+    // 壳自己的内存计数(commands.rs::host_memory 的替身)。字段与 psapi 分支同形,
+    // 让「本机」面板在浏览器里也有数可拍;private 给值、virtual 给 null,顺带验一次
+    // 「缺测显示 —」而不是冒充 0。
+    if (cmd === "host_memory") {
+      const resident = 214_000_000 + Math.round(Math.sin(Date.now() / 9_000) * 4_000_000);
+      return {
+        resident_bytes: resident,
+        private_bytes: resident - 18_000_000,
+        virtual_bytes: null,
+        peak_resident_bytes: 268_000_000,
+        source: "fixture.psapi",
+        error: null,
+      };
+    }
     if (cmd === "devices_list") {
       return {
         devices: [
@@ -249,3 +304,16 @@ window.__qaqhProbe = probe;
 
 const root = document.getElementById("root");
 if (root != null) render(() => <App />, root);
+
+/**
+ * `?dev=1`:给开发者控制台铺一层「可拍的真状态」——开一个假会话标签(活动面板就
+ * 有 store 可读)、打开设置、并解锁控制台。默认不开:既有断言与基线都不受影响。
+ * 走的是真 `App` + 真 `TauriTransport`,所以事件流面板在这里能看到埋点真的记到了
+ * 收发(stress.tsx 那条路把 `transport.rpc` 整个替掉了,绕过埋点)。
+ */
+const devHarness = new URLSearchParams(window.location.search).get("dev") === "1";
+if (devHarness) {
+  void openSession("seed_dev_preview");
+  void openSettings();
+  openDevConsole();
+}

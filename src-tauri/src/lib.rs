@@ -13,6 +13,7 @@ mod daemon;
 mod events;
 mod lan;
 mod pairing;
+mod procgroup;
 mod version;
 
 use tauri::{
@@ -113,6 +114,8 @@ pub fn run() {
             commands::timeline_page,
             commands::session_bootstrap,
             commands::service_rpc,
+            commands::host_memory,
+            commands::host_process_group,
             commands::open_external,
             commands::streams_retry,
             commands::stop_stale_daemon,

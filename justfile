@@ -11,7 +11,11 @@ set windows-shell := ["pwsh.exe", "-NoLogo", "-Command"]
 # 即 daemon LAN 双 listener）。src-tauri 用 path 依赖指向 ../qaqh-backend，
 # 编译结果跟着那个 worktree 的 checkout 走——所以构建前先断言它在场，
 # 别让人对上 8 个 E0609。后端并行分支合流后可以把它往前挪。
-BACKEND_CONTRACT_REV := "d454865"
+#
+# 221f58e 起再抬一档:壳的 `host_memory` 命令要用 `qaqh-memwatch` 的
+# `global().snapshot()`(内存探测的进程计数面)。这条 pin 上移意味着**打壳包**
+# 的人必须把 ../qaqh-backend 更到含该提交的版本;`just verify-backend` 会先拦住。
+BACKEND_CONTRACT_REV := "221f58e"
 
 # Intel mac 的产物三元组，显式传而不靠推断：Apple Silicon 上的 Rosetta shell 会把
 # host tuple 报成 x86_64，反过来原生 arm64 的 sidecar 在 Intel 机器上装不上——

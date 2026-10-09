@@ -3173,6 +3173,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "qaqh-memwatch"
+version = "2.0.0-beta.3"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "qaqh-message"
 version = "2.0.0-beta.3"
 dependencies = [
@@ -3226,8 +3233,10 @@ version = "2.0.0-beta.4"
 dependencies = [
  "axum",
  "futures-util",
+ "libc",
  "log",
  "qaqh-client",
+ "qaqh-memwatch",
  "qaqh-types",
  "rand 0.10.3",
  "reqwest",
@@ -3241,7 +3250,9 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tokio",
  "tokio-stream",
+ "webview2-com",
  "window-vibrancy",
+ "windows-core",
 ]
 
 [[package]]

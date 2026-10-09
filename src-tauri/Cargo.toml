@@ -26,11 +26,27 @@ futures-util = "0.3"
 window-vibrancy = "0.8"
 qaqh-client = { path = "../../qaqh-backend/crates/qaqh-client" }
 qaqh-types = { path = "../../qaqh-backend/crates/qaqh-types" }
+# 壳自己的内存计数(`commands::host_memory`)复用 daemon 那份 psapi/procfs 实现,
+# 两边 DTO 同形——前端才能把「壳」与「daemon」两行拼进同一张表。只依赖 serde。
+qaqh-memwatch = { path = "../../qaqh-backend/crates/qaqh-memwatch" }
 # 设备配对(pairing.rs)直连 daemon 的 ringing v2 HTTPS 面;特性集与
 # qaqh-client 保持一致(rustls-no-provider + 进程内 ring provider),
 # 避免拖第二套 TLS 栈进产物。
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+
+# 界面进程组(`procgroup.rs`):要问 WebView2 引擎「你起了哪些进程、各是什么角色」,
+# 就得用它的接口类型,而 tauri 不 re-export `webview2_com`。`windows-core` 只为
+# `Interface::cast`(两者都已在依赖图里,不新增下载)。
+[target."cfg(windows)".dependencies]
+webview2-com = "0.39"
+windows-core = "0.62"
+
+# mac 的界面进程组(`procgroup.rs`):`proc_listchildpids` / `proc_pidpath` /
+# `proc_pid_rusage` + `rusage_info_v4` 都在 libc 里声明好了,所以不用手写
+# 结构体布局(那正是最容易把字段偏移记错的地方)。libc 已在依赖图里,不新增下载。
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
 
 [lints]
 workspace = true
