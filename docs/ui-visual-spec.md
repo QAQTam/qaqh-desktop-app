@@ -1,6 +1,17 @@
 # QAQH 桌面 UI 视觉优化 Spec
 
-版本：1.4 · 日期：2026-10-09 · 状态：主界面设计语言已收敛
+版本：1.5 · 日期：2026-10-09 · 状态：主界面设计语言已收敛
+
+### 1.5 输入区对齐 Qoder（会话级 profile + 身份行）
+
+- 目标：输入区同时回答「我现在在哪、用什么跑、上下文多满」，并让模型／端点切换就地完成。
+- **profile 选择器（会话级，已接线）**：读 `session.meta` 的 `profile`，写 `session.set_profile { name }`；空 name = 清除选择、跟随全局 `active_profile`。daemon 只定向重载该会话（`AgentReloadConfig`），不动其他会话，也不写全局配置。宿主侧 `session.set_profile` 在 `SERVICE_METHODS` 白名单里、且**不在**会话豁免名单里，所以 `service_rpc` 会注入活动 seed（前端另传 seed 时以参数为准）。
+- **生效时机是 turn 边界，不是 ack**：daemon 的 ack 只表示命令进了队，而 `meta.json` 写得比生效早。因此选择器一律**重读 `session.meta`**（`setSessionProfile` 之后与每次 `turn_finished`），不做乐观落库；菜单尾部一行说明「新配置在下一个回合开始时用」。
+- **模型不是独立可写的会话字段**：模型是 profile 的属性，控件标签展示 `profile → model`，菜单列出 `ConfigDto.profiles` 名录；不提供「临时换模型 ID」的假入口。但 **model 只能从全局扁平值推**：`ConfigDto` 只下发活跃 profile 的 `model`，名录里其他 profile 不带自己的 model，`SessionMeta.model` 又是建会话那一刻的快照（`reload_config` 不回写）。所以「本会话选了非活跃 profile」时标签只显示 profile 名、菜单项标「该 profile 的模型名未公开」，不拿快照充数。
+- **权限档位不进输入区**：`permission_level` 在 daemon 中只有全局一份（`apply_profile` 不覆盖它，`SessionMeta` 无该字段），就地切换会造成「以为只影响本会话」的误解。档位仍只在设置页改，经 `config.save` 单一写口。
+- **身份行（输入区表面外下方，只读，已接线）**：当前会话工作区名（sessions 目录项的 `cwd`/`workspace_id` + `workspaceCatalog`，取不到就整项不摆，不说「未分组」）、本地或局域网（`daemon_lan_status`，开局读一次）、上下文百分比 + 进度条 + tok/s + 缓存命中 + 端点原生 usage 项。原先贴在表面内的 `.composer-metrics` 条并入这一行，输入表面内只剩写与发。注意它与工具栏「新建会话目标工作区」选择器语义不同（前者是当前会话，后者是待建目标），两者不合并。
+- 沿用现有 token 与 popover 菜单模式，不新增模态。
+- 待办：`ConfigDto.profiles` 暴露每个 profile 的 model／是否自带 key（P1，补齐上面那条标签）；git 分支 chip（P1，`git.branch` 已在宿主白名单，缺 DTO + 调用）；拖拽／粘贴附件与图片多模态（P2）。
 
 ### 1.4 工作区面板改为真实右栏（覆盖 1.3 的浮层方案）
 
@@ -220,7 +231,9 @@ Web 首版只有顶部 session tabs 使用 backdrop blur。Tauri 壳另外允许
 
 输入容器为普通表面，1px 边框，20px 圆角。焦点时强化边框；不对整个容器做持续发光。主发送动作使用 accent；运行时取消动作有明确标签，沿用现有发送／取消规则。
 
-保留 Enter／Shift+Enter、IME 组合输入、草稿按会话保存、附件与发送阻塞原因等现有行为。禁止视觉改造期间改写 composer 数据流。
+表面内自上而下：附件 chip 行（有附件时）→ 文本域 → 动作行（左：附件 `+`、profile／模型选择器；右：发送／取消）。表面外下方是**只读身份行**：当前会话工作区、本地／局域网、上下文百分比 + 进度条 + tok/s。摆放与语义见 §1.5。
+
+保留 Enter／Shift+Enter、IME 组合输入、草稿按会话保存、附件与发送阻塞原因等现有行为。§1.5 列出的 profile 选择器是**唯一**允许在视觉改造中改写的数据流（原型 → `session.set_profile`）；其余 composer 数据流仍不得改写。权限档位不在输入区出现。
 
 思考栏固定 28px，高度不随文本变化。文字单行、截尾；退出思考／更换块按现有逻辑清理。高速思考不逐 token 触发屏幕阅读器播报：状态播报使用独立、低频的状态信息，可见文字不作为持续 live region。
 

@@ -1087,18 +1087,21 @@
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     padding: 0 8px 8px 9px;
   }
-  .composer-metrics {
+  /* 只读身份行(§1.5):在输入表面**外**的下方,与表面同宽对齐;不描边、
+     不占输入高度,所以它永远不会盖住正文。 */
+  .composer-identity {
+    width: min(var(--content-width), 100%); margin: 6px auto 0;
     display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px;
-    min-height: 28px; padding: 5px 12px 7px;
-    border-top: 1px solid var(--border);
+    min-height: 20px; padding: 0 4px;
     color: var(--muted); font-size: 10px; line-height: 1.4;
     font-variant-numeric: tabular-nums;
   }
-  .composer-metrics > span { white-space: nowrap; }
-  .composer-metrics strong { color: var(--text); font-weight: 600; }
+  .composer-identity > span { white-space: nowrap; }
+  .composer-identity strong { color: var(--text); font-weight: 600; }
+  .composer-identity-item { display: inline-flex; align-items: center; gap: 4px; }
+  .composer-identity-item svg { width: 12px; height: 12px; flex: none; }
   .composer-controls, .composer-submit-area { display: flex; align-items: center; gap: 5px; min-width: 0; }
   .composer-submit-area { flex: none; }
-  .composer-preview-label { padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--muted); font-size: 10px; white-space: nowrap; }
   .composer-control-wrap { position: relative; min-width: 0; }
   .composer-tool-button {
     display: inline-flex; align-items: center; justify-content: center; gap: 5px;
@@ -1114,11 +1117,12 @@
   .composer-tool-button svg { width: 14px; height: 14px; flex: none; }
   .composer-add-file { width: 32px; padding: 0; border-color: var(--border); color: var(--text); }
   .composer-add-file svg { width: 16px; height: 16px; }
-  .composer-config-label { color: var(--muted); }
-  .composer-model-button { color: var(--text); font-family: var(--font-mono); font-size: 11px; }
-  .composer-model-wrap { max-width: min(240px, 26vw); }
-  .composer-model-button span { overflow: hidden; text-overflow: ellipsis; }
-  .composer-shortcut-hint { color: var(--muted); font-size: 10px; white-space: nowrap; }
+  /* 会话级 profile 选择器(§1.5):profile 名 + 生效 model 同一个 chip——
+     model 是 profile 的属性,不单独给「临时换个模型 ID」的假入口。 */
+  .composer-profile-button { max-width: min(280px, 34vw); color: var(--text); }
+  .composer-profile-button > span { overflow: hidden; text-overflow: ellipsis; }
+  .composer-profile-model { color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+  .composer-profile-menu { max-height: 46vh; overflow-y: auto; }
   .composer-menu {
     position: absolute; z-index: 30; bottom: calc(100% + 8px); left: 0;
     display: grid; gap: 3px; width: 260px; max-width: min(280px, 80vw);
@@ -1134,8 +1138,9 @@
   .composer-menu > button:hover, .composer-menu > button.selected { background: var(--surface-2); }
   .composer-menu > button small, .composer-menu-note { color: var(--muted); font-size: 10px; line-height: 1.4; }
   .composer-menu-note { padding: 5px 7px 2px; }
-  /* 新建会话的工作区选择:只作用于新建,和「配置/模型」那几个原型控件不同,
-     这个在生产里常显。长路径折行会撑破菜单,故路径行省略号截断。 */
+  /* 新建会话的工作区选择:只作用于新建,和上面那个「本会话 profile」chip 语义
+     不同(前者是待建目标,后者是当前会话),所以两者都留着、不合并(§1.5)。
+     长路径折行会撑破菜单,故路径行省略号截断。 */
   .composer-workspace-button { max-width: min(220px, 28vw); color: var(--text); }
   .composer-workspace-button span { overflow: hidden; text-overflow: ellipsis; }
   .composer-workspace-menu { max-height: 46vh; overflow-y: auto; }
@@ -1625,10 +1630,13 @@
     .tab-more span { display: none; }
   }
   @container composer (max-width: 620px) {
-    .composer-preview-label, .composer-shortcut-hint, .composer-config-label { display: none; }
-    .composer-control-wrap:first-of-type .composer-tool-button > span { display: none; }
-    .composer-model-wrap { max-width: 112px; }
+    /* 工作区 chip 有文件夹图标可退,窄起来只丢文字;profile chip 没有图标,
+     所以保住它的名字,再窄一档才丢 model 尾巴。 */
+    .composer-workspace-button > span { display: none; }
     .composer-toolbar { gap: var(--space-2); }
+  }
+  @container composer (max-width: 460px) {
+    .composer-profile-model { display: none; }
   }
   @container composer (max-width: 360px) {
     .composer-controls { flex-wrap: wrap; gap: var(--space-1); }
@@ -1661,16 +1669,15 @@
       position: fixed; left: 50%; right: auto; top: 98px; bottom: auto;
       transform: translateX(-50%); transform-origin: top center;
     }
-    .composer-design-preview { padding-inline: 10px; }
-    .composer-design-preview .composer-toolbar { gap: 4px; padding-inline: 6px; }
-    .composer-design-preview .composer-controls { gap: 2px; }
-    .composer-design-preview .composer-tool-button { gap: 3px; padding-inline: 5px; }
-    .composer-design-preview .composer-control-wrap:first-of-type .composer-tool-button > span { display: none; }
-    .composer-design-preview .composer-config-label { display: none; }
-    .composer-design-preview .composer-model-wrap { max-width: 112px; }
-    .composer-design-preview .composer-preview-label,
-    .composer-design-preview .composer-shortcut-hint { display: none; }
-    .composer-design-preview .composer-menu { width: min(260px, 82vw); }
+    /* 窄窗口下输入区动作行的紧凑化(原设计预览专用,现在就是生产形状)。
+       注意别在这里给 #composer 改 padding-inline:它靠 `var(--content-gutter)`
+       与正文列对齐,曾经的 `.composer-design-preview{padding-inline}` 之所以
+       没生效,是因为同元素上的 `#composer` 规则特异性更高。 */
+    .composer-toolbar { gap: 4px; padding-inline: 6px; }
+    .composer-controls { gap: 2px; }
+    .composer-tool-button { gap: 3px; padding-inline: 5px; }
+    .composer-workspace-button > span { display: none; }
+    .composer-menu { width: min(260px, 82vw); }
   }
   @media (forced-colors: active) {
     :root {

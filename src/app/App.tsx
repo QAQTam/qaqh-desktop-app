@@ -47,6 +47,7 @@ import {
 import { SessionView } from "../session/SessionView";
 import { WorkspacePanel } from "../workspace/WorkspacePanel";
 import { Composer, type SendBlockReason } from "../composer/Composer";
+import { lanActive, refreshLanStatus, sessionWorkspaceName } from "../composer/identity";
 import { ApprovalStack } from "../approval/ApprovalCards";
 import { SettingsView } from "../settings/SettingsView";
 import { closeDevConsole, devConsoleOpen } from "../lib/devmode";
@@ -105,6 +106,8 @@ const App: Component = () => {
     });
     // 后台标签状态点(§5.2):轮询 sessions 列表(turn_count/running/title)。
     const poll = setInterval(() => void pollSessions(), 15_000);
+    // 身份行的局域网判据读一次就够:开/关局域网都要重启 daemon,那是设置页的动作。
+    void refreshLanStatus();
     const onFocus = (): void => {
       void pollSessions();
       const tab = activeTab();
@@ -327,6 +330,18 @@ const App: Component = () => {
     }
   };
 
+  /**
+   * 会话级换 profile(§1.5)。失败必须出声:菜单已关、控件回到旧值,
+   * 不提示就等于「点了没反应」。
+   */
+  const switchProfile = async (tab: Tab, name: string | null): Promise<void> => {
+    try {
+      await tab.store.setSessionProfile(name);
+    } catch (error) {
+      toast(`${STR.profileSwitchFailed}：${String(error instanceof Error ? error.message : error)}`, "err");
+    }
+  };
+
   /** 输入区的工作区选择:两处 Composer(空态页 / 会话页)共用同一份选择。 */
   const workspacePicker = {
     workspaces: () => workspaceCatalog(),
@@ -431,6 +446,7 @@ const App: Component = () => {
                   focusToken={0}
                   autoFocus={false}
                   placeholder={STR.emptyComposer}
+                  lanActive={lanActive}
                   {...workspacePicker}
                 />
               </div>
@@ -468,6 +484,10 @@ const App: Component = () => {
                       })}
                       attachments={() => tab.store.pendingAttachments[0]()}
                       onRemoveAttachment={(id) => tab.store.removeAttachment(id)}
+                      profileView={() => tab.store.composerProfile[0]()}
+                      onProfile={(name) => void switchProfile(tab, name)}
+                      sessionWorkspace={() => sessionWorkspaceName(tab.seed)}
+                      lanActive={lanActive}
                       {...workspacePicker}
                     />
                     <WorkspacePanel store={tab.store} />

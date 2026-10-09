@@ -145,10 +145,17 @@ async function capture(name, { view, theme, material, width, height, section, cl
       const a = turn.getBoundingClientRect(), b = composer.getBoundingClientRect();
       const m = messages.getBoundingClientRect(), p = surface.getBoundingClientRect();
       const h = head.getBoundingClientRect(), c = body.getBoundingClientRect();
+      // 身份行(§1.5):在表面外下方、与表面同宽;profile chip 必须在动作行里。
+      const id = document.querySelector('.composer-identity');
+      const i = id == null ? null : id.getBoundingClientRect();
       const panelOpen = !panel.classList.contains('collapsed');
-      return { leftDelta: Math.abs(a.left - b.left), rightDelta: Math.abs(a.right - b.right), messageWidth: a.width, messagesWidth: m.width, composerWidth: b.width, panelHeight: p.height, bodyBelowHeader: !panelOpen || c.top >= h.bottom - 1, overflow: document.documentElement.scrollWidth > innerWidth, panelOpen, noOverlap: p.left >= m.right - 1 };
+      const hasIdentity = i != null;
+      return { leftDelta: Math.abs(a.left - b.left), rightDelta: Math.abs(a.right - b.right), messageWidth: a.width, messagesWidth: m.width, composerWidth: b.width, panelHeight: p.height, bodyBelowHeader: !panelOpen || c.top >= h.bottom - 1, overflow: document.documentElement.scrollWidth > innerWidth, panelOpen, noOverlap: p.left >= m.right - 1, identityBelowSurface: !hasIdentity || i.top >= b.bottom - 1, identityAligned: !hasIdentity || (Math.abs(i.left - b.left) <= 2 && Math.abs(i.right - b.right) <= 2), profileChip: !hasIdentity || document.querySelector('.composer-profile-button') != null };
     })()`);
-    if (geometry.leftDelta > 2 || geometry.rightDelta > 2 || geometry.overflow || !geometry.noOverlap || !geometry.bodyBelowHeader) throw new Error(`${name}: alignment failed ${JSON.stringify(geometry)}`);
+    if (geometry.leftDelta > 2 || geometry.rightDelta > 2 || geometry.overflow || !geometry.noOverlap || !geometry.bodyBelowHeader
+      || !geometry.identityBelowSurface || !geometry.identityAligned || !geometry.profileChip) {
+      throw new Error(`${name}: alignment failed ${JSON.stringify(geometry)}`);
+    }
     if (closed) {
       // Refresh the local snapshot while collapsed: the same header must survive.
       await cdp.evaluate("window.__stress.store.todos[1](window.__stress.store.todos[0]().map(item => ({ ...item })))");

@@ -1056,6 +1056,23 @@ const fixtureMetrics = {
   extras: { completion_thinking_tokens: 32, credit: 4 },
 };
 
+/**
+ * 夹具的会话级 profile 视图(§1.5)。推导规则和真实 store 一致:选了本会话专属
+ * 的 profile 就拿不到它的 model(`ConfigDto` 只下发活跃 profile 的),于是看得出
+ * 「model 未公开」那一档长什么样。
+ */
+const [previewProfile, setPreviewProfile] = createSignal<string | null>(null);
+const fixtureProfileView = (): import("./session/store").SessionProfileView => {
+  const selected = previewProfile();
+  return {
+    selected,
+    activeProfile: "视觉验收",
+    effective: selected ?? "视觉验收",
+    model: selected == null ? "qaqh-visual-preview" : null,
+    catalog: ["视觉验收", "本地模型"],
+  };
+};
+
 /** `?compact=` → 夹具的确定性压缩态(idle 时返回 idle,卡片不渲染)。 */
 function fixtureCompactState(): import("./session/store").CompactState {
   if (previewCompact === "running") {
@@ -1195,7 +1212,10 @@ render(
                 onPickAttachments={simulateAttach}
                 attachments={() => previewActiveTab().store.pendingAttachments[0]()}
                 onRemoveAttachment={(id) => previewActiveTab().store.removeAttachment(id)}
-                showDesignControls
+                profileView={fixtureProfileView}
+                onProfile={setPreviewProfile}
+                sessionWorkspace={() => "qaqh"}
+                lanActive={() => false}
               />
               <WorkspacePanel store={previewActiveTab().store} />
             </div>

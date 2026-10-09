@@ -84,6 +84,20 @@ export const STR = {
   workspaceChooseFolderHint: "注册为新工作区并设为新建目标",
   workspaceRegisterFailed: "注册工作区失败",
   workspacePickerFailed: "打开文件夹选择器失败",
+  // 输入区的会话级 profile 选择(只改本会话,全局配置不动)。
+  profilePickTitle: (name: string) => `本会话的模型配置:${name}`,
+  profilePickMenu: "本会话的模型配置",
+  profileFollowGlobal: "跟随全局",
+  profileFollowGlobalHint: "用设置页当前激活的 profile",
+  profileTakesEffectHint: "只改这个会话;新配置在下一个回合开始时用",
+  profileModelHidden: "该 profile 的模型名未公开",
+  profileSwitchFailed: "切换会话配置失败",
+  // 表面外下方的只读身份行。
+  identityTitle: "当前会话",
+  identityWorkspaceTitle: (name: string) => `当前会话的工作区:${name}`,
+  netLocal: "本地",
+  netLan: "局域网",
+
   // 侧栏会话行的「…」菜单(只动组织归属,不动会话运行目录)。
   sessionActions: "会话操作",
   moveToWorkspace: "移动到工作区",

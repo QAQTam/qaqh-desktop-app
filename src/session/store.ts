@@ -60,6 +60,31 @@ export interface ComposerMetrics {
   extras: Record<string, number>;
 }
 
+/**
+ * 输入区 profile 选择器的视图(spec §1.5)。
+ *
+ * 三份来源拼一个数,各自都不能单独当真相:
+ *  - `selected` 来自 `session.meta` 的 `profile`(会话级,落 meta.json);
+ *  - `catalog`/`activeProfile` 来自全局 `config.load`;
+ *  - `model` **只能从全局扁平值推**:`ConfigDto` 只下发活跃 profile 的 model,
+ *    名录里别的 profile 不带它。所以选了这个会话专属的 profile 时 `model` 为
+ *    null,由 UI 留空而不是拿 `SessionMeta.model`(建会话那一刻的快照,
+ *    `reload_config` 不回写它)冒充生效值。
+ */
+export interface SessionProfileView {
+  selected: string | null;
+  /** 全局 `active_profile`:「跟随全局」这一项实际会用到谁。 */
+  activeProfile: string | null;
+  effective: string | null;
+  model: string | null;
+  catalog: string[];
+}
+
+/** `session.meta` 条目(`SessionListEntry`,`meta` 字段在 wire 上是平铺的)。 */
+type SessionMetaWire = { profile?: string | null };
+/** `config.load` 里与 profile 选择器有关的三个字段。 */
+type ConfigProfileView = { activeProfile: string; model: string; profiles: string[] };
+
 function cacheHitPercent(usage: UsageInfo): number | null {
   if (usage.cache_usage_reported !== true) return null;
   const total = usage.prompt_cache_hit_tokens + usage.prompt_cache_miss_tokens;
@@ -91,6 +116,7 @@ export class SessionStore {
   connection = createSignal<ConnectionKind>("reconnecting");
   activity = createSignal<SessionActivity | null>(null);
   composerMetrics = createSignal<ComposerMetrics>({ tokensPerSecond: null, contextPercent: null, cacheHitPercent: null, extras: {} });
+  composerProfile = createSignal<SessionProfileView>({ selected: null, activeProfile: null, effective: null, model: null, catalog: [] });
   title = createSignal<string | null>(null);
   pending = createSignal<ApprovalView[]>([]);
   todos = createSignal<TodoItemWire[]>([]);
@@ -143,6 +169,11 @@ export class SessionStore {
   private contextRefreshId = 0;
   /** 分母:最近一次 `config.load` 读到的窗口。 */
   private contextLength: number | null = null;
+  /** `session.meta.profile`(会话级选择);null = 跟随全局 `active_profile`。 */
+  private metaProfile: string | null = null;
+  /** 最近一次 `config.load` 的 profile 面:名录 + 活跃项 + 活跃项的 model。 */
+  private configProfile: ConfigProfileView | null = null;
+  private profileRefreshId = 0;
   /** 分子:上一轮服务端 usage 的 `prompt_tokens`,即真正发出去的上下文。 */
   private measuredContextTokens: number | null = null;
 
@@ -180,7 +211,8 @@ export class SessionStore {
     void this.refreshApprovals();
     void this.refreshTodos();
     void this.refreshActivity();
-    void this.refreshContextLength();
+    void this.refreshConfigView();
+    void this.refreshProfile();
   }
 
   /** 失去活动资格(别的标签接管):退订宿主事件保状态(流由宿主在新 attach 时停)。 */
@@ -432,7 +464,9 @@ export class SessionStore {
         if (delta.kind === "turn_finished") {
           this.activeTurnStartedAt = null;
           this.activeAnswerBlockIds.clear();
-          void this.refreshContextLength();
+          // 换 profile 的重载就在 turn 边界生效,回合结束正好把新配置与新选择读回来。
+          void this.refreshConfigView();
+          void this.refreshProfile();
         }
       }
     }
@@ -513,8 +547,11 @@ export class SessionStore {
     }));
   }
 
-  /** 只取窗口这一个数当百分比分母;分子不由这里产生(来自 usage 流)。 */
-  private async refreshContextLength(): Promise<void> {
+  /**
+   * 取全局配置的 composer 视图:窗口(百分比分母)+ profile 名录。
+   * 分子与「本会话选了哪个 profile」都不由这里产生。
+   */
+  private async refreshConfigView(): Promise<void> {
     if (this.disposed) return;
     const refreshId = ++this.contextRefreshId;
     try {
@@ -522,10 +559,51 @@ export class SessionStore {
       if (this.disposed || refreshId !== this.contextRefreshId) return;
       const length = config?.contextLength;
       if (length != null && Number.isFinite(length) && length > 0) this.contextLength = length;
+      this.configProfile = { activeProfile: config.activeProfile, model: config.model, profiles: [...config.profiles] };
       this.publishContextPercent();
+      this.publishProfileView();
     } catch {
       // Keep the last known window; metrics are an optional HUD.
     }
+  }
+
+  /** 三份来源拼一个视图:`session.meta` 的选择 + 全局名录 + 全局活跃项。 */
+  private publishProfileView(): void {
+    const config = this.configProfile;
+    const selected = this.metaProfile;
+    // 只有生效项就是全局活跃 profile 时,扁平 model 才真的是它的 model;
+    // 选了别的 profile 就留空,由 UI 显示「model 未公开」而不是拿创建时刻的快照充数。
+    const followsGlobal = selected == null || selected === config?.activeProfile;
+    this.composerProfile[1]({
+      selected,
+      activeProfile: config?.activeProfile ?? null,
+      effective: selected ?? config?.activeProfile ?? null,
+      model: followsGlobal ? config?.model ?? null : null,
+      catalog: config?.profiles ?? [],
+    });
+  }
+
+  /**
+   * 重读会话自己的 profile。必须重读而不能乐观落库:daemon 的 ack 只表示命令
+   * 进了队,重载要等 turn 边界才发生,而 meta.json 写得更早(spec §1.5)。
+   */
+  async refreshProfile(): Promise<void> {
+    if (this.disposed) return;
+    const refreshId = ++this.profileRefreshId;
+    try {
+      const meta = await transport.rpc<SessionMetaWire>("session.meta", {}, this.seed);
+      if (this.disposed || refreshId !== this.profileRefreshId) return;
+      this.metaProfile = typeof meta?.profile === "string" && meta.profile !== "" ? meta.profile : null;
+    } catch {
+      // best-effort:选择器退回「跟随全局」,下一次 turn 结束再取。
+    }
+    this.publishProfileView();
+  }
+
+  /** 会话级换 profile;`null` = 清除选择、回到跟随全局 `active_profile`。 */
+  async setSessionProfile(name: string | null): Promise<void> {
+    await transport.rpc("session.set_profile", { name: name ?? "" }, this.seed);
+    await this.refreshProfile();
   }
 
   async refreshActivity(): Promise<void> {

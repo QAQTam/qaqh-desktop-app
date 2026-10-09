@@ -51,6 +51,10 @@ const SERVICE_METHODS: &[&str] = &[
     "profile.apply",
     "profile.save_current",
     "profile.delete",
+    // 会话级 profile 选择(输入区):写 `SessionMeta.profile` 后 daemon 只定向重载
+    // 该会话,不动全局 `active_profile`,所以它不在上面那批「会话无关」豁免里——
+    // `service_requires_session` 会注入活动 seed,前端另传 seed 时以参数为准。
+    "session.set_profile",
     // 开发者控制台的内存探测面(daemon 侧 admin scope,service_methods.rs:126-128)。
     // 采集是 opt-in:`start` 之前 daemon 不采样,`snapshot` 只是读环形缓冲——所以
     // 这三个方法本身无副作用,放行不扩大写面。
