@@ -1,8 +1,19 @@
 {
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "transparent": true
+      }
+    ]
+  },
   "bundle": {
     "targets": ["app", "dmg"],
     "macOS": {
-      "minimumSystemVersion": "15.0"
+      "minimumSystemVersion": "15.0",
+      "infoPlist": "Info.plist"
     }
   }
 }

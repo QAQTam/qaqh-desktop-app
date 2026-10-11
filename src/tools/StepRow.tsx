@@ -10,6 +10,7 @@ import IconCopy from "~icons/lucide/copy";
 import IconLoader from "~icons/lucide/loader-circle";
 import IconX from "~icons/lucide/x";
 import { Collapse } from "../ui/Collapse";
+import { TextShimmer } from "../ui/TextShimmer";
 import { hasAnsi, parseAnsi } from "../lib/ansi";
 import { STR, formatWorkDuration } from "../lib/strings";
 import { now } from "../lib/time";
@@ -87,13 +88,25 @@ export const ToolDetail: Component<{ step: ToolStep }> = (props) => {
   </div>;
 };
 
-export const StepRow: Component<{ step: ToolStep; turn: Turn; expandable?: boolean; cwd?: string | null }> = (props) => {
+export const StepRow: Component<{ step: ToolStep; turn: Turn; expandable?: boolean; cwd?: string | null; isLatest?: boolean; isShimmer?: boolean }> = (props) => {
   const step = () => props.step;
   const kind = () => isSkillStep(step()) ? "skill" : toolPresentation(step());
   const semantic = () => semanticLabel(step());
   const commandIcon = () => kind() === "shell" ? toolCommandIcon(step().argsJson, step().display) : undefined;
   const paths = createMemo(() => ["read", "edit"].includes(kind()) ? toolPaths(step(), props.cwd) : []);
   const summary = () => semantic() ? "" : paths().length ? paths().join(" · ") : primaryArg(step().argsJson, step().display);
+  const isLatest = createMemo(() => {
+    if (props.isLatest !== undefined) return props.isLatest;
+    const toolSteps = (props.turn?.steps ?? []).filter((s) => s.kind === "tool");
+    return toolSteps.length > 0 && toolSteps[toolSteps.length - 1]?.id === step().id;
+  });
+  const isShimmer = createMemo(() => {
+    if (props.isShimmer !== undefined) return props.isShimmer;
+    const st = step().status;
+    if (st === "error" || st === "denied" || st === "aborted") return false;
+    const active = isLatest() || st === "running" || st === "pending";
+    return Boolean(active && (summary() || commandIcon()));
+  });
   const hasDetails = () => kind() === "shell"
     || (["read", "edit"].includes(kind()) && step().status === "success" && Boolean(step().output?.diffText))
     || Boolean(step().error || (step().permission && ["pending", "running"].includes(step().status)));
@@ -105,7 +118,7 @@ export const StepRow: Component<{ step: ToolStep; turn: Turn; expandable?: boole
     const add = step().display?.lines_added ?? 0, del = step().display?.lines_removed ?? 0;
     return add || del ? { add, del } : null;
   });
-  return <div class={{ "step-row": true, tool: true, [`st-${step().status}`]: true }}>
+  return <div class={{ "step-row": true, tool: true, [`st-${step().status}`]: true, "is-latest": isLatest() }}>
     <button type="button" class="tool-head" disabled={!hasDetails()} aria-expanded={hasDetails() ? open() ? "true" : "false" : undefined} onClick={() => setOverride(!open())}>
       <Switch>
         <Match when={step().status === "pending" || step().status === "running"}><span class="tool-icon spin"><IconLoader /></span></Match>
@@ -118,7 +131,7 @@ export const StepRow: Component<{ step: ToolStep; turn: Turn; expandable?: boole
       <span class="tool-name">{semantic() ?? toolLabel(step().name)}</span>
       <span class="tool-summary" title={summary()}>
         <Show when={commandIcon()}>{(icon) => <img class="tool-command-icon" src={icon().src} alt="" aria-hidden="true" title={icon().label} draggable={false} />}</Show>
-        <span class="tool-summary-text">{summary()}</span>
+        <span class="tool-summary-text"><TextShimmer text={summary()} active={isShimmer()} /></span>
       </span>
       <Show when={stats()}><span class="tool-diffstat"><b class="diff-stat-add">+{stats()!.add}</b><b class="diff-stat-del">−{stats()!.del}</b></span></Show>
       <Switch>

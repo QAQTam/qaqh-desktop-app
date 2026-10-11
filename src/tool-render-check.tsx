@@ -30,6 +30,6 @@ render(() => (
   <main style={{ "max-width": "780px", margin: "36px auto", padding: "0 20px" }}>
     <h2 style={{ "font-size": "16px", "font-weight": "500", "margin-bottom": "16px" }}>工具工作记录</h2>
     <p style={{ color: "var(--muted)", "font-size": "13px", "margin-bottom": "14px" }}>文件路径与修改结果 · 命令实时输出 · 待办与 skills 记录</p>
-    <div class="timeline turn-steps"><For each={steps()} keyed={(step) => step.id}>{(step) => <StepRow step={step()} turn={turn} cwd="E:/qaqh-backend" />}</For></div>
+    <div class="timeline turn-steps"><For each={steps()} keyed={(step) => step.id}>{(step, index) => <StepRow step={step()} turn={turn} cwd="E:/qaqh-backend" isLatest={index() === steps().length - 1} />}</For></div>
   </main>
 ), document.getElementById("root")!);

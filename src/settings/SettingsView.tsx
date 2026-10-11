@@ -16,6 +16,15 @@ import { createEffect, createMemo, createSignal, For, onSettled, Show, type Comp
 import IconRotate from "~icons/lucide/rotate-ccw";
 import { STR } from "../lib/strings";
 import { sessionMaterial, setSessionMaterial, type SessionMaterial } from "../lib/visual";
+import { applyThemePreset, themePreset, type ThemePreset } from "../lib/theme";
+import {
+  FONT_PRESETS,
+  FONT_SCALE_OPTIONS,
+  type FontScale,
+  resetTypography,
+  typography,
+  updateTypography,
+} from "../lib/typography";
 import { MASK, PERMISSION_TIERS, THEME_OPTIONS, formatToolList, needsBypassConfirm, parseToolList, toInt, toNumber } from "./patch";
 import {
   baseline,
@@ -58,6 +67,44 @@ const NAV = [
   { id: "section-mcp", label: "MCP / LSP" },
   { id: "section-about", label: "关于" },
 ] as const;
+
+const FontPicker: Component<{
+  label: string;
+  hint: string;
+  value: string;
+  presets: Array<{ label: string; value: string }>;
+  onChange: (val: string) => void;
+}> = (props) => {
+  const isCustom = () => props.value !== "" && !props.presets.some((p) => p.value === props.value);
+  return (
+    <Field label={props.label} hint={props.hint}>
+      <div style={{ display: "grid", gap: "6px" }}>
+        <select
+          class="field-input"
+          value={isCustom() ? "__custom" : props.value}
+          onChange={(event) => {
+            const val = event.currentTarget.value;
+            if (val === "__custom") {
+              props.onChange(" ");
+            } else {
+              props.onChange(val);
+            }
+          }}
+        >
+          <For each={props.presets}>{(opt) => <option value={opt.value}>{opt.label}</option>}</For>
+          <option value="__custom">自定义字体名称…</option>
+        </select>
+        <Show when={isCustom()}>
+          <TextInput
+            value={props.value.trim()}
+            onInput={(val) => props.onChange(val.trim() === "" ? " " : val)}
+            placeholder="输入本地字体族名，如 'JetBrains Mono'"
+          />
+        </Show>
+      </div>
+    </Field>
+  );
+};
 
 export const SettingsView: Component = () => {
   // 子代理密钥与工具清单是「只进不出」的本地缓冲:它们的 DOM 文本不等于草稿值
@@ -237,7 +284,7 @@ export const SettingsView: Component = () => {
                         placeholder="auto"
                       />
                     </Field>
-                    <Field label={STR.settingsIdleUnload} hint={STR.settingsIdleUnloadHint}>
+                    <Field label={STR.settingsIdleUnload} hint={STR.settingsIdleUnloadHint} compact>
                       <TextInput
                         value={String(config().sessionIdleUnloadSecs)}
                         onInput={(value) => {
@@ -249,6 +296,16 @@ export const SettingsView: Component = () => {
                   </Section>
 
                   <Section id="section-appearance" title="外观" desc={STR.settingsThemeNote}>
+                    <Field label="界面风格预设" hint="支持经典工作台与 macOS 26 水感流体玻璃（Liquid Glass），纯前端独立生效。">
+                      <select
+                        class="field-input"
+                        value={themePreset()}
+                        onChange={(event) => applyThemePreset(event.currentTarget.value as ThemePreset)}
+                      >
+                        <option value="default">经典工作台 (Default)</option>
+                        <option value="liquid-glass">macOS 26 水感流体玻璃 (Liquid Glass)</option>
+                      </select>
+                    </Field>
                     <Field label={STR.settingsTheme}>
                       <select
                         class="field-input"
@@ -268,6 +325,56 @@ export const SettingsView: Component = () => {
                         <option value="solid">Solid</option>
                       </select>
                     </Field>
+
+                    <Field label="全局字号缩放" hint="等比缩放界面中所有字阶（90% ~ 120%），纯前端即时生效。">
+                      <select
+                        class="field-input"
+                        value={typography().scale}
+                        onChange={(event) => updateTypography({ scale: event.currentTarget.value as FontScale })}
+                      >
+                        <For each={FONT_SCALE_OPTIONS}>{(opt) => <option value={opt.value}>{opt.label} — {opt.desc}</option>}</For>
+                      </select>
+                    </Field>
+
+                    <FontPicker
+                      label="界面骨架字体 (--font-ui)"
+                      hint="侧边栏、标题栏与按钮表单，留空为系统默认。"
+                      value={typography().fontUi}
+                      presets={FONT_PRESETS.ui}
+                      onChange={(fontUi) => updateTypography({ fontUi })}
+                    />
+
+                    <FontPicker
+                      label="消息阅读正文 (--font-prose)"
+                      hint="AI 回答、用户气泡与 Markdown 正文，留空跟随界面。"
+                      value={typography().fontProse}
+                      presets={FONT_PRESETS.prose}
+                      onChange={(fontProse) => updateTypography({ fontProse })}
+                    />
+
+                    <FontPicker
+                      label="代码块与差异 (--font-code)"
+                      hint="Markdown 代码块与 DiffView 对比行，留空为 Cascadia。"
+                      value={typography().fontCode}
+                      presets={FONT_PRESETS.code}
+                      onChange={(fontCode) => updateTypography({ fontCode })}
+                    />
+
+                    <FontPicker
+                      label="终端与工具输出 (--font-terminal)"
+                      hint="命令行执行输出与控制台原始日志，留空为 Menlo/Consolas。"
+                      value={typography().fontTerminal}
+                      presets={FONT_PRESETS.terminal}
+                      onChange={(fontTerminal) => updateTypography({ fontTerminal })}
+                    />
+
+                    <div style={{ "grid-column": "1 / -1", display: "flex", "align-items": "center", "justify-content": "space-between", "margin-top": "4px" }}>
+                      <span class="settings-muted">字体与字号偏好保存在本地，不影响后端会话。</span>
+                      <button type="button" class="ghost-mini" onClick={resetTypography}>
+                        <IconRotate /> 恢复默认排版
+                      </button>
+                    </div>
+
                     <p class="settings-section-desc">
                       界面内嵌 HarmonyOS Sans SC 与 Cascadia Code；字体许可与来源见{" "}
                       <a href="/fonts/THIRD-PARTY-NOTICES.txt">第三方字体说明</a>。
@@ -296,7 +403,7 @@ export const SettingsView: Component = () => {
                         }}
                       />
                     </Field>
-                    <Field label={STR.settingsSubagentMaxTokens} hint={STR.settingsSubagentNewOnlyHint}>
+                    <Field label={STR.settingsSubagentMaxTokens} hint={STR.settingsSubagentNewOnlyHint} compact>
                       <TextInput
                         value={String(config().subagent.maxTokens)}
                         onInput={(value) => {
@@ -305,7 +412,7 @@ export const SettingsView: Component = () => {
                         }}
                       />
                     </Field>
-                    <Field label={STR.settingsSubagentTimeout} hint={STR.settingsSubagentNewOnlyHint}>
+                    <Field label={STR.settingsSubagentTimeout} hint={STR.settingsSubagentNewOnlyHint} compact>
                       <TextInput
                         value={String(config().subagent.timeoutSecs)}
                         onInput={(value) => {
@@ -314,7 +421,7 @@ export const SettingsView: Component = () => {
                         }}
                       />
                     </Field>
-                    <Field label={STR.settingsSubagentMaxDepth} hint={STR.settingsSubagentMaxDepthHint}>
+                    <Field label={STR.settingsSubagentMaxDepth} hint={STR.settingsSubagentMaxDepthHint} compact>
                       <TextInput
                         value={String(config().subagent.maxDepth)}
                         onInput={(value) => {
@@ -323,7 +430,7 @@ export const SettingsView: Component = () => {
                         }}
                       />
                     </Field>
-                    <Field label={STR.settingsSubagentInFlight} hint={STR.settingsSubagentInFlightHint}>
+                    <Field label={STR.settingsSubagentInFlight} hint={STR.settingsSubagentInFlightHint} compact>
                       <TextInput
                         value={String(config().subagent.messageInFlightPerPair)}
                         onInput={(value) => {
@@ -332,7 +439,7 @@ export const SettingsView: Component = () => {
                         }}
                       />
                     </Field>
-                    <Field label={STR.settingsSubagentOutbound} hint={STR.settingsSubagentOutboundHint}>
+                    <Field label={STR.settingsSubagentOutbound} hint={STR.settingsSubagentOutboundHint} compact>
                       <TextInput
                         value={String(config().subagent.messageOutboundPerSender)}
                         onInput={(value) => {

@@ -11,6 +11,7 @@
     "visual:capture": "node scripts/visual-capture.mjs"
   },
   "dependencies": {
+    "@formkit/auto-animate": "^0.10.0",
     "@solidjs/web": "2.0.0-rc.13",
     "@tauri-apps/api": "^2",
     "anser": "^2.2.4",

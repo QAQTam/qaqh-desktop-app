@@ -696,10 +696,7 @@ export class SessionStore {
 
   // ── 动作 ────────────────────────────────────────────────────────────────────
 
-  async sendMessage(text: string): Promise<void> {
-    const attachments = this.pendingAttachments[0]()
-      .filter((item) => item.state === "ready" && item.reference != null)
-      .map((item) => item.reference as ContentRef);
+  async sendMessageWithAttachments(text: string, attachments: ContentRef[] = []): Promise<void> {
     await transport.command("conversation", {
       channel: "conversation",
       type: "conversation_send_message",
@@ -708,6 +705,13 @@ export class SessionStore {
       as_system: false,
       attachments,
     }, this.seed);
+  }
+
+  async sendMessage(text: string): Promise<void> {
+    const attachments = this.pendingAttachments[0]()
+      .filter((item) => item.state === "ready" && item.reference != null)
+      .map((item) => item.reference as ContentRef);
+    await this.sendMessageWithAttachments(text, attachments);
     // 投递失败会抛出,附件保持原样让用户重试。
     this.pendingAttachments[1]([]);
   }

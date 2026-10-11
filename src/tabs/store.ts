@@ -9,10 +9,12 @@
  * 找出新 seed。宿主模式下 SessionCreate 不要求 active seed,空会话也可创建。
  */
 import { createSignal, createStore } from "solid-js";
+import { withViewTransition } from "../ui/viewTransition";
 import { transport } from "../lib/transport";
 import { STR } from "../lib/strings";
 import { SessionStore } from "../session/store";
 import { toast } from "../ui/toast";
+import type { ContentRef } from "../api/qaqh/ContentRef";
 
 export interface Tab {
   id: string;
@@ -22,6 +24,7 @@ export interface Tab {
 
 const [tabs, setTabs] = createSignal<Tab[]>([]);
 const [activeId, setActiveId] = createSignal<string | null>(null);
+const [isStartup, setIsStartup] = createSignal(false);
 const [bootError, setBootErrorSignal] = createSignal<string | null>(null);
 // setBootError 由本模块内部与 App 兜底路径共用;导出名见文件底部。
 const [creating, setCreating] = createSignal(false);
@@ -61,7 +64,19 @@ const [focusToken, setFocusToken] = createSignal(0);
 /** Serialize singleton-host attach calls; rapid tab changes must settle on the latest tab. */
 let activationQueue: Promise<void> = Promise.resolve();
 
-export { tabs, activeId, bootError, creating, focusToken, sessionCatalog, workspaceCatalog, newSessionCwd, setNewSessionCwd };
+export {
+  tabs,
+  activeId,
+  isStartup,
+  setIsStartup,
+  bootError,
+  creating,
+  focusToken,
+  sessionCatalog,
+  workspaceCatalog,
+  newSessionCwd,
+  setNewSessionCwd,
+};
 export const setBootError = (value: string | null): void => {
   setBootErrorSignal(value);
 };
@@ -70,6 +85,17 @@ export const draftOf = (seed: string): string => drafts[seed] ?? "";
 export const setDraftOf = (seed: string, value: string): void => {
   setDrafts((draft) => { draft[seed] = value; });
 };
+
+export function openStartup(): void {
+  withViewTransition(() => {
+    setIsStartup(true);
+    setActiveId(null);
+    for (const other of tabs()) {
+      other.store.deactivate();
+    }
+  });
+  setFocusToken(focusToken() + 1);
+}
 
 function addTab(seed: string): Tab {
   const existing = tabs().find((tab) => tab.seed === seed);
@@ -90,11 +116,15 @@ function addTab(seed: string): Tab {
 
 /** 激活标签:宿主 attach 切 active seed + 重建流 → 该 store 订阅,其余退订。 */
 export async function activateTab(tab: Tab): Promise<void> {
-  setActiveId(tab.id);
+  // 只包同步的「内容换血」信号写入;attach/RPC 留在外面,别把旧快照冻屏。
+  withViewTransition(() => {
+    setIsStartup(false);
+    setActiveId(tab.id);
+    for (const other of tabs()) {
+      if (other.id !== tab.id) other.store.deactivate();
+    }
+  });
   setFocusToken(focusToken() + 1);
-  for (const other of tabs()) {
-    if (other.id !== tab.id) other.store.deactivate();
-  }
   const activation = activationQueue.catch(() => {}).then(async () => {
     // A rapid later click supersedes queued work before it can attach.
     if (activeId() !== tab.id) return;
@@ -130,40 +160,102 @@ export async function closeTab(tabId: string): Promise<void> {
   if (wasActive) {
     const next = list[index - 1] ?? list[index + 1] ?? null;
     if (next != null) await activateTab(next);
-    else setActiveId(null);
+    else openStartup();
   }
+}
+
+/**
+ * 依据指定 cwd 创建新会话并返回新分配的 session_id。
+ */
+export async function createSessionWithCwd(cwd?: string | null): Promise<string> {
+  const before = new Set((await transport.sessions()).map((item) => String(item.session_id)));
+  await transport.command("control", {
+    channel: "control",
+    type: "session_create",
+    close_current: false,
+    cwd: cwd ?? null,
+  });
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const list = await transport.sessions();
+    setSessionCatalog(list as SidebarSession[]);
+    const fresh = list.map((item) => String(item.session_id)).find((id) => !before.has(id));
+    if (fresh != null) {
+      return fresh;
+    }
+  }
+  throw new Error("会话创建超时");
 }
 
 /**
  * 新建会话:控制通道 SessionCreate → 轮询 sessions 找新 seed(≤6s)。
  *
  * `cwd` 取输入区的目标工作区(`newSessionCwd`);daemon 透传给 `session.new`,
- * 落 `SessionMeta.cwd` 并触发 workspace 自动归属(`grouping.rs:278` 只认已注册
- * 工作区,所以「选文件夹」那条路先在 `chooseNewSessionFolder` 里注册)。
+ * 落 `SessionMeta.cwd` 并触发 workspace 自动归属。
  */
-export async function createSession(): Promise<void> {
+export async function createSession(cwd?: string | null): Promise<void> {
   if (creating()) return;
   setCreating(true);
   try {
-    const before = new Set((await transport.sessions()).map((item) => String(item.session_id)));
-    await transport.command("control", {
-      channel: "control",
-      type: "session_create",
-      close_current: false,
-      cwd: newSessionCwd(),
-    });
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      const list = await transport.sessions();
-      setSessionCatalog(list as SidebarSession[]);
-      const fresh = list.map((item) => String(item.session_id)).find((id) => !before.has(id));
-      if (fresh != null) {
-        await openSession(fresh);
-        return;
+    const fresh = await createSessionWithCwd(cwd ?? newSessionCwd());
+    await openSession(fresh);
+  } catch (error) {
+    setBootError(String(error instanceof Error ? error.message : error));
+  } finally {
+    setCreating(false);
+  }
+}
+
+export interface StartupSubmitOptions {
+  cwd: string | null;
+  profile?: string | null;
+  text: string;
+  attachmentPaths?: string[];
+}
+
+/**
+ * Startup 首页延迟创建会话与首包发送事务:
+ * 1. 带目标 cwd 创建会话
+ * 2. 绑定 profile (若指定)
+ * 3. 上传本地暂存的附件 (若有)
+ * 4. 打开会话并发送第一条用户消息
+ */
+export async function submitStartupSession(options: StartupSubmitOptions): Promise<void> {
+  if (creating()) return;
+  setCreating(true);
+  try {
+    const fresh = await createSessionWithCwd(options.cwd);
+    if (options.profile) {
+      try {
+        await transport.rpc("session.set_profile", { name: options.profile }, fresh);
+      } catch (err) {
+        console.warn("set_profile failed on new session", err);
       }
     }
-    throw new Error("会话创建超时");
+    const uploadedRefs: ContentRef[] = [];
+    if (options.attachmentPaths && options.attachmentPaths.length > 0) {
+      for (const path of options.attachmentPaths) {
+        try {
+          const uploaded = await transport.uploadAttachment(fresh, path);
+          uploadedRefs.push({
+            content_id: uploaded.content_id,
+            media_type: uploaded.media_type,
+            sha256: uploaded.sha256,
+            truncated: uploaded.truncated,
+          });
+        } catch (err) {
+          toast(`附件上传失败: ${path}`, "err");
+        }
+      }
+    }
+    await openSession(fresh);
+    const tab = activeTab();
+    if (tab != null) {
+      await tab.store.sendMessageWithAttachments(options.text, uploadedRefs);
+    }
+    setIsStartup(false);
   } catch (error) {
+    toast(`创建会话失败：${error instanceof Error ? error.message : String(error)}`, "err");
     setBootError(String(error instanceof Error ? error.message : error));
   } finally {
     setCreating(false);
@@ -285,6 +377,7 @@ export async function boot(): Promise<void> {
   const live = list.find((item) => !item.archived && item.busy) ?? list.find((item) => !item.archived) ?? list[0];
   if (live?.session_id == null) {
     setBootError(null);
+    openStartup();
     return;
   }
   await openSession(String(live.session_id));

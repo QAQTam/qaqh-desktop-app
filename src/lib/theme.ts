@@ -97,3 +97,43 @@ if (systemDark != null) {
 }
 
 export const resolvedTheme = resolved;
+
+export type ThemePreset = "default" | "liquid-glass";
+
+const PRESET_STORAGE_KEY = "qaqh.theme-preset";
+
+export function storedThemePreset(): ThemePreset {
+  try {
+    const val = localStorage.getItem(PRESET_STORAGE_KEY);
+    return val === "liquid-glass" ? "liquid-glass" : "default";
+  } catch {
+    return "default";
+  }
+}
+
+const [currentPreset, setCurrentPreset] = createSignal<ThemePreset>(storedThemePreset());
+
+export function applyThemePreset(preset: ThemePreset): void {
+  try {
+    localStorage.setItem(PRESET_STORAGE_KEY, preset);
+  } catch {}
+  setCurrentPreset(preset);
+  const root = document.documentElement;
+  if (preset === "liquid-glass") {
+    root.dataset.themePreset = "liquid-glass";
+    root.classList.add("theme-liquid-glass");
+  } else {
+    delete root.dataset.themePreset;
+    root.classList.remove("theme-liquid-glass");
+  }
+}
+
+export const themePreset = currentPreset;
+
+if (typeof document !== "undefined") {
+  const initialPreset = storedThemePreset();
+  if (initialPreset === "liquid-glass") {
+    document.documentElement.dataset.themePreset = "liquid-glass";
+    document.documentElement.classList.add("theme-liquid-glass");
+  }
+}

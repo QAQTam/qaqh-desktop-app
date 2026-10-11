@@ -28,7 +28,18 @@ fn set_window_theme(window: tauri::WebviewWindow, dark: bool) -> Result<(), Stri
     {
         window_vibrancy::apply_mica(&window, Some(dark)).map_err(|error| error.to_string())
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        let _ = dark;
+        window_vibrancy::apply_vibrancy(
+            &window,
+            window_vibrancy::NSVisualEffectMaterial::Sidebar,
+            Some(window_vibrancy::NSVisualEffectState::Active),
+            None,
+        )
+        .map_err(|error| error.to_string())
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let _ = (window, dark);
         Ok(())
@@ -136,6 +147,17 @@ pub fn run() {
                 && let Err(error) = window_vibrancy::apply_mica(&window, None)
             {
                 log::warn!("[qaqh-webui-app] Windows Mica unavailable: {error}");
+            }
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main")
+                && let Err(error) = window_vibrancy::apply_vibrancy(
+                    &window,
+                    window_vibrancy::NSVisualEffectMaterial::Sidebar,
+                    Some(window_vibrancy::NSVisualEffectState::Active),
+                    None,
+                )
+            {
+                log::warn!("[qaqh-webui-app] macOS Vibrancy unavailable: {error}");
             }
             #[cfg(debug_assertions)]
             {

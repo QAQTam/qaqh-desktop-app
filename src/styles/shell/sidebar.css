@@ -1,0 +1,134 @@
+/* QAQ-Harness WebUI —— 全局导航与会话侧边栏 */
+
+@layer components {
+  .global-nav {
+    grid-column: 1; grid-row: 2;
+    display: grid; grid-auto-rows: max-content; align-content: start; gap: 4px;
+    padding: 12px 6px; border-right: 1px solid var(--border);
+    background: var(--surface);
+  }
+  html.tauri .global-nav {
+    border-right-color: color-mix(in srgb, var(--border) 72%, transparent);
+    background: color-mix(in srgb, var(--surface) 68%, transparent);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(130%);
+    backdrop-filter: blur(var(--glass-blur)) saturate(130%);
+  }
+  html.tauri[data-theme="dark"] .global-nav { background: color-mix(in srgb, var(--surface) 78%, transparent); }
+  html.tauri.platform-macos .global-nav {
+    border-right-color: color-mix(in srgb, var(--border) 72%, transparent);
+    background: color-mix(in srgb, var(--surface) 58%, transparent);
+    -webkit-backdrop-filter: saturate(135%);
+    backdrop-filter: saturate(135%);
+    box-shadow: inset -1px 0 0 color-mix(in srgb, var(--border) 45%, transparent);
+  }
+  html.tauri.platform-macos[data-theme="dark"] .global-nav { background: color-mix(in srgb, var(--surface) 72%, transparent); }
+  .global-nav-item {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+    min-width: 0; min-height: 56px; padding: 6px 2px;
+    border-radius: var(--r-md); color: var(--muted); font-size: 10px; line-height: 1.2;
+    transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
+  }
+  .global-nav-item svg { width: 18px; height: 18px; }
+  .global-nav-item:hover { color: var(--text); background: var(--surface-2); }
+  .global-nav-item.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+
+  .message-sidebar {
+    grid-column: 1; grid-row: 1; display: grid; grid-template-rows: auto minmax(0, 1fr);
+    min-width: 0; min-height: 0; overflow: hidden;
+    border-right: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 72%, var(--bg));
+  }
+  html.tauri .message-sidebar {
+    border-right-color: color-mix(in srgb, var(--border) 72%, transparent);
+    background: color-mix(in srgb, var(--surface) 68%, transparent);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(130%);
+    backdrop-filter: blur(var(--glass-blur)) saturate(130%);
+  }
+  html.tauri[data-theme="dark"] .message-sidebar { background: color-mix(in srgb, var(--surface) 78%, transparent); }
+  html.tauri.platform-macos .message-sidebar {
+    border-right-color: color-mix(in srgb, var(--border) 72%, transparent);
+    background: color-mix(in srgb, var(--surface) 58%, transparent);
+    -webkit-backdrop-filter: saturate(135%);
+    backdrop-filter: saturate(135%);
+    box-shadow: inset -1px 0 0 color-mix(in srgb, var(--border) 45%, transparent);
+  }
+  html.tauri.platform-macos[data-theme="dark"] .message-sidebar { background: color-mix(in srgb, var(--surface) 72%, transparent); }
+  .message-sidebar-head { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 14px; color: var(--muted); font-size: var(--fs-xs); font-weight: 600; letter-spacing: .04em; }
+  .message-sidebar-count { margin-left: auto; color: var(--muted); opacity: .72; font-size: 10px; font-weight: 500; }
+  .message-create { display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-control); color: var(--muted); }
+  .message-create svg { width: 16px; height: 16px; }
+  .message-create:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+  .message-create:disabled { opacity: .5; }
+  .message-sidebar-groups { min-height: 0; overflow: auto; padding: 2px 8px 12px; overscroll-behavior: contain; }
+  /* 会话行 = 主体按钮 + 「…」动作钮。动作钮常占位、悬停/聚焦/展开时才显形,
+     所以 hover 只改表面不改布局(spec §悬停)。 */
+  .message-session-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
+  .message-session-more {
+    display: grid; place-items: center; flex: none;
+    width: 24px; height: 24px; border-radius: var(--r-sm);
+    color: var(--muted); opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
+  }
+  .message-session-more svg { width: 14px; height: 14px; }
+  .message-session-row:hover .message-session-more,
+  .message-session-row.active .message-session-more,
+  .message-session-more:focus-visible,
+  .message-session-more[aria-expanded="true"] { opacity: 1; }
+  .message-session-more:hover { background: var(--surface-2); color: var(--text); }
+  /* 菜单在流内展开,不用绝对定位:侧栏是 overflow:auto 的滚动容器,浮层会被裁掉。 */
+  .message-session-menu {
+    display: grid; gap: 2px; margin: 2px 0 4px;
+    padding: 6px; border: 1px solid var(--border-strong); border-radius: var(--radius-panel);
+    background: var(--surface); box-shadow: var(--shadow-soft);
+  }
+  .message-session-menu > strong { padding: 1px 6px 4px; color: var(--muted); font-size: 10px; letter-spacing: .04em; }
+  .message-session-menu > button {
+    display: grid; gap: 1px; width: 100%; padding: 5px 6px;
+    border-radius: var(--r-sm); color: var(--text); text-align: left; font-size: var(--fs-xs);
+  }
+  .message-session-menu > button:hover, .message-session-menu > button.selected { background: var(--surface-2); }
+  .message-session-menu-path {
+    font-family: var(--font-mono);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--muted); font-size: 10px;
+  }
+  .message-session-menu > button.message-session-menu-detach {
+    margin-top: 2px; padding-top: 7px;
+    border-top: 1px solid var(--border); border-radius: 0;
+    color: var(--muted);
+  }
+  .message-workspace-group { margin-bottom: 6px; }
+  .message-workspace-toggle { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 0 8px; border-radius: var(--r-sm); color: var(--text); text-align: left; font-size: var(--fs-xs); font-weight: 600; }
+  .message-workspace-toggle:hover { background: var(--surface-2); }
+  .message-workspace-toggle > svg { flex: none; width: 14px; height: 14px; color: var(--muted); transition: transform var(--dur-fast) var(--ease); }
+  .message-workspace-toggle > svg.collapsed { transform: rotate(-90deg); }
+  .message-workspace-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .message-workspace-count { margin-left: auto; color: var(--muted); font-size: 10px; font-weight: 500; }
+  .message-workspace-sessions { display: grid; gap: 2px; padding: 2px 0 4px 18px; }
+  .message-session-item {
+    position: relative;
+    display: flex; align-items: center; gap: 8px;
+    min-width: 0; min-height: 32px; padding: 0 8px;
+    border: 1px solid transparent; border-radius: var(--r-sm);
+    color: var(--muted); text-align: left; font-size: var(--fs-xs);
+    transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+  }
+  .message-session-item::before {
+    content: "";
+    position: absolute; left: 0; top: 50%;
+    width: 3px; height: 0; border-radius: var(--radius-pill);
+    background: var(--accent);
+    opacity: 0; transform: translateY(-50%);
+    transition: height var(--dur-enter) var(--ease), opacity var(--dur-fast) var(--ease);
+  }
+  .message-session-item:hover { color: var(--text); background: color-mix(in srgb, var(--text) 5%, transparent); }
+  .message-session-item:active { background: var(--accent-soft); }
+  .message-session-item.active {
+    color: var(--text); background: var(--accent-soft); border-color: transparent;
+  }
+  .message-session-item.active::before { height: 16px; opacity: 1; }
+  .message-session-item:focus-visible { outline-offset: 1px; }
+  .message-session-item > svg { flex: none; width: 14px; height: 14px; opacity: .72; }
+  .message-session-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .message-session-running { flex: none; width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .message-sidebar-empty { padding: 8px; color: var(--muted); font-size: var(--fs-xs); }
+}

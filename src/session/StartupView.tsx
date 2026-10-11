@@ -1,0 +1,345 @@
+import { createSignal, For, Show, type Component } from "solid-js";
+import IconFolder from "~icons/lucide/folder";
+import IconFolderPlus from "~icons/lucide/folder-plus";
+import IconChevronDown from "~icons/lucide/chevron-down";
+import IconPaperclip from "~icons/lucide/paperclip";
+import IconPlus from "~icons/lucide/plus";
+import IconArrowUp from "~icons/lucide/arrow-up";
+import IconX from "~icons/lucide/x";
+import IconSparkles from "~icons/lucide/sparkles";
+import IconLoader from "~icons/lucide/loader-circle";
+import { transport } from "../lib/transport";
+import { STR } from "../lib/strings";
+import {
+  workspaceCatalog,
+  newSessionCwd,
+  setNewSessionCwd,
+  chooseNewSessionFolder,
+  submitStartupSession,
+  creating,
+} from "../tabs/store";
+import type { ConfigDto } from "../api/qaqh/ConfigDto";
+
+const tailName = (path: string): string => {
+  const norm = path.replace(/[\\/]+$/, "");
+  return norm.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+};
+
+const SUGGESTIONS = [
+  {
+    title: "分析项目架构",
+    desc: "梳理模块拓扑、核心调用流与设计职责",
+    prompt: "请系统性分析当前项目的代码架构、核心模块职责与依赖流向。",
+  },
+  {
+    title: "排查代码缺陷",
+    desc: "审查近期变更，定位潜在异常与边界漏洞",
+    prompt: "请检查最近的代码变更，排查潜在的边界条件漏洞或状态冲突。",
+  },
+  {
+    title: "优化系统性能",
+    desc: "分析性能热点、高频调度与内存开销",
+    prompt: "请分析项目的性能热点与资源占用，并给出针对性的优化方案。",
+  },
+  {
+    title: "编写测试用例",
+    desc: "为核心函数补充边缘用例与回归测试",
+    prompt: "请为核心业务模块设计单元测试用例，覆盖异常分支与关键不变量。",
+  },
+];
+
+export const StartupView: Component = () => {
+  let textarea: HTMLTextAreaElement | undefined;
+  const [draftText, setDraftText] = createSignal("");
+  const [selectedProfile, setSelectedProfile] = createSignal<string | null>(null);
+  const [openMenu, setOpenMenu] = createSignal<"workspace" | "profile" | null>(null);
+  const [configProfiles, setConfigProfiles] = createSignal<{
+    activeProfile: string;
+    model: string;
+    profiles: string[];
+  } | null>(null);
+  const [attachments, setAttachments] = createSignal<string[]>([]);
+
+  void (async () => {
+    try {
+      const config = await transport.rpc<ConfigDto>("config.load");
+      if (config) {
+        setConfigProfiles({
+          activeProfile: config.activeProfile,
+          model: config.model,
+          profiles: config.profiles,
+        });
+      }
+    } catch {
+      // 容错: 无配置或离线时回落
+    }
+  })();
+
+  const workspaceLabel = (): string => {
+    const cwd = newSessionCwd();
+    if (!cwd) return STR.workspaceUngrouped;
+    const found = workspaceCatalog().find((w) => w.path === cwd);
+    return found?.title || tailName(cwd);
+  };
+
+  const profileLabel = (): string => {
+    const sel = selectedProfile();
+    if (sel) return sel;
+    const conf = configProfiles();
+    return conf?.activeProfile ? `跟随全局 (${conf.activeProfile})` : "跟随全局";
+  };
+
+  const autoGrow = (): void => {
+    const el = textarea;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 8 * 22 + 20)}px`;
+  };
+
+  const handlePickAttachments = async (): Promise<void> => {
+    try {
+      const paths = await transport.pickAttachments();
+      if (paths.length > 0) {
+        setAttachments((prev) => [...new Set([...prev, ...paths])]);
+      }
+    } catch {
+      // 静默处理
+    }
+  };
+
+  const handleRemoveAttachment = (pathToRemove: string): void => {
+    setAttachments((prev) => prev.filter((p) => p !== pathToRemove));
+  };
+
+  const handleApplySuggestion = (prompt: string): void => {
+    setDraftText(prompt);
+    setTimeout(() => {
+      autoGrow();
+      textarea?.focus();
+    }, 50);
+  };
+
+  const handleSubmit = async (): Promise<void> => {
+    const text = draftText().trim();
+    if (!text || creating()) return;
+    await submitStartupSession({
+      cwd: newSessionCwd(),
+      profile: selectedProfile(),
+      text,
+      attachmentPaths: attachments(),
+    });
+    setDraftText("");
+    setAttachments([]);
+  };
+
+  return (
+    <div class="startup-container">
+      <div class="startup-hero">
+        <h1 class="startup-title">QAQ-Harness</h1>
+        <p class="startup-subtitle">配置新会话环境，在发送首条消息时原子化创建</p>
+      </div>
+
+      <div class="startup-config-bar">
+        {/* 工作区选择 */}
+        <div class="composer-control-wrap">
+          <button
+            type="button"
+            class="composer-tool-button composer-workspace-button"
+            aria-expanded={openMenu() === "workspace" ? "true" : "false"}
+            onClick={() => setOpenMenu(openMenu() === "workspace" ? null : "workspace")}
+            title="选择新会话工作区目录"
+          >
+            <IconFolder />
+            <span>{workspaceLabel()}</span>
+            <IconChevronDown />
+          </button>
+          <Show when={openMenu() === "workspace"}>
+            <div class="composer-menu composer-workspace-menu" role="menu">
+              <strong>选择目标工作区</strong>
+              <button
+                type="button"
+                role="menuitemradio"
+                class={newSessionCwd() == null ? "selected" : undefined}
+                onClick={() => {
+                  setNewSessionCwd(null);
+                  setOpenMenu(null);
+                }}
+              >
+                <span>{STR.workspaceUngrouped}</span>
+                <small>{STR.workspaceDefaultHint}</small>
+              </button>
+              <For each={workspaceCatalog()}>
+                {(workspace) => (
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    class={newSessionCwd() === workspace.path ? "selected" : undefined}
+                    onClick={() => {
+                      setNewSessionCwd(workspace.path);
+                      setOpenMenu(null);
+                    }}
+                  >
+                    <span>{workspace.title || tailName(workspace.path)}</span>
+                    <small class="composer-workspace-path">{workspace.path}</small>
+                  </button>
+                )}
+              </For>
+              <button
+                type="button"
+                class="composer-menu-action"
+                onClick={() => {
+                  setOpenMenu(null);
+                  void chooseNewSessionFolder();
+                }}
+              >
+                <span class="composer-workspace-browse">
+                  <IconFolderPlus />
+                  {STR.workspaceChooseFolder}
+                </span>
+                <small>{STR.workspaceChooseFolderHint}</small>
+              </button>
+            </div>
+          </Show>
+        </div>
+
+        {/* 模型/Profile 选择 */}
+        <div class="composer-control-wrap composer-profile-wrap">
+          <button
+            type="button"
+            class="composer-tool-button composer-profile-button"
+            aria-expanded={openMenu() === "profile" ? "true" : "false"}
+            onClick={() => setOpenMenu(openMenu() === "profile" ? null : "profile")}
+            title="选择会话生效的模型档案"
+          >
+            <IconSparkles />
+            <span>{profileLabel()}</span>
+            <Show when={configProfiles()?.model}>
+              <span class="composer-profile-model">→ {configProfiles()!.model}</span>
+            </Show>
+            <IconChevronDown />
+          </button>
+          <Show when={openMenu() === "profile"}>
+            <div class="composer-menu composer-profile-menu" role="menu">
+              <strong>会话模型配置</strong>
+              <button
+                type="button"
+                role="menuitemradio"
+                class={selectedProfile() == null ? "selected" : undefined}
+                onClick={() => {
+                  setSelectedProfile(null);
+                  setOpenMenu(null);
+                }}
+              >
+                <span>跟随全局</span>
+                <small>{configProfiles()?.activeProfile ?? ""}</small>
+              </button>
+              <For each={configProfiles()?.profiles ?? []}>
+                {(name) => (
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    class={selectedProfile() === name ? "selected" : undefined}
+                    onClick={() => {
+                      setSelectedProfile(name);
+                      setOpenMenu(null);
+                    }}
+                  >
+                    <span>{name}</span>
+                    <Show when={name === configProfiles()?.activeProfile}>
+                      <small>{configProfiles()!.model}</small>
+                    </Show>
+                  </button>
+                )}
+              </For>
+            </div>
+          </Show>
+        </div>
+      </div>
+
+      {/* 快捷建议卡片 */}
+      <div class="startup-suggestions">
+        <For each={SUGGESTIONS}>
+          {(s) => (
+            <button
+              type="button"
+              class="startup-suggestion-card"
+              onClick={() => handleApplySuggestion(s.prompt)}
+            >
+              <div class="startup-card-title">{s.title}</div>
+              <div class="startup-card-desc">{s.desc}</div>
+            </button>
+          )}
+        </For>
+      </div>
+
+      {/* 输入与发送卡片 */}
+      <div class="startup-composer-box">
+        <div id="composer">
+          <div class="composer-surface">
+            <Show when={attachments().length > 0}>
+              <div class="composer-attachments" aria-label="待发送附件">
+                <For each={attachments()}>
+                  {(filePath) => (
+                    <span class="composer-file-chip ready" title={filePath}>
+                      <IconPaperclip />
+                      <span>{tailName(filePath)}</span>
+                      <button
+                        type="button"
+                        aria-label={`移除 ${tailName(filePath)}`}
+                        onClick={() => handleRemoveAttachment(filePath)}
+                      >
+                        <IconX />
+                      </button>
+                    </span>
+                  )}
+                </For>
+              </div>
+            </Show>
+            <textarea
+              ref={textarea}
+              rows={2}
+              placeholder="输入你的任务需求或直接提问... (Enter 发送, Shift+Enter 换行)"
+              value={draftText()}
+              onInput={(e) => {
+                setDraftText(e.currentTarget.value);
+                autoGrow();
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" || e.shiftKey) return;
+                if (e.isComposing || e.keyCode === 229) return;
+                e.preventDefault();
+                void handleSubmit();
+              }}
+            />
+            <div class="composer-toolbar">
+              <div class="composer-controls">
+                <button
+                  type="button"
+                  class="composer-tool-button composer-add-file"
+                  aria-label={STR.attachmentAdd}
+                  title={STR.attachmentAddTitle}
+                  onClick={() => void handlePickAttachments()}
+                >
+                  <IconPlus />
+                </button>
+              </div>
+              <div class="composer-submit-area">
+                <button
+                  type="button"
+                  class="icon-btn send button-primary"
+                  disabled={creating() || draftText().trim() === ""}
+                  onClick={() => void handleSubmit()}
+                  title="发送并创建新会话"
+                >
+                  <Show when={creating()} fallback={<IconArrowUp />}>
+                    <IconLoader class="icon-spin" />
+                  </Show>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};

@@ -25,31 +25,32 @@ import {
   activateTab,
   boot as bootTabs,
   bootError,
-  chooseNewSessionFolder,
   closeTab,
   createSession,
   creating,
   detachSessionFromWorkspace,
   draftOf,
   focusToken,
+  isStartup,
   moveSessionToWorkspace,
-  newSessionCwd,
   openSession,
+  openStartup,
   pollSessions,
   setBootError,
   setDraftOf,
-  setNewSessionCwd,
   sessionCatalog,
   tabs,
   type Tab,
-  workspaceCatalog,
 } from "../tabs/store";
 import { SessionView } from "../session/SessionView";
+import { StartupView } from "../session/StartupView";
 import { WorkspacePanel } from "../workspace/WorkspacePanel";
 import { Composer, type SendBlockReason } from "../composer/Composer";
 import { lanActive, refreshLanStatus, sessionWorkspaceName } from "../composer/identity";
 import { ApprovalStack } from "../approval/ApprovalCards";
-import { SettingsView } from "../settings/SettingsView";
+import { lazy } from "solid-js";
+// 设置页(dev 面板/图表/关于页等一大家子)只在打开设置时出现,懒加载收主包。
+const SettingsView = lazy(() => import("../settings/SettingsView").then((m) => ({ default: m.SettingsView })));
 import { closeDevConsole, devConsoleOpen } from "../lib/devmode";
 import {
   open as settingsOpen,
@@ -342,19 +343,11 @@ const App: Component = () => {
     }
   };
 
-  /** 输入区的工作区选择:两处 Composer(空态页 / 会话页)共用同一份选择。 */
-  const workspacePicker = {
-    workspaces: () => workspaceCatalog(),
-    workspacePath: () => newSessionCwd(),
-    onWorkspace: (path: string | null): void => { setNewSessionCwd(path); },
-    onBrowseWorkspace: (): void => { void chooseNewSessionFolder(); },
-  };
-
   return (
     <div id="app" class={{ "tauri-shell": inTauri }}>
       {/* 三页(消息/工具/设置)共用同一条 40px 标题栏:返回按钮只在非根页面出现。
           消息页此前在原生壳里整行塌掉,切页会让左侧导航与内容整体跳 40px。 */}
-      <header id="top">
+      <header id="top" data-tauri-drag-region>
         <Show when={settingsOpen() || section() !== "messages"}>
           <button type="button" class="titlebar-back" aria-label="返回消息" title="返回消息" onClick={() => navigateSection("messages")}>
             <IconArrowLeft />
@@ -373,9 +366,9 @@ const App: Component = () => {
         <Show when={section() === "messages"}>
           <MessageSidebar
             sessions={sessionCatalog()}
-            activeSeed={activeTab()?.seed ?? null}
+            activeSeed={isStartup() ? null : (activeTab()?.seed ?? null)}
             onSelect={(seed) => { setSection("messages"); void openSession(seed); }}
-            onCreate={() => { void createSession(); }}
+            onCreate={() => { setSection("messages"); openStartup(); }}
             creating={creating()}
             canCreate={hostIncompatible() == null}
             onMove={(seed, workspaceId) => { void moveSessionToWorkspace(seed, workspaceId); }}
@@ -425,76 +418,57 @@ const App: Component = () => {
             </div>
           </Show>
           <Show when={section() === "messages"}>
-            <Show when={tabs().length > 0} fallback={
-              <div class="session-column">
-                <div id="messages" class="messages-empty">
-                  <div class="messages-empty-copy">
-                    <strong>QAQH</strong>
-                    <p>{STR.emptyMessages}</p>
-                    <button type="button" class="primary-mini button-primary" disabled={creating() || hostIncompatible() != null} onClick={() => void createSession()}>
-                      {creating() ? STR.creatingSession : STR.newTab}
-                    </button>
-                  </div>
+            <Show
+              when={!isStartup() && activeTab() != null}
+              fallback={
+                <div class="session-column">
+                  <StartupView />
                 </div>
-                <Composer
-                  draft={() => emptyDraft()}
-                  onDraft={setEmptyDraft}
-                  blocked={() => "no-session"}
-                  running={() => false}
-                  onSend={() => {}}
-                  onStop={() => {}}
-                  focusToken={0}
-                  autoFocus={false}
-                  placeholder={STR.emptyComposer}
-                  lanActive={lanActive}
-                  {...workspacePicker}
-                />
-              </div>
-            }>
-            <For each={tabs()}>
-              {(tab) => (
-                // 非活动标签卸载 DOM(§5.3),store 数据保留。
-                <Show when={tab.id === activeId()}>
-                  <div
-                    class="session-column"
-                    id={`panel-${tab.id}`}
-                    role="region"
-                    aria-label={tab.store.title[0]() ?? STR.newTab}
-                  >
-                    <SessionView tab={tab} />
-                    <Show when={tab.store.pending[0]().length > 0}>
-                      <ApprovalStack
-                        pending={tab.store.pending[0]()}
-                        respond={(challengeId, decision, payload) => tab.store.respondApproval(challengeId, decision, payload)}
+              }
+            >
+              <For each={tabs()}>
+                {(tab) => (
+                  // 非活动标签卸载 DOM(§5.3),store 数据保留。
+                  <Show when={tab.id === activeId()}>
+                    <div
+                      class="session-column"
+                      id={`panel-${tab.id}`}
+                      role="region"
+                      aria-label={tab.store.title[0]() ?? STR.newTab}
+                    >
+                      <SessionView tab={tab} />
+                      <Show when={tab.store.pending[0]().length > 0}>
+                        <ApprovalStack
+                          pending={tab.store.pending[0]()}
+                          respond={(challengeId, decision, payload) => tab.store.respondApproval(challengeId, decision, payload)}
+                        />
+                      </Show>
+                      <Composer
+                        draft={() => draftOf(tab.seed)}
+                        onDraft={(value) => setDraftOf(tab.seed, value)}
+                        blocked={() => blockedReason(tab)}
+                        running={() => runningNow(tab)}
+                        onSend={(text) => send(tab, text)}
+                        onStop={() => void tab.store.cancelTurn().catch(() => {})}
+                        focusToken={focusToken()}
+                        metrics={() => tab.store.composerMetrics[0]()}
+                        onCompact={() => void tab.store.compactContext().catch(() => {})}
+                        compactPhase={() => tab.store.compact[0]().phase}
+                        onPickAttachments={() => void tab.store.addAttachments().catch((error) => {
+                          toast(`${STR.attachmentFailed}：${String(error instanceof Error ? error.message : error)}`, "err");
+                        })}
+                        attachments={() => tab.store.pendingAttachments[0]()}
+                        onRemoveAttachment={(id) => tab.store.removeAttachment(id)}
+                        profileView={() => tab.store.composerProfile[0]()}
+                        onProfile={(name) => void switchProfile(tab, name)}
+                        sessionWorkspace={() => sessionWorkspaceName(tab.seed)}
+                        lanActive={lanActive}
                       />
-                    </Show>
-                    <Composer
-                      draft={() => draftOf(tab.seed)}
-                      onDraft={(value) => setDraftOf(tab.seed, value)}
-                      blocked={() => blockedReason(tab)}
-                      running={() => runningNow(tab)}
-                      onSend={(text) => send(tab, text)}
-                      onStop={() => void tab.store.cancelTurn().catch(() => {})}
-                      focusToken={focusToken()}
-                      metrics={() => tab.store.composerMetrics[0]()}
-                      onCompact={() => void tab.store.compactContext().catch(() => {})}
-                      compactPhase={() => tab.store.compact[0]().phase}
-                      onPickAttachments={() => void tab.store.addAttachments().catch((error) => {
-                        toast(`${STR.attachmentFailed}：${String(error instanceof Error ? error.message : error)}`, "err");
-                      })}
-                      attachments={() => tab.store.pendingAttachments[0]()}
-                      onRemoveAttachment={(id) => tab.store.removeAttachment(id)}
-                      profileView={() => tab.store.composerProfile[0]()}
-                      onProfile={(name) => void switchProfile(tab, name)}
-                      sessionWorkspace={() => sessionWorkspaceName(tab.seed)}
-                      lanActive={lanActive}
-                      {...workspacePicker}
-                    />
-                    <WorkspacePanel store={tab.store} />
-                  </div>
-                </Show>
-              )}
-            </For>
+                      <WorkspacePanel store={tab.store} />
+                    </div>
+                  </Show>
+                )}
+              </For>
             </Show>
           </Show>
           <Show when={section() === "tools"}><ToolsPage /></Show>

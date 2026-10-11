@@ -8,6 +8,7 @@
  * 只读身份行在表面外下方,见 §1.5。
  */
 import { createEffect, createSignal, For, Show, type Component } from "solid-js";
+import autoAnimate from "@formkit/auto-animate";
 import IconArrowUp from "~icons/lucide/arrow-up";
 import IconSquare from "~icons/lucide/square";
 import IconPlus from "~icons/lucide/plus";
@@ -158,7 +159,13 @@ export const Composer: Component<{
     <div id="composer">
       <div class="composer-surface">
         <Show when={attachments().length > 0}>
-          <div class="composer-attachments" aria-label="待发送附件">
+          <div
+            class="composer-attachments"
+            aria-label="待发送附件"
+            ref={(el) => {
+              if (el) autoAnimate(el, { duration: 140, easing: "cubic-bezier(0.2, 0, 0, 1)" });
+            }}
+          >
             <For each={attachments()}>{(item) => (
               <span class={`composer-file-chip ${item.state}`} title={item.error ?? item.name}>
                 <IconPaperclip />

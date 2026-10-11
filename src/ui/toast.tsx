@@ -5,6 +5,7 @@
  * Solid 实现:模块级信号 + 懒挂载宿主(App 渲染一次 `<ToastHost />`)。
  */
 import { createSignal, For, Show, type Component } from "solid-js";
+import autoAnimate from "@formkit/auto-animate";
 import IconCheck from "~icons/lucide/check";
 import IconInfo from "~icons/lucide/info";
 import IconX from "~icons/lucide/x";
@@ -52,7 +53,13 @@ export const dismissToast = dismiss;
 /** 固定于右下的 toast 宿主;App 挂载一次。 */
 export const ToastHost: Component = () => {
   return (
-    <div class="toast-host" aria-live="polite">
+    <div
+      class="toast-host"
+      aria-live="polite"
+      ref={(el) => {
+        if (el) autoAnimate(el, { duration: 160, easing: "cubic-bezier(0.2, 0, 0, 1)" });
+      }}
+    >
       <For each={toasts()}>
         {(item) => (
           <div class={`toast ${item.kind}`} role="status">

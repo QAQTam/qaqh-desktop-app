@@ -10,6 +10,7 @@
  * v2 资源变更/工具终态/回合结束/激活/重连/投影重置驱动刷新)。
  */
 import { createEffect, createSignal, For, onSettled, Show, type Component } from "solid-js";
+import autoAnimate from "@formkit/auto-animate";
 import IconChevronDown from "~icons/lucide/chevron-down";
 import IconFolder from "~icons/lucide/folder";
 import IconListTodo from "~icons/lucide/list-todo";
@@ -128,7 +129,12 @@ export const WorkspacePanel: Component<{ store: SessionStore }> = (props) => {
               when={items().length > 0}
               fallback={<div class="todo-empty">{STR.todoEmpty}</div>}
             >
-              <ul class="todo-list">
+              <ul
+                class="todo-list"
+                ref={(el) => {
+                  if (el) autoAnimate(el, { duration: 160, easing: "cubic-bezier(0.2, 0, 0, 1)" });
+                }}
+              >
                 <For each={items()}>
                   {(item) => <TodoRow item={item} />}
                 </For>

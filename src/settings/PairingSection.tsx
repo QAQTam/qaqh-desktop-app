@@ -279,7 +279,7 @@ export const PairingSection: Component = () => {
                   <Field label="绑定地址" hint="留空 = 自动选出口网卡(0.0.0.0)。多网卡或开着代理建议手填,如 192.168.1.23;改地址会重签证书,设备需重扫。">
                     <TextInput value={bindIp()} onInput={setBindIp} placeholder="留空自动" />
                   </Field>
-                  <Field label="端口" hint="固定端口让手机侧地址可预测;被占用时换个再试。">
+                  <Field label="端口" hint="固定端口让手机侧地址可预测;被占用时换个再试。" compact>
                     <TextInput value={portDraft()} onInput={setPortDraft} placeholder={String(DEFAULT_LAN_PORT)} />
                   </Field>
                   <div class="lan-actions">

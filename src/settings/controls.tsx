@@ -4,8 +4,14 @@
  */
 import { Show, type Component, type ParentComponent } from "solid-js";
 
-export const Field: ParentComponent<{ label: string; hint?: string; wide?: boolean; error?: string }> = (props) => (
-  <label class={`field${props.wide ? " wide" : ""}`}>
+export const Field: ParentComponent<{
+  label: string;
+  hint?: string;
+  wide?: boolean;
+  compact?: boolean;
+  error?: string;
+}> = (props) => (
+  <label class={`field${props.wide ? " wide" : ""}${props.compact ? " compact" : ""}`}>
     <span class="field-label">{props.label}</span>
     {props.children}
     <Show when={props.error != null && props.error !== ""}>

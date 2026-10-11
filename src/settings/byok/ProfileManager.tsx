@@ -126,6 +126,7 @@ export const ProfileManager: Component = () => {
         </Field>
         <Field
           label={STR.settingsMaxTokens}
+          compact
           error={config().maxTokens <= 0 ? "必须是大于 0 的整数" : undefined}
         >
           <TextInput
@@ -139,6 +140,7 @@ export const ProfileManager: Component = () => {
         <Field
           label={STR.settingsContextLength}
           hint={STR.settingsContextLengthHint}
+          compact
           error={config().contextLength <= 0 ? "必须是大于 0 的整数" : undefined}
         >
           <TextInput
