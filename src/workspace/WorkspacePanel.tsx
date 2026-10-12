@@ -17,29 +17,11 @@ import IconListTodo from "~icons/lucide/list-todo";
 import IconLoader from "~icons/lucide/loader-circle";
 import IconCheck from "~icons/lucide/check";
 import { STR } from "../lib/strings";
+import { normalizeStatus } from "../lib/todo";
 import type { SessionStore } from "../session/store";
-
-type TodoStatus = "pending" | "in_progress" | "completed" | "cancelled";
 
 /** 会话列宽度低于此值时,右栏默认收起为胶囊条(仍占位,不覆盖消息)。 */
 const NARROW_RAIL_MAX = 720;
-
-function normalizeStatus(raw: unknown): TodoStatus {
-  switch (raw) {
-    case "in_progress":
-    case "in-progress":
-    case "running":
-      return "in_progress";
-    case "completed":
-    case "done":
-      return "completed";
-    case "cancelled":
-    case "canceled":
-      return "cancelled";
-    default:
-      return "pending";
-  }
-}
 
 const TodoRow: Component<{ item: { title?: string; status?: string; evidence?: string } }> = (props) => {
   const status = () => normalizeStatus(props.item.status);

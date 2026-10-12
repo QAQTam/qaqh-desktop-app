@@ -17,7 +17,13 @@ const [steps, setSteps] = createSignal<ToolStep[]>([
   { kind: "tool", id: "diff", seq: 4, name: "edit", status: "success", argsJson: JSON.stringify({ path: "src/policy.ts", old_str: "const level = 2;", new_str: "const level = 4;" }), display: { lines_added: 1, lines_removed: 1 }, output: { diffText: "--- a/src/policy.ts\n+++ b/src/policy.ts\n@@ -1 +1 @@\n-const level = 2;\n+const level = 4;" } },
   { kind: "tool", id: "mcp", seq: 5, name: "mcp__workspace__inspect", status: "success", argsJson: JSON.stringify({ payload: source }), output: { text: source } },
   { kind: "tool", id: "live", seq: 6, name: "exec_command", status: "running", startedAt: Date.now(), argsJson: JSON.stringify({ command: "pnpm run build" }), progressTail: "vite: building renderer…", progressTruncated: true },
-  { kind: "tool", id: "todo", seq: 7, name: "todo_write", status: "success", argsJson: JSON.stringify({ items: [{ title: "不应出现在工具行的完整待办", status: "idle" }] }), output: { text: "{\"receipt\":\"internal\"}" } },
+  { kind: "tool", id: "todo", seq: 7, name: "todo_write", status: "success", argsJson: JSON.stringify({ items: [
+    { title: "梳理渲染分层", status: "completed", evidence: "typecheck 通过" },
+    { title: "实现 todo 卡片", status: "completed" },
+    { title: "接入深浅主题", status: "in_progress" },
+    { title: "待评审的交互细节", status: "pending" },
+    { title: "已放弃的旧方案", status: "cancelled" },
+  ] }), output: { text: "{\"receipt\":\"internal\"}" } },
   { kind: "tool", id: "skill", seq: 8, name: "skill_activate", status: "success", argsJson: JSON.stringify({ name: "mc-source-driven-mod" }), output: { text: source } },
   { kind: "tool", id: "skill-read", seq: 9, name: "read", status: "success", argsJson: JSON.stringify({ path: "C:/Users/test/.agents/skills/example/SKILL.md" }), output: { text: source } },
 ]);

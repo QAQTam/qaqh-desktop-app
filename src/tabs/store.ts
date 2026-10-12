@@ -63,6 +63,15 @@ const [drafts, setDrafts] = createStore<Record<string, string>>({});
 const [focusToken, setFocusToken] = createSignal(0);
 /** Serialize singleton-host attach calls; rapid tab changes must settle on the latest tab. */
 let activationQueue: Promise<void> = Promise.resolve();
+/**
+ * 最近一次请求激活的标签 id,`null` = 回到启动页。
+ *
+ * 必须同步写入而不是读 `activeId()`:`withViewTransition` 的 View Transition 回调
+ * 是**异步**的(排到下一帧),`setActiveId` 要到那时才生效;而排队中的 activation
+ * 在微任务里就跑,读 `activeId()` 会拿到旧值,把「刚点开的标签」误判成「被后来的
+ * 点击取代」而整段 return —— 结果标签高亮但 store 从不 activate(不 attach、不订阅)。
+ */
+let activationTargetId: string | null = null;
 
 export {
   tabs,
@@ -87,6 +96,8 @@ export const setDraftOf = (seed: string, value: string): void => {
 };
 
 export function openStartup(): void {
+  // 回到启动页 = 取消在飞的激活:让排队中的 activation 不再 proceed。
+  activationTargetId = null;
   withViewTransition(() => {
     setIsStartup(true);
     setActiveId(null);
@@ -116,6 +127,8 @@ function addTab(seed: string): Tab {
 
 /** 激活标签:宿主 attach 切 active seed + 重建流 → 该 store 订阅,其余退订。 */
 export async function activateTab(tab: Tab): Promise<void> {
+  // 先同步记下「要激活谁」——见 activationTargetId 的说明,不能读被 VT 推迟的 activeId。
+  activationTargetId = tab.id;
   // 只包同步的「内容换血」信号写入;attach/RPC 留在外面,别把旧快照冻屏。
   withViewTransition(() => {
     setIsStartup(false);
@@ -127,16 +140,16 @@ export async function activateTab(tab: Tab): Promise<void> {
   setFocusToken(focusToken() + 1);
   const activation = activationQueue.catch(() => {}).then(async () => {
     // A rapid later click supersedes queued work before it can attach.
-    if (activeId() !== tab.id) return;
+    if (activationTargetId !== tab.id) return;
     try {
       await tab.store.activate();
-      if (activeId() !== tab.id) {
+      if (activationTargetId !== tab.id) {
         tab.store.deactivate();
         return;
       }
       setBootError(null);
     } catch (error) {
-      if (activeId() === tab.id) setBootError(String(error instanceof Error ? error.message : error));
+      if (activationTargetId === tab.id) setBootError(String(error instanceof Error ? error.message : error));
     }
   });
   activationQueue = activation;

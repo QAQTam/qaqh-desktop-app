@@ -11,6 +11,7 @@ import IconLoader from "~icons/lucide/loader-circle";
 import IconX from "~icons/lucide/x";
 import { Collapse } from "../ui/Collapse";
 import { TextShimmer } from "../ui/TextShimmer";
+import { TodoCard, todoCardData } from "./TodoCard";
 import { hasAnsi, parseAnsi } from "../lib/ansi";
 import { STR, formatWorkDuration } from "../lib/strings";
 import { now } from "../lib/time";
@@ -118,7 +119,8 @@ export const StepRow: Component<{ step: ToolStep; turn: Turn; expandable?: boole
     const add = step().display?.lines_added ?? 0, del = step().display?.lines_removed ?? 0;
     return add || del ? { add, del } : null;
   });
-  return <div class={{ "step-row": true, tool: true, [`st-${step().status}`]: true, "is-latest": isLatest() }}>
+  return (
+    <Show when={todoCardData(step())} fallback={<div class={{ "step-row": true, tool: true, [`st-${step().status}`]: true, "is-latest": isLatest() }}>
     <button type="button" class="tool-head" disabled={!hasDetails()} aria-expanded={hasDetails() ? open() ? "true" : "false" : undefined} onClick={() => setOverride(!open())}>
       <Switch>
         <Match when={step().status === "pending" || step().status === "running"}><span class="tool-icon spin"><IconLoader /></span></Match>
@@ -144,5 +146,8 @@ export const StepRow: Component<{ step: ToolStep; turn: Turn; expandable?: boole
       <Show when={hasDetails()}><IconChevronRight class={`tool-chevron${open() ? " is-open" : ""}`} /></Show>
     </button>
     <Collapse open={open()}><ToolDetail step={step()} /></Collapse>
-  </div>;
+    </div>}>
+      <TodoCard step={step()} />
+    </Show>
+  );
 };

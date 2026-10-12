@@ -26,6 +26,7 @@
 @import "./components/workspace-panel.css";
 @import "./components/composer.css";
 @import "./components/approval.css";
+@import "./components/genui.css";
 @import "./components/settings.css";
 @import "./components/dev-console.css";
 @import "./components/feedback.css";

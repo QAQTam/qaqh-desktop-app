@@ -96,4 +96,16 @@
   .card-actions button:not(.primary):disabled { color: var(--muted); }
   .card-actions button:not(.primary) { border: 1px solid var(--border-strong); }
   .card-actions button:disabled { cursor: not-allowed; }
+
+  /* ask v2 内嵌卡:停靠消息列尾部(#session 的隐式 grid 行,compact-card 同位),
+     不遮罩视口、不抢焦点;保留一条主色边以提示「正在等你回答」。 */
+  .ask-inline {
+    grid-column: 1; grid-row: 2;
+    width: min(var(--content-width), 100%);
+    margin: 0 auto 8px;
+  }
+  .ask-inline .card.ask {
+    box-shadow: inset 3px 0 0 var(--accent), var(--shadow-soft);
+  }
+  .ask-inline .card-body { max-height: min(40vh, 360px); }
 }

@@ -3,7 +3,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show, Switch, M
 import IconChevronDown from "~icons/lucide/chevron-down";
 import IconChevronRight from "~icons/lucide/chevron-right";
 import { Collapse } from "../ui/Collapse";
-import { Markdown } from "../markdown/Markdown";
+import { AssistantContent } from "../genui/AssistantContent";
 import { StepRow } from "../tools/StepRow";
 import { STR, formatWorkDuration } from "../lib/strings";
 import { workDurationMs } from "../lib/time";
@@ -114,7 +114,7 @@ const WorkGroup: Component<{ group: WorkSegment; turn: Turn; waits: Wait[]; cwd?
   );
 };
 
-const SegmentView: Component<{ segment: Accessor<TurnSegment>; turn: Turn; waits: Wait[]; cwd?: string | null; latestToolStepId?: string | null }> = (props) => {
+const SegmentView: Component<{ segment: Accessor<TurnSegment>; turn: Turn; waits: Wait[]; cwd?: string | null; latestToolStepId?: string | null; onFollowUp?: (text: string) => void }> = (props) => {
   const work = createMemo(() => { const segment = props.segment(); return segment.kind === "work" ? segment : null; });
   const text = createMemo(() => { const segment = props.segment(); return segment.kind === "text" ? segment.step : null; });
   return (
@@ -122,7 +122,12 @@ const SegmentView: Component<{ segment: Accessor<TurnSegment>; turn: Turn; waits
       <Match when={work() != null}><WorkGroup group={work()!} turn={props.turn} waits={props.waits} cwd={props.cwd} latestToolStepId={props.latestToolStepId} /></Match>
       <Match when={text() != null}>
         <div data-text-id={text()!.id} class={{ "turn-answer": text()!.id === props.turn.answerStepId, "turn-intermediate": text()!.id !== props.turn.answerStepId }}>
-          <Markdown text={() => text()!.text} revision={text()!.id} streaming={props.turn.status === "running" && text()!.endedAt == null} />
+          <AssistantContent
+            text={() => text()!.text}
+            revision={text()!.id}
+            streaming={props.turn.status === "running" && text()!.endedAt == null}
+            onFollowUp={props.onFollowUp}
+          />
         </div>
       </Match>
     </Switch>
@@ -157,7 +162,7 @@ export const TurnView: Component<{ turn: Turn; waits: Wait[]; store: SessionStor
   return (
     <section class="turn">
       <div class="turn-user"><div class="bubble">{props.turn.user.text}</div></div>
-      <For each={segments()} keyed={(segment) => segment.key}>{(segment) => <SegmentView segment={segment} turn={props.turn} waits={props.waits} cwd={cwd()} latestToolStepId={latestToolStepId()} />}</For>
+      <For each={segments()} keyed={(segment) => segment.key}>{(segment) => <SegmentView segment={segment} turn={props.turn} waits={props.waits} cwd={cwd()} latestToolStepId={latestToolStepId()} onFollowUp={(text) => void props.store.sendMessage(text)} />}</For>
       <Show when={props.turn.status === "aborted" && props.turn.steps.length === 0}><div class="turn-aborted">{STR.interrupted}</div></Show>
       <Show when={props.turn.status === "failed" && props.turn.error != null}><div class="turn-error">{props.turn.error!.message}</div></Show>
     </section>

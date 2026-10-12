@@ -47,6 +47,39 @@
 
   /* 工具行(§8) */
   .step-row.tool { min-width: 0; }
+  /* todo v2 语义卡片:成功终态的 todo 调用原位渲染清单快照,替代纯文字语义行。 */
+  .todo-card {
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--surface);
+  }
+  .todo-card-head {
+    display: flex; align-items: center; gap: 8px; min-width: 0;
+    color: var(--muted); font-size: var(--fs-xs); font-weight: 600;
+  }
+  .todo-card-head svg { width: 13px; height: 13px; flex: none; }
+  .todo-card-action { font-weight: 500; }
+  .todo-card-head .todo-count { margin-left: auto; }
+  .todo-card-bar {
+    height: 3px; margin-top: 8px;
+    border-radius: 2px; background: var(--surface-2); overflow: hidden;
+  }
+  .todo-card-bar > span {
+    display: block; height: 100%; border-radius: 2px;
+    background: var(--accent);
+    transition: width var(--dur) var(--ease);
+  }
+  .todo-card-list {
+    display: flex; flex-direction: column; gap: 2px;
+    max-height: 264px; overflow-y: auto;
+    padding: 6px 0 0; margin: 0; list-style: none;
+  }
+  .todo-card-row { padding: 4px 6px; }
+  .todo-card-row:hover { background: transparent; }
+  .todo-card-row b { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .todo-card-state { margin-left: 8px; color: var(--muted); }
   .tool-head {
     display: flex; align-items: center; gap: 8px;
     width: 100%; min-height: 26px;
