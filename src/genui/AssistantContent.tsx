@@ -45,7 +45,10 @@ const UiSurfaceBlock: Component<{ part: Accessor<UiSourcePart>; onFollowUp?: (te
   };
   const status = () => (props.part().sealed ? "已生成" : "生成中");
   return (
-    <Show keyed when={ir()} fallback={
+    /* keyed 按 surfaceId 而非对象身份:流式期间每一帧部分编译都产出新 IR,
+     * 按对象 key 会让 SurfaceView 整棵重挂(输入到一半的 TextInput 被清空、
+     * 已渲染的节点闪烁);按 id key 则同一 surface 就地更新,节点到达即出现。 */
+    <Show keyed when={(() => { const value = ir(); return value == null ? null : { key: value.surfaceId, ir: value }; })()} fallback={
       <div class={{ "genui-surface": true, sealed: props.part().sealed }} data-surface={props.part().surfaceId}>
         <button type="button" class="genui-surface-head" aria-expanded={open() ? "true" : "false"} onClick={() => setOpen(!open())}>
           <span class="genui-surface-title">生成式界面 · {props.part().surfaceId ?? "未命名"}</span>
@@ -58,7 +61,7 @@ const UiSurfaceBlock: Component<{ part: Accessor<UiSourcePart>; onFollowUp?: (te
         </Collapse>
       </div>
     }>
-      {(value) => <SurfaceView ir={value} onFollowUp={props.onFollowUp} streaming={compiled().state === "partial"} />}
+      {(value) => <SurfaceView ir={value.ir} onFollowUp={props.onFollowUp} streaming={compiled().state === "partial"} />}
     </Show>
   );
 };

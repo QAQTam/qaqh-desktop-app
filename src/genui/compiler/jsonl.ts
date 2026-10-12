@@ -129,6 +129,10 @@ export function parseSurfaceJsonl(source: string, options: { final?: boolean } =
     try {
       record = JSON.parse(line) as Record0;
     } catch {
+      // 流式容尾(final=false):最后一行只到达了半截 JSON,等下一帧补齐,
+      // 不拖累已到齐的 record;final 语义不变——半截行照样具名报错。
+      const isLastLine = index === lines.length - 1;
+      if (options.final === false && isLastLine) break;
       throw new GenUiError(`jsonl 行不是合法 JSON:${line.slice(0, 40)}`, lineNo);
     }
     if (typeof record.op !== "string") throw new GenUiError("jsonl record 缺少 op", lineNo);

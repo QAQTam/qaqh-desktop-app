@@ -398,6 +398,28 @@ describe("genui DSL 扩展(括号 / show / binding / jsonl)", () => {
     fails('ui.surface("s");\nui.node("a", <Text text="x" />);', "缺少 ui.end()");
   });
 
+  it("流式容尾:尾部半截语句/半截行丢弃,已到齐节点逐个可用;final 半截仍具名报错", () => {
+    // tsx:半截 JSX、半截字符串、未写完注释都不拖累前面的节点。
+    const tsxCases = [
+      'ui.surface("s");\nui.node("a", <Text text="x" />);\nui.node("b", <Text te',
+      'ui.surface("s");\nui.node("a", <Text text="x" />);\nui.node("b", <Text text="半截',
+      'ui.surface("s");\nui.node("a", <Text text="x" />); // 注释还没写完',
+    ];
+    for (const src of tsxCases) {
+      const ir = compileSurface(src, "tsx", { final: false });
+      expect(ir.order).toEqual(["a"]);
+    }
+    // 分号省略形态在结尾悬空同样能收(宽容换行 + 闭合判定)。
+    expect(compileSurface('ui.surface("s")\nui.node("a", <Text text="x" />)', "tsx", { final: false }).order).toEqual(["a"]);
+    // jsonl:尾部半截行跳过,完整 record 照常。
+    const jbase = '{"op":"surface.open","surface":"t","title":"表"}\n{"op":"node","id":"a","component":"Text","props":{"text":"A"}}\n';
+    expect(compileSurface(`${jbase}{"op":"node","id":"b","comp`, "jsonl", { final: false }).order).toEqual(["a"]);
+    // final 语义不变:半截语句/半截行在 seal 后具名报错。
+    fails(tsxCases[0]!, "只支持自闭合 JSX 元素");
+    failsJsonl(jbase.replace(/\n$/, ""), "jsonl 缺少 surface.close") /* 完整但缺 close */;
+    failsJsonl('{"op":"surface.open","surface":"t"}\n{"op":"node","id":"b","comp', "jsonl 行不是合法 JSON");
+  });
+
   it("jsonl 结构裁决:未知 op / 缺 close / 非法 JSON / 类型不符都拒绝", () => {
     failsJsonl(JSONL_COUNTER.replace("surface.close", "surface.finish"), "未知的 jsonl op");
     failsJsonl(JSONL_COUNTER.replace(/\n\{"op":"surface\.close"\}/, ""), "缺少 surface.close");

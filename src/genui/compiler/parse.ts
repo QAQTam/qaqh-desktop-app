@@ -16,8 +16,10 @@ import {
 
 type Statement = { text: string; line: number };
 
-/** 按「深度 0 的分号」切语句;跳过字符串与注释,记录起始行号。 */
-export function splitStatements(source: string): Statement[] {
+/** 按「深度 0 的分号」切语句;跳过字符串与注释,记录起始行号。
+ *  流式容尾(final=false 才由调用方触发重扫):结尾处未终结的语句整体丢弃,
+ *  已到齐的语句照常返回——半截 JSX/括号不得拖累前面的节点先渲染。 */
+export function splitStatements(source: string, options: { tolerantTail?: boolean } = {}): Statement[] {
   const statements: Statement[] = [];
   let statementStart: number | null = null;
   let line = 1;
@@ -43,6 +45,7 @@ export function splitStatements(source: string): Statement[] {
         if (source[index] === "\n") line += 1;
         index += 1;
       }
+      if (index >= source.length && options.tolerantTail === true) return statements; // 未闭合注释 = 半截
       index += 2;
       continue;
     }
@@ -59,6 +62,7 @@ export function splitStatements(source: string): Statement[] {
         if (source[index] === "\n") line += 1;
         index += 1;
       }
+      if (index >= source.length && options.tolerantTail === true) return statements; // 未闭合字符串 = 尾部半截语句
       index += 1;
       continue;
     }
@@ -82,8 +86,41 @@ export function splitStatements(source: string): Statement[] {
     }
     index += 1;
   }
+  // 扫描到源码结尾:容尾模式(流式 final=false)下,凡是没有被分号/宽容换行
+  // 边界收尾的尾语句都视为「还在生成中」直接丢弃——半截 JSX/括号/字符串不
+  // 拖累已到齐的节点先渲染;严格模式(final)照旧收尾,seal 后半截语句得到
+  // 具名报错而不是被静默吞掉。
+  if (options.tolerantTail === true) {
+    if (statementStart != null && (depth > 0 || !statementsClosedTail(source, statementStart))) {
+      return statements;
+    }
+    push(source.length);
+    return statements;
+  }
   push(source.length);
   return statements;
+}
+
+/** 容尾判定:statementStart 之后(到源码结尾)是否已构成「闭合」的语句形态
+ *  (出现 `)`,且深度已归零)。宽容换行能收尾的语句在扫描中早已 push,
+ *  这里只处理「结尾悬空」的形态:语句完整(如省略分号的 ui.end())返回 true。 */
+function statementsClosedTail(source: string, start: number): boolean {
+  let depth = 0;
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index]!;
+    if (char === '"' || char === "'" || char === "`") {
+      const quote = char;
+      index += 1;
+      while (index < source.length && source[index] !== quote) {
+        if (source[index] === "\\") index += 2;
+        else index += 1;
+      }
+      continue;
+    }
+    if (char === "(" || char === "[" || char === "{") depth += 1;
+    if (char === ")" || char === "]" || char === "}") depth -= 1;
+  }
+  return depth <= 0 && /[\)\}"']\s*$/.test(source.slice(start));
 }
 
 /** index 是否正处在新语句的关键字起始(ui./const,大小写敏感)。 */
@@ -393,7 +430,8 @@ function parseJsxNode(text: string, symbols: Symbols, line: number): { type: str
  * ui.state 声明与 ui.node;ui.set/ui.reset 只能作为事件值出现。
  */
 export function parseSurface(source: string, options: { final?: boolean } = {}): SurfaceIR {
-  const statements = splitStatements(source);
+  const final = options.final !== false;
+  const statements = splitStatements(source, { tolerantTail: !final });
   if (statements.length === 0) throw new GenUiError("UI 源码为空");
 
   const symbols: Symbols = {};
