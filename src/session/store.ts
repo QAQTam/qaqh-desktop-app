@@ -18,7 +18,7 @@ import { applyEntry, applySnapshot, emptySession, prependPage } from "./reducer"
 import { evictForWindow, fillGapHeights } from "./pagination";
 import type { SessionState, TimelineEntryWire, Wait } from "./types";
 import { normalizeActivity, projectionActions, readProjection, type SessionActivity } from "./projection";
-import { reduceCompact, type CompactState } from "./compact";
+import { compactedAnchor, reduceCompact, type CompactState } from "./compact";
 import type { ConfigDto } from "../api/qaqh/ConfigDto";
 import type { ContentRef } from "../api/qaqh/ContentRef";
 import type { UsageInfo } from "../api/qaqh/UsageInfo";
@@ -108,6 +108,8 @@ const SNAPSHOT_LIMIT = 50;
 const PAGE_LIMIT = 30;
 /** 缺口触发快照校正的最小间隔(防抖,高吞吐下不连环拉全量)。 */
 const RESNAPSHOT_DEBOUNCE_MS = 2_000;
+/** 压缩终态卡(done/skipped)自动退场的延时;failed 不退,留待用户处理。 */
+const COMPACT_CARD_TTL_MS = 8_000;
 
 export class SessionStore {
   readonly seed: string;
@@ -126,6 +128,10 @@ export class SessionStore {
   compactedAfter = createSignal<string | null>(null);
   /** 压缩进行态与流式摘要(见 `CompactState`);idle 时 HUD 只显示百分比。 */
   compact = createSignal<CompactState>({ phase: "idle" });
+  /** 上一次 `compaction_applied` 的 checkpoint;同值重复投影不重锚分隔线。 */
+  private compactedCheckpoint: string | null = null;
+  /** 终态卡自动退场定时器;任何后续压缩状态都会先撤掉。 */
+  private compactTimer: number | null = null;
   /** 待发附件;上传成功前不允许发送(命令里只能出现 `ContentRef`)。 */
   pendingAttachments = createSignal<PendingAttachment[]>([]);
   loadingOlder = createSignal(false);
@@ -483,16 +489,19 @@ export class SessionStore {
           void this.refreshTodos();
           break;
         case "compacted": {
-          const slots = this.stateGet.slots;
-          const anchor = slots.length > 0 ? slots[slots.length - 1]!.key : null;
-          this.compactedAfter[1](anchor);
-          this.compact[1]((current) => reduceCompact(current, "compacted", delta.body, now()));
+          // 同一 checkpoint 的重复投影(重连重放 durable 事实)不重锚,否则
+          // 分隔线会跳到最新回合下方,压缩后发生的内容全被顶到线上方。
+          const checkpoint = typeof delta.body.checkpoint_id === "string" ? delta.body.checkpoint_id : null;
+          if (checkpoint != null && checkpoint === this.compactedCheckpoint) break;
+          this.compactedCheckpoint = checkpoint;
+          this.compactedAfter[1](compactedAnchor(this.stateGet.slots, this.stateGet.turns));
+          this.setCompact(reduceCompact(this.compact[0](), "compacted", delta.body, now()));
           break;
         }
         case "compact_started":
         case "compact_progress":
         case "compact_finished": {
-          this.compact[1]((current) => reduceCompact(current, action, delta.body, now()));
+          this.setCompact(reduceCompact(this.compact[0](), action, delta.body, now()));
           break;
         }
         case "sessions":
@@ -697,6 +706,8 @@ export class SessionStore {
   // ── 动作 ────────────────────────────────────────────────────────────────────
 
   async sendMessageWithAttachments(text: string, attachments: ContentRef[] = []): Promise<void> {
+    // 发送即收掉滞留的压缩终态卡(failed 保留);退场定时器随后空转,无需专撤。
+    this.compact[1]((current) => current.phase === "done" || current.phase === "skipped" ? { phase: "idle" } : current);
     await transport.command("conversation", {
       channel: "conversation",
       type: "conversation_send_message",
@@ -777,17 +788,36 @@ export class SessionStore {
   }
 
   /**
+   * 压缩卡写入的唯一入口:done/skipped 起延时退场定时器,failed 常驻等用户
+   * 处理;任何后续状态先撤掉旧定时器。
+   */
+  private setCompact(next: CompactState): void {
+    this.compact[1](next);
+    if (this.compactTimer != null) {
+      clearTimeout(this.compactTimer);
+      this.compactTimer = null;
+    }
+    if (next.phase === "done" || next.phase === "skipped") {
+      this.compactTimer = window.setTimeout(() => {
+        this.compactTimer = null;
+        // 期间可能已开新一轮压缩或被发送消息清掉:只收掉仍然滞留的终态。
+        this.compact[1]((current) => current.phase === "done" || current.phase === "skipped" ? { phase: "idle" } : current);
+      }, COMPACT_CARD_TTL_MS);
+    }
+  }
+
+  /**
    * 手动压缩上下文。ack 只代表进队,所以先乐观置 running,否则按钮点了要等
    * 第一帧过程事件才有反馈;真实终态以 `compact_finished` / `compaction_applied`
    * 为准。投递失败只是个失败态,原因只在控制台(`compact_finished` 不带原因)。
    */
   async compactContext(): Promise<void> {
-    this.compact[1]({ phase: "running", compactId: null, turnsTotal: null, turnsKeeping: null, summary: "" });
+    this.setCompact({ phase: "running", compactId: null, turnsTotal: null, turnsKeeping: null, summary: "" });
     try {
       await transport.command("conversation", { channel: "conversation", type: "conversation_compact" }, this.seed);
     } catch (error) {
       console.warn("[compact] 压缩命令投递失败", error);
-      this.compact[1]({ phase: "failed" });
+      this.setCompact({ phase: "failed" });
     }
   }
 

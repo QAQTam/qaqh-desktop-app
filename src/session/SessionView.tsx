@@ -320,12 +320,19 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
             {STR.loadFailedRetry}
           </button>
         </Show>
-        <Show when={store.compactedAfter[0]() != null && !state().slots.some((slot) => slot.kind === "turn" && slot.key === store.compactedAfter[0]())}>
+        <Show when={store.compactedAfter[0]() != null && !state().slots.some((slot) => slot.key === store.compactedAfter[0]())}>
           <div class="compact-divider" role="separator"><span>{STR.compactedAbove}</span></div>
         </Show>
         <For each={slotGroups()} keyed={(group) => group.key}>
           {(group) => <div class="session-group"><For each={group().keys}>{(key) => (
-            <Show when={slotTable().get(key)?.kind === "turn"} fallback={<GapRow slot={slotTable().get(key) ?? { kind: "gap", key, spans: [] }} />}>
+            <Show when={slotTable().get(key)?.kind === "turn"} fallback={<>
+              <GapRow slot={slotTable().get(key) ?? { kind: "gap", key, spans: [] }} />
+              {/* 锚点落在占位段(压缩前旧回合已被窗口淘汰)时,分隔线画在占位段
+                  下方、真实尾部回合上方,而不是退回整列顶部。 */}
+              <Show when={store.compactedAfter[0]() === key}>
+                <div class="compact-divider" role="separator"><span>{STR.compactedAbove}</span></div>
+              </Show>
+            </>}>
               <TurnSlot store={store} slotKey={key} />
             </Show>
           )}</For></div>}

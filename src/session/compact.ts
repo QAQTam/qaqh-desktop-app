@@ -10,6 +10,8 @@
  * 分片按 256 字符合并后发整段,不是增量分片。所以这里整段替换;拼加会让文本按
  * 帧长堆叠,而丢帧不需要补偿(下一帧自带全文)。
  */
+import type { Slot, Turn } from "./types";
+
 export type CompactState =
   | { phase: "idle" }
   | { phase: "running"; compactId: string | null; turnsTotal: number | null; turnsKeeping: number | null; summary: string }
@@ -75,4 +77,22 @@ export function reduceCompact(
       };
     }
   }
+}
+
+/**
+ * 「此前已压缩」分隔线的锚点:压缩时点上最后一个**已收口**的槽位。
+ *
+ * 自动压缩常发生在新回合已经开跑之后(阈值检查在构建上下文时),且
+ * conversation 投影与 timeline 流之间没有跨流顺序保证——若锚到那个运行中的
+ * 回合,分隔线画在它的槽位末尾,它此后的全部输出连同之后的新消息都落在
+ * 分隔线上方,时间线在视觉上被倒置。所以运行中的回合一律跳过;占位段
+ * (已淘汰的旧回合,全部早于压缩时点)是合法锚点。空表返回 null(不渲染)。
+ */
+export function compactedAnchor(slots: readonly Slot[], turns: Readonly<Record<string, Turn>>): string | null {
+  for (let index = slots.length - 1; index >= 0; index -= 1) {
+    const slot = slots[index]!;
+    if (slot.kind === "turn" && turns[slot.key]?.status === "running") continue;
+    return slot.key;
+  }
+  return null;
 }

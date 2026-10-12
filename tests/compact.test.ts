@@ -7,7 +7,8 @@
  * 不是增量分片。按分片拼加会让摘要按帧长重复堆叠。
  */
 import { describe, expect, test } from "vitest";
-import { reduceCompact, type CompactState } from "../src/session/compact";
+import { compactedAnchor, reduceCompact, type CompactState } from "../src/session/compact";
+import type { Slot, Turn } from "../src/session/types";
 
 const run = (state: CompactState, action: Parameters<typeof reduceCompact>[1], body: Record<string, unknown>) =>
   reduceCompact(state, action, body, 1000);
@@ -75,5 +76,39 @@ describe("reduceCompact:落盘事实收口", () => {
     expect(run(done, "compacted", {})).toBe(done);
     const skipped: CompactState = { phase: "skipped", status: "skipped" };
     expect(run(skipped, "compacted", {})).toBe(skipped);
+  });
+});
+
+describe("compactedAnchor:「此前已压缩」分隔线锚在压缩时点前最后一个已收口槽位", () => {
+  const turn = (key: string, status: Turn["status"] = "done"): Turn => ({
+    id: key, key, turnIndex: null, user: { text: "" }, steps: [], answer: null,
+    answerStepId: null, status, expanded: false,
+  });
+  const turnSlot = (key: string): Slot => ({ kind: "turn", key });
+  const gapSlot = (key = "gap:g1"): Slot => ({ kind: "gap", key, spans: [] });
+  const table = (...turns: Turn[]): Record<string, Turn> => {
+    const out: Record<string, Turn> = {};
+    for (const item of turns) out[item.key] = item;
+    return out;
+  };
+
+  test("压缩发生在新回合开跑后:跳过运行中的回合,锚到它前面的已封回合", () => {
+    const slots = [turnSlot("t1"), turnSlot("t2"), turnSlot("t3")];
+    expect(compactedAnchor(slots, table(turn("t1"), turn("t2"), turn("t3", "running")))).toBe("t2");
+  });
+
+  test("压缩发生在回合间隙:最后一个已封回合就是锚点", () => {
+    const slots = [turnSlot("t1"), turnSlot("t2")];
+    expect(compactedAnchor(slots, table(turn("t1"), turn("t2")))).toBe("t2");
+  });
+
+  test("占位段是合法锚点:淘汰掉的旧回合全部早于压缩时点,分隔线画在它下方", () => {
+    const slots = [gapSlot(), turnSlot("t3")];
+    expect(compactedAnchor(slots, table(turn("t3", "running")))).toBe("gap:g1");
+  });
+
+  test("只有运行中回合 / 空表 → null(不渲染)", () => {
+    expect(compactedAnchor([turnSlot("t1")], table(turn("t1", "running")))).toBeNull();
+    expect(compactedAnchor([], {})).toBeNull();
   });
 });
