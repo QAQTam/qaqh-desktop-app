@@ -9,7 +9,7 @@ import { For, Match, Show, Switch, createSignal, type Component } from "solid-js
 import { createStore } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import type { Action, Expr, IRNode, PropValue, StateValue, SurfaceIR } from "../compiler/ir";
-import { GenUiError } from "../compiler/ir";
+import { forestRoots, GenUiError } from "../compiler/ir";
 import { evaluate, type ItemScope } from "../runtime/eval";
 
 const display = (value: StateValue): string => {
@@ -231,10 +231,11 @@ const SurfaceView: Component<{ ir: SurfaceIR; onFollowUp?: (text: string) => voi
     return content;
   };
 
-  // 树结构在 IR 层已定,这里按 root 优先渲染;无 root 时按插入顺序平铺。
+  // 树结构在 IR 层已定:root 优先;无 root(模型省略选项/流式未到齐)时只平铺
+  // 森林顶层——按 order 全量平铺会把已随父渲染的子树再画一遍(重复三连的来源)。
   let body: JSX.Element;
   if (ir.rootId != null) body = renderNode(ir.rootId, 1);
-  else body = <>{ir.order.map((id) => renderNode(id, 1))}</>;
+  else body = <>{forestRoots(ir).map((id) => renderNode(id, 1))}</>;
 
   return (
     <div class="genui-view" data-surface={ir.surfaceId} data-streaming={streaming ? "true" : undefined}>

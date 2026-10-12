@@ -95,6 +95,20 @@ export const BINDING_TYPES: Record<string, StateType> = {
 export const MAX_TREE_DEPTH = 16;
 export const MAX_NODES = 512;
 
+/**
+ * 无 root 时的平铺集合:只返回「森林顶层」节点——没有被任何 children 引用的
+ * 节点。直接按 order 平铺会把已随父节点渲染过的子树再画一遍(实测:模型省略
+ * root 选项时整棵 Surface 双重渲染)。order 保序,顶层节点保持声明顺序。
+ */
+export function forestRoots(ir: SurfaceIR): string[] {
+  const nested = new Set<string>();
+  for (const id of ir.order) {
+    const children = ir.nodes[id]!.props.children;
+    if (children?.kind === "list") for (const child of children.items) nested.add(child);
+  }
+  return ir.order.filter((id) => !nested.has(id));
+}
+
 export function normalizeBindings(ir: SurfaceIR, catalog: Record<string, Record<string, PropKind>> = CATALOG): void {
   for (const id of ir.order) {
     const node = ir.nodes[id]!;

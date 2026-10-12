@@ -116,7 +116,9 @@ function scan(lines: string[]): ScanResult {
   let ui: { format: UiFormat; source: string[]; openLength: number } | null = null;
   let fenceLength = 0; // 普通(非 UI)围栏的开门长度;0 = 不在围栏内
   const flushMd = (into: ContentPart[]): void => {
-    if (md.length > 0) into.push({ kind: "markdown", text: md.join("\n") });
+    // 空行(如仅 "\n")拼出来是空串:不产 part,与增量视图/渲染层(Match 跳过空文本)同约。
+    const joined = md.join("\n");
+    if (joined !== "") into.push({ kind: "markdown", text: joined });
     md = [];
   };
   for (const line of lines) {
@@ -177,9 +179,11 @@ function scan(lines: string[]): ScanResult {
  */
 export function splitContentParts(text: string, options: { final?: boolean } = {}): ContentPart[] {
   if (!text.includes("`")) {
+    // 快路径与扫描路径同行模型:尾部 \n 的切分伪影不算内容;全空(如仅 "\n")
+    // 不产 part——空 markdown 在渲染层本来就被 Match 跳过。
     if (text === "") return [];
-    // 快路径与扫描路径同行模型:尾部 \n 的切分伪影不算内容。
-    return [{ kind: "markdown", text: text.endsWith("\n") ? text.slice(0, -1) : text }];
+    const body = text.endsWith("\n") ? text.slice(0, -1) : text;
+    return body === "" ? [] : [{ kind: "markdown", text: body }];
   }
   const lines = text.split("\n");
   // 尾部 \n 的切分伪影(末尾空串)不是真实行,统一丢弃——与增量水位封装同行模型。
@@ -222,7 +226,8 @@ export function createContentDecoder(): {
   const stats: ContentDecoderStats = { pushes: 0, rescans: 0, scannedChars: 0 };
 
   const flushMd = (into: ContentPart[]): void => {
-    if (machine.md.length > 0) into.push({ kind: "markdown", text: machine.md.join("\n") });
+    const joined = machine.md.join("\n");
+    if (joined !== "") into.push({ kind: "markdown", text: joined });
     machine.md = [];
   };
 
@@ -304,8 +309,11 @@ export function createContentDecoder(): {
     if (machine.ui != null) {
       const close = live != null ? FENCE_CLOSE.exec(live) : null;
       const sealed = close != null && close[1]!.length >= machine.ui.openLength;
+      // 「还没有源码」看行数而不是 join 结果:围栏头后的空行让 source 变 "" 但行数 > 0,
+      // 此时 live 行要追加(否则空行被 live 替换吞掉,与纯函数逐行模型不一致)。
+      const hasSource = machine.ui.source.length > 0;
       let source = machine.ui.source.join("\n");
-      if (live != null && !sealed) source = source === "" ? live : `${source}\n${live}`;
+      if (live != null && !sealed) source = hasSource ? `${source}\n${live}` : live;
       result.push({ kind: "ui", format: machine.ui.format, source, sealed, ...describe(machine.ui.format, source) });
       return result;
     }
