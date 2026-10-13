@@ -70,6 +70,10 @@ export const STR = {
   planPlaceholder: "审批意见(可选)",
   autonomous: "自主执行",
   customAnswer: "自定义回答",
+  /** 侧栏待响应卡文案(§6.2):与后端 `SessionRunStatus` 三态一一对应。 */
+  pendingPermission: "请求授权",
+  pendingAsk: "请求回答",
+  pendingPlan: "计划评审",
   noSession: "没有可用会话。",
   bootFailed: "连接失败。",
   emptyMessages: "新建对话即可开始。已写的草稿会保留到新对话。",

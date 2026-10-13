@@ -9,6 +9,7 @@
  * 找出新 seed。宿主模式下 SessionCreate 不要求 active seed,空会话也可创建。
  */
 import { createSignal, createStore } from "solid-js";
+import type { SessionRunStatus } from "../api/qaqh/SessionRunStatus";
 import { withViewTransition } from "../ui/viewTransition";
 import { transport } from "../lib/transport";
 import { STR } from "../lib/strings";
@@ -43,6 +44,12 @@ export type SidebarSession = {
    * 折算(`commands.rs:session_is_busy`),不再是从前的 `running`(进程存在性)。
    */
   busy?: boolean;
+  /**
+   * 后端 8 态 `SessionRunStatus` 原样透传(宿主 `commands.rs` 同名镜像)。
+   * 待人响应的三态(`waiting_permission` / `waiting_ask` / `waiting_plan`)由
+   * 它判出——`busy` 折成 bool 后无法区分「在跑」与「等人」,弹卡必须读这个。
+   */
+  status?: SessionRunStatus;
   /** 会话轮次数:后台标签状态点用它判断「跑过东西但没在跑」(§5.2)。 */
   turn_count?: number;
   workspace_id?: string | null;
@@ -156,9 +163,12 @@ export async function activateTab(tab: Tab): Promise<void> {
   await activation;
 }
 
-export async function openSession(seed: string): Promise<void> {
+export async function openSession(seed: string): Promise<Tab | null> {
   const tab = addTab(seed);
   await activateTab(tab);
+  // 直接返回目标 tab,不走 activeId():那是 withViewTransition 异步回调才写入的,
+  // 紧随其后的调用者(启动页原子提交)会在夹具/快速时序下读到 null。
+  return tabs().some((item) => item.id === tab.id) ? tab : null;
 }
 
 export async function closeTab(tabId: string): Promise<void> {
@@ -233,8 +243,9 @@ export interface StartupSubmitOptions {
  * 3. 上传本地暂存的附件 (若有)
  * 4. 打开会话并发送第一条用户消息
  */
-export async function submitStartupSession(options: StartupSubmitOptions): Promise<void> {
-  if (creating()) return;
+/** 返回是否成功提交;false = 创建/发送失败(调用方据此保留草稿)。 */
+export async function submitStartupSession(options: StartupSubmitOptions): Promise<boolean> {
+  if (creating()) return false;
   setCreating(true);
   try {
     const fresh = await createSessionWithCwd(options.cwd);
@@ -261,15 +272,16 @@ export async function submitStartupSession(options: StartupSubmitOptions): Promi
         }
       }
     }
-    await openSession(fresh);
-    const tab = activeTab();
+    const tab = await openSession(fresh);
     if (tab != null) {
       await tab.store.sendMessageWithAttachments(options.text, uploadedRefs);
     }
     setIsStartup(false);
+    return true;
   } catch (error) {
     toast(`创建会话失败：${error instanceof Error ? error.message : String(error)}`, "err");
     setBootError(String(error instanceof Error ? error.message : error));
+    return false;
   } finally {
     setCreating(false);
   }

@@ -8,6 +8,7 @@
 import { render } from "@solidjs/web";
 import { createSignal, Show, untrack } from "solid-js";
 import { SessionStore } from "./session/store";
+import type { SessionRunStatus } from "./api/qaqh/SessionRunStatus";
 import { applyEntry } from "./session/reducer";
 import { SessionView } from "./session/SessionView";
 import { WorkspacePanel } from "./workspace/WorkspacePanel";
@@ -25,6 +26,7 @@ import { reload as reloadSettings } from "./settings/store";
 import { setSessionMaterial, type SessionMaterial } from "./lib/visual";
 import { applyTheme, type ResolvedTheme } from "./lib/theme";
 import { transport } from "./lib/transport";
+import { pollSessions } from "./tabs/store";
 import type { ConfigDto } from "./api/qaqh/ConfigDto";
 import type { ApprovalView } from "./lib/transport";
 import type { Tab } from "./tabs/store";
@@ -35,6 +37,8 @@ import "./styles/app.css";
 const previewParams = new URLSearchParams(window.location.search);
 const previewView = previewParams.get("view");
 const isVisualPreview = previewView === "messages" || previewView === "settings" || previewView === "approval" || previewView === "tools";
+/** 侧栏待响应卡的预览开关(§6.2):见 `previewSessions` 的注释。 */
+const pendingPreview = previewParams.get("pending") === "1";
 const [currentView, setCurrentView] = createSignal<"messages" | "tools" | "settings">(
   previewView === "settings" || previewView === "tools" ? previewView : "messages",
 );
@@ -268,14 +272,23 @@ const previewWorkspaces: SidebarWorkspace[] = [
   { id: "ws-web", title: "qaqh-desktop-app", path: "E:/qaqh-desktop-app", order: 0 },
   { id: "ws-backend", title: "qaqh-backend", path: "E:/qaqh-backend", order: 1 },
 ];
-const previewSessions: SidebarSession[] = fixtureTabs.map((item, index) => ({
-  session_id: item.seed,
-  title: item.store.title[0]() ?? `会话 ${index + 1}`,
-  cwd: index < 8 ? "E:/qaqh-desktop-app" : index < 14 ? "E:/qaqh-backend" : null,
-  workspace_id: index < 8 ? "ws-web" : index < 14 ? "ws-backend" : null,
-  busy: item.store.activity[0]() === "working",
-  updated_at: 100 - index,
-}));
+const previewSessions: SidebarSession[] = fixtureTabs.map((item, index) => {
+  const working = item.store.activity[0]() === "working";
+  // 待人态只在 `?pending=1` 时铺:默认不铺,免得每次打开 stress 预览都看到三条
+  // 假的「等授权」会话,也让视觉回归的既有基线不被这次改动整批刷掉。
+  const status: SessionRunStatus | undefined = pendingPreview
+    ? index === 1 ? "waiting_permission" : index === 2 ? "waiting_ask" : index === 3 ? "waiting_plan" : working ? "working" : "idle"
+    : working ? "working" : "idle";
+  return {
+    session_id: item.seed,
+    title: item.store.title[0]() ?? `会话 ${index + 1}`,
+    cwd: index < 8 ? "E:/qaqh-desktop-app" : index < 14 ? "E:/qaqh-backend" : null,
+    workspace_id: index < 8 ? "ws-web" : index < 14 ? "ws-backend" : null,
+    status,
+    busy: status !== "idle",
+    updated_at: 100 - index,
+  };
+});
 const [previewActiveSeed, setPreviewActiveSeed] = createSignal(tab.seed);
 const previewActiveTab = (): Tab => fixtureTabs.find((item) => item.seed === previewActiveSeed()) ?? tab;
 const [draft, setDraft] = createSignal("");
@@ -312,9 +325,132 @@ if (isVisualPreview) {
       messageInFlightPerPair: 0,
       messageOutboundPerSender: 0,
     },
-    mcp: { enabled: true, idleShutdownSecs: 300, servers: [] },
+    mcp: {
+      enabled: true,
+      idleShutdownSecs: 300,
+      servers: [
+        {
+          name: "context7",
+          transport: "stdio",
+          command: "npx",
+          args: ["-y", "ctx7"],
+          env: { KEY: "${secret:ctx7}" },
+          url: "",
+          headers: {},
+          tools: null,
+          resourcesEnabled: false,
+          defaultTimeoutSecs: 30,
+          maxConcurrentCalls: 8,
+          cwd: "",
+        },
+      ],
+    },
     lsp: { enabled: false, idleShutdownSecs: 300, servers: [] },
     tokenizerPath: null,
+  };
+  // tools 视图夹具:skills 分两层,两层的数据面不同,夹具也各给一份——
+  //  - 项目级走 fs.list/fs.read(内存工作区,两个目录:一个带 short-description、
+  //    一个 frontmatter 残缺,另有一个同名 `shadowed-skill` 用来验「被同名覆盖」);
+  //  - 用户级走宿主命令 skills_user_scan(这里直接 mock 宿主回包:两个根,
+  //    `~/.agents/skills` 存在、`~/.qaqh/skills` 不存在,各带一条 skill)。
+  // 卡片的展开正文、诊断条、分组头与 root 存在性因此都能在浏览器里验收。
+  const previewWorkspaceRoot = "E:/fixtures/demo-repo";
+  const previewFs: Record<string, unknown> = {
+    [previewWorkspaceRoot]: [
+      { name: "skills", path: `${previewWorkspaceRoot}/skills`, is_dir: true, is_file: false },
+      { name: "src", path: `${previewWorkspaceRoot}/src`, is_dir: true, is_file: false },
+    ],
+    [`${previewWorkspaceRoot}/skills`]: [
+      { name: "skill-creator", path: `${previewWorkspaceRoot}/skills/skill-creator`, is_dir: true, is_file: false },
+      { name: "broken-skill", path: `${previewWorkspaceRoot}/skills/broken-skill`, is_dir: true, is_file: false },
+      { name: "shadowed-skill", path: `${previewWorkspaceRoot}/skills/shadowed-skill`, is_dir: true, is_file: false },
+    ],
+    [`${previewWorkspaceRoot}/skills/skill-creator`]: [
+      { name: "SKILL.md", path: `${previewWorkspaceRoot}/skills/skill-creator/SKILL.md`, is_dir: false, is_file: true },
+    ],
+    [`${previewWorkspaceRoot}/skills/broken-skill`]: [
+      { name: "SKILL.md", path: `${previewWorkspaceRoot}/skills/broken-skill/SKILL.md`, is_dir: false, is_file: true },
+    ],
+    [`${previewWorkspaceRoot}/skills/shadowed-skill`]: [
+      { name: "SKILL.md", path: `${previewWorkspaceRoot}/skills/shadowed-skill/SKILL.md`, is_dir: false, is_file: true },
+    ],
+  };
+  const previewFiles: Record<string, string> = {
+    [`${previewWorkspaceRoot}/skills/skill-creator/SKILL.md`]: [
+      "---",
+      "name: skill-creator",
+      "description: Create or update a skill with appropriately scoped instructions. (visual fixture)",
+      "metadata:",
+      "  short-description: Create or update a skill",
+      "---",
+      "",
+      "# Skill Creator",
+      "",
+      "**Assume the agent is already capable.** Include only information that changes its decisions.",
+      "",
+      "## Anatomy",
+      "",
+      "- SKILL.md: required frontmatter + body",
+      "- references/: read only what the task needs",
+    ].join("\n"),
+    [`${previewWorkspaceRoot}/skills/broken-skill/SKILL.md`]: "# 没有 frontmatter 的文件\n",
+    // 项目级这一条与用户级夹具里的 `shadowed-skill` 同名:展示「被同名覆盖」的降级态。
+    [`${previewWorkspaceRoot}/skills/shadowed-skill/SKILL.md`]: [
+      "---",
+      "name: shadowed-skill",
+      "description: 项目级同名条目——用户级那条会被标成被覆盖。(visual fixture)",
+      "---",
+      "",
+      "# Shadowed",
+      "",
+      "项目级优先于用户级(`qaqh-skills` 的 seen_names)。",
+    ].join("\n"),
+  };
+  // 用户级夹具(宿主 `skills_user_scan` 的回包形状,见 src-tauri/src/skills.rs)。
+  const previewUserSkills = {
+    roots: [
+      { path: "C:/Users/fixture/.qaqh/skills", label: "~/.qaqh/skills", exists: false },
+      { path: "C:/Users/fixture/.agents/skills", label: "~/.agents/skills", exists: true },
+    ],
+    skills: [
+      {
+        root: "C:/Users/fixture/.agents/skills",
+        path: "C:/Users/fixture/.agents/skills/mc-bug-audit/SKILL.md",
+        content: [
+          "---",
+          "name: mc-bug-audit",
+          "description: 独立审计 / 主动找 bug:从源码本身出发复现,不读社区报告。(visual fixture)",
+          "---",
+          "",
+          "# Independent bug audit",
+          "",
+          "先从边界找:迁移之后的每一条约定(符号、单位、默认值、事件顺序)都值得怀疑。",
+        ].join("\n"),
+        bytes: 512,
+      },
+      {
+        root: "C:/Users/fixture/.agents/skills",
+        path: "C:/Users/fixture/.agents/skills/shadowed-skill/SKILL.md",
+        content: [
+          "---",
+          "name: shadowed-skill",
+          "description: 用户级同名条目,项目级已先占——卡片会标出「被同名覆盖」。(visual fixture)",
+          "---",
+          "",
+          "# Shadowed(用户级)",
+        ].join("\n"),
+        bytes: 256,
+      },
+      {
+        root: "C:/Users/fixture/.agents/skills",
+        path: "C:/Users/fixture/.agents/skills/broken-user/SKILL.md",
+        content: "# 用户级里没有 frontmatter 的文件\n",
+        bytes: 64,
+      },
+    ],
+    diagnostics: [
+      { path: "C:/Users/fixture/.agents/skills/legacy/SKILL.md", message: "skill file exceeds 524288 bytes" },
+    ],
   };
   transport.rpc = async <T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> => {
     if (method === "config.load") return structuredClone(previewConfig) as T;
@@ -328,9 +464,24 @@ if (isVisualPreview) {
     }
     if (method === "daemon.version") return "0.0.0-visual-fixture" as T;
     if (method === "session.list") return [] as T;
-    if (method === "workspace.list") return { items: [] } as T;
+    if (method === "workspace.list") return [
+      { id: "w1", title: "演示仓库", path: previewWorkspaceRoot, order: 0 },
+    ] as T;
+    if (method === "fs.list") {
+      const entries = previewFs[String(params.path)];
+      if (entries == null) throw new Error(`fs.list ${String(params.path)}: 系统找不到指定的文件。(fixture)`);
+      return entries as T;
+    }
+    if (method === "fs.read") {
+      const content = previewFiles[String(params.path)];
+      if (content == null) throw new Error(`fs.read ${String(params.path)}: 系统找不到指定的文件。(fixture)`);
+      return { path: params.path, size: content.length, truncated: false, content } as T;
+    }
     throw new Error(`visual preview does not mock ${method}`);
   };
+  // 用户级 skills 是**宿主命令**(不是 rpc):夹具直接替掉 transport 上那一个方法,
+  // 形状与 src-tauri/src/skills.rs 的回包一致。
+  transport.userSkills = async () => structuredClone(previewUserSkills);
 }
 
 if (previewView === "approval") {
@@ -1239,6 +1390,21 @@ void (async () => {
     // 视觉验收要拍到控制台本身,而不是只拍到「关于」里那个后门入口。
     if (previewParams.get("dev") === "1") openDevConsole();
     return;
+  }
+  // tools 视图:把夹具 workspace.list 灌进 tabs store 的注册表信号,
+  // ToolsPage 的 skills 扫描才看得到演示工作区。
+  if (previewView === "tools") {
+    await pollSessions();
+    // 展开一条 skill:截图要拍得到卡片的展开态(正文 + 路径),否则这一层视觉
+    // 只能靠 DOM 断言,评审看不到实际排版。
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const head = document.querySelector<HTMLElement>(".skill-card-head");
+      if (head != null) {
+        head.click();
+        break;
+      }
+      await frames(1);
+    }
   }
   await store.resnapshot();
   if (previewView === "approval") store.todos[1]([]);

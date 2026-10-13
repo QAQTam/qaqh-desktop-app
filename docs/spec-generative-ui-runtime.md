@@ -180,7 +180,9 @@ skill 包的后续结构建议：`SKILL.md`、`catalog.md`、`recipes/`、`failu
 
 `type` 首版为 string、number、integer、boolean，以及由 Catalog 定义的有界数组/对象类型。声明允许引用此前的声明；派生引用不能循环。UI children 可前向引用尚未到达的节点，期间显示有限占位，未解析引用不得产生可执行外部动作。
 
-Component 只接受注册属性与事件。布局 children 为稳定 ID 列表或受限 Repeat 模板；首版不要求解析任意嵌套 TSX module。首版事件使用 `onPress`、`onChange`、`onSubmit` 等 Catalog 名称，其值为 Action 描述；不接受任意箭头函数体。
+声明了 `root` 时，既不是 root、也未被任何 `children` 引用的节点是不可达的：它不会渲染，但也不构成结构错误。seal 后编译器对它产出**软告警**（`SurfaceIR.warnings`，渲染层以非阻断提示展示，不显示具名错误、不改变节点状态），因为漏挂常见于生成中的中间态；阻断渲染或静默吞掉都比提示更糟。无 `root`（森林顶层平铺）时不存在不可达节点，不产生该告警。
+
+Component 只接受注册属性与事件。布局 children 为稳定 ID 列表或受限 Repeat 模板；首版不要求解析任意嵌套 TSX module。首版事件使用 `onPress`、`onChange`、`onSubmit` 等 Catalog 名称，其值为 Action 描述；不接受任意箭头函数体。文本类标量属性（`label`/`title`/`placeholder`/`pattern` 等）与数字槽位（`maxLength`）同时接受字面量和纯表达式：`{"expr"}` 形态在渲染期按 §8.3 求值后转文本，表达式仍受目录封闭性与状态域限制；类型不符的字面量（如 `label={1}`）照旧具名拒绝。
 
 ### 7.2 计数器完整配方
 

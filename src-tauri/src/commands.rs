@@ -137,6 +137,9 @@ struct SidebarSession {
     cwd: Option<String>,
     updated_at: u64,
     turn_count: usize,
+    /// 后端 8 态 `SessionRunStatus` 原样透传(工作台按态渲染,不再折叠成 bool)。
+    status: qaqh_types::SessionRunStatus,
+    /// 兼容字段:旧前端/快照判据仍是「还挂着事」。新代码读 `status`。
     busy: bool,
     archived: bool,
     workspace_id: Option<String>,
@@ -169,15 +172,19 @@ fn sidebar_sessions(raw: Value) -> Result<Value, String> {
     serde_json::to_value(
         entries
             .into_iter()
-            .map(|entry| SidebarSession {
-                session_id: entry.meta.session_id,
-                title: entry.meta.title,
-                cwd: entry.meta.cwd,
-                updated_at: entry.meta.updated_at,
-                turn_count: entry.meta.turn_count,
-                busy: session_is_busy(entry.status),
-                archived: entry.meta.archived,
-                workspace_id: entry.workspace_id,
+            .map(|entry| {
+                let busy = session_is_busy(entry.status);
+                SidebarSession {
+                    session_id: entry.meta.session_id,
+                    title: entry.meta.title,
+                    cwd: entry.meta.cwd,
+                    updated_at: entry.meta.updated_at,
+                    turn_count: entry.meta.turn_count,
+                    status: entry.status,
+                    busy,
+                    archived: entry.meta.archived,
+                    workspace_id: entry.workspace_id,
+                }
             })
             .collect::<Vec<_>>(),
     )
@@ -672,6 +679,7 @@ mod tests {
                 "cwd",
                 "updated_at",
                 "turn_count",
+                "status",
                 "busy",
                 "archived",
                 "workspace_id",
@@ -697,11 +705,12 @@ mod tests {
             "ephemeral",
             "created_at",
             "message_count",
-            // 状态词汇表不过 IPC:侧栏只看 `busy` 一个判据。
-            "status",
         ] {
             assert!(card.get(leak).is_none(), "宿主细节 {leak} 不该进 webview");
         }
+        // `status` 相反:侧栏的待响应弹卡靠它区分「在跑」与「等人」
+        // (`src/app/session-pending.ts`),而 `busy` 折成 bool 后丢了这个信息。
+        assert_eq!(card["status"], json!("working"));
     }
 
     #[test]

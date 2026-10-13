@@ -221,6 +221,20 @@ Web 首版只有顶部 session tabs 使用 backdrop blur。Tauri 壳另外允许
 
 会话项：状态点、单行标题、选中表面。标签宽建议 120–180px，标题省略；完整标题可在 tooltip／菜单中查看。状态点沿用现有 store 判断，不新增脉冲或 token 驱动动画。
 
+#### 6.2.1 侧栏待响应弹出卡
+
+会话卡在「需要人类响应」的状态时，会话行整行让位给一张弹出卡——一眼看出「这个会话在等我」，不必逐个点开。
+
+- **判据**：后端 `SessionRunStatus` ∈ `waiting_permission` / `waiting_ask` / `waiting_plan`（`src/app/session-pending.ts`）。`canceled` / `error` 是上一回合的终态驻留，**不是**待办，不弹卡；`working` 仍走原有的状态点。判据与宿主 `session_is_busy` 同源但不等价：那边多算一个 `working`（「还挂着事」），这边只取要人动手的三个。
+- **形态**：整行覆盖。卡片撑满会话行，底下的标题降到 50% 不透明并向右渐隐让位。点击穿透到会话按钮（点卡片 = 切到该会话去处理），卡片自己不拦事件。
+- **动效**：`slide-in` 240ms（`translateX(102%) scale(.94)` → 归位，被卡片盒 `overflow:hidden` 裁切，观感是从行右缘滑进来，不是从侧栏外飞进来）→ `hold` 静置 2.6s 低频呼吸光晕 → `slide-out` 180ms 原路滑回并卸载。入场用 `animationend` 推进相位而非定时器，这样离场能立刻打断入场。
+- **跑马灯**：卡内文案右→左匀速 34px/s（时长 = 半轨宽 / 34，文案长短不改变速度）。轨道两段等长、位移恰好一个半轨宽 → 接缝无跳变；两端 mask 淡出。半轨宽度由 `ResizeObserver` 实测，短到不值得动时静止显示。
+- **常驻成本**：卡片会挂几分钟，所以呼吸动的是 `::before` 的 `opacity`，**不是** `box-shadow`——每帧重绘阴影不可接受。
+- **无障碍**：卡体 `aria-hidden`（跑马灯文案重复，不能进可访问名计算），状态挂到会话按钮的 `aria-label` 上（「<标题>：请求授权」）。
+- **降级**：`prefers-reduced-motion` 下停掉入场/呼吸/跑马灯，只留静态卡；此时 `animationend` 不会到来，组件侧用定时器兜底卸载。
+- **形态与动画的耦合**：`For` 必须按 id 做键（`keyed={(session) => session.session_id}`）。`pollSessions` 每轮用 IPC 新解出的对象换掉整个目录，引用键会让每次轮询卸载重建整棵侧栏，把正在播的入场动画、悬停态和焦点一起打断。
+- 视觉基线：`sidebar-pending-light` / `sidebar-pending-dark` / `sidebar-pending-640`（`scripts/visual-capture.mjs`，夹具经 `?pending=1` 铺状态），另有 `messages-reduced-motion` 验动画全停。
+
 右侧固定「更多会话」和「新建」按钮。「更多」菜单列出全部会话，显示活动／未读／等待状态；关闭动作放在菜单行右侧及会话上下文菜单，保留 Ctrl/Cmd+W。不得在 `role=tab` 的交互元素内嵌另一个可聚焦关闭按钮。
 
 使用 `role=tablist` / `role=tab` / `aria-selected`，选中项 tabindex=0，其他可见项=-1。左右键移动焦点，Home／End 定位，Enter／Space 激活；移焦不触发宿主切流。现有 Ctrl/Cmd+Tab、Ctrl/Cmd+1–9、Ctrl/Cmd+T/W 保留。隐藏会话依旧可通过菜单和现有快捷键访问。
@@ -261,6 +275,17 @@ Web 首版只有顶部 session tabs 使用 backdrop blur。Tauri 壳另外允许
 
 空会话仅显示简洁标题、说明和输入引导，避免大型插画增加首屏成本。离线／重连／不兼容状态保留明确操作；错误不可被玻璃层隐藏。
 
+#### 6.5.1 工具页 Skills 目录
+
+工具页的 Skills 按**发现范围**分两组，因为两层的数据面不同（`src/skills/scan.ts`）：
+
+- **项目级**：已注册工作区下的 `.qaqh/skills`、`.agents/skills`、`skills`，经 daemon `fs.list`/`fs.read` 读取；未注册目录会被 `FORBIDDEN` 拒，按工作区分桶出诊断条，并明说「注册为工作区即可读」。
+- **用户级**：`~/.qaqh/skills`、`~/.agents/skills`。这两个根**不在** daemon `fs.*` 的 allowed_roots 内（数据根 + UI 注册工作区 + 会话 cwd，`qaqh-backend/crates/qaqh-runtime/src/service/fs_git.rs:28-51`），daemon 自己的 catalog 又只经 Ringing 控制事件 `SkillsUpdated` 出去、在 v2 投影里没有对应 fact，所以由宿主命令 `skills_user_scan`（`src-tauri/src/skills.rs`）读盘后交给渲染层。宿主不暴露「读任意路径」的口子——扫哪些根由宿主自己算。
+
+分组头显示该组的发现根与存在性（`~/.agents/skills(不存在)` 这类），否则「一个都没有」无从自查。同名 skill 与后端 `qaqh-skills` 的 `seen_names` 同判据：项目级先占，被覆盖的用户级条目**保留在列表里**并标「被同名覆盖」，不静默删除。超限文件、目录不可读等非致命问题与项目级诊断同区展示。旧壳没有 `skills_user_scan` 时显式提示「这一版壳读不了用户级」，不当作扫描失败。
+
+工具页其余部分：MCP／LSP 只读表复用设置页同源投影，插件区仍是占位。
+
 设置：桌面居中实色面板，最大宽 960px、最大高 `calc(100vh - 48px)`；窄窗口使用可滚动全宽面板，分区导航固定在滚动区顶部并随阅读位置更新当前分区。待办与审批复用 Surface／Field／Button，审批仍有独立的语义强调。菜单／弹窗支持 Esc、焦点恢复、边缘避让；模态弹窗需要焦点约束，非模态菜单不能误锁整页。
 
 ## 7. 渲染与性能约束
@@ -297,6 +322,8 @@ Web 首版只有顶部 session tabs 使用 backdrop blur。Tauri 壳另外允许
 每阶段先完成可运行结果再进入下一阶段。视觉修改如改变滚动容器结构，必须同步更新 stress fixture，使其布局与真实 App 一致；只改夹具、只测无胶囊页面不算完成性能验收。
 
 视觉夹具支持 `/stress.html?view=settings|tools|approval&theme=light|dark&material=glass|solid`；settings 使用本地确定性 `ConfigDto`，approval 使用合成高风险授权，不调用 daemon。启动 Vite 后运行 `pnpm run visual:capture`，截图写入 `artifacts/ui-visual-review/`，覆盖 1280×900、1024×768、800×600、640×480、480×820 与 480×640。当前矩阵重点覆盖设置、工具页和审批卡；这套截图只作布局回归，真实 WebView2 的 GPU／合成验收仍需单独测量。
+
+`tools` 视图的 skills 两层各有夹具：项目级走内存 `fs.list`/`fs.read`（一个注册工作区 + 一条与用户级同名的 skill），用户级走 `skills_user_scan` 的宿主回包（两个根，其中 `~/.qaqh/skills` 标成不存在）。两层各一条同名 `shadowed-skill`，用来验收「被同名覆盖」的降级态；夹具还会展开第一张卡，好让截图带得到正文排版。布局闸（`scripts/layout-check.mjs`）对同一视图断言：两组都在、组头带得出发现根、卡片展开后正文真的挂上、横向无溢出。
 
 ## 10. 验收清单
 

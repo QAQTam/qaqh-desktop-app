@@ -97,6 +97,19 @@ const SurfaceView: Component<{ ir: SurfaceIR; onFollowUp?: (text: string) => voi
     return { op: "lit", value: "" };
   };
 
+  /** 数字槽位(maxLength):字面量直取,表达式在渲染期求值;非数字忽略。 */
+  const propNumber = (value: PropValue | undefined, scope?: ItemScope): number | undefined => {
+    if (value == null) return undefined;
+    if (value.kind === "lit") return typeof value.value === "number" ? value.value : undefined;
+    if (value.kind !== "expr") return undefined;
+    try {
+      const result = evaluate(value.expr, states, scope);
+      return typeof result === "number" ? result : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
   /** 条件属性(show/disabled/required)统一真值;渲染期求值失败按真处理。 */
   const truthyProp = (value: PropValue | undefined, scope?: ItemScope): boolean => {
     if (value == null || value.kind !== "expr") return false;
@@ -183,7 +196,7 @@ const SurfaceView: Component<{ ir: SurfaceIR; onFollowUp?: (text: string) => voi
               placeholder={propText(node.props.placeholder, scope)}
               required={truthyProp(node.props.required, scope)}
               pattern={propText(node.props.pattern, scope)}
-              maxlength={typeof (node.props.maxLength as { kind?: string; value?: unknown })?.value === "number" ? (node.props.maxLength as { value: number }).value : undefined}
+              maxlength={propNumber(node.props.maxLength, scope)}
               onInput={(event) => setBinding(node, "value", event.currentTarget.value)} />
           </label>
         </Match>
@@ -242,6 +255,8 @@ const SurfaceView: Component<{ ir: SurfaceIR; onFollowUp?: (text: string) => voi
       <Show when={ir.title != null}><div class="genui-view-title">{ir.title}</div></Show>
       {body}
       <Show when={streaming}><span class="genui-streaming">生成中…</span></Show>
+      {/* 软告警(孤儿节点):编译通过但某些节点挂不进树,提示不阻断渲染。 */}
+      <For each={ir.warnings ?? []}>{(warning) => <p class="genui-surface-warn">{warning}</p>}</For>
       <Show when={error()}><p class="genui-surface-error" role="alert">{error()}</p></Show>
     </div>
   );

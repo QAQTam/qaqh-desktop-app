@@ -97,6 +97,59 @@ const probe = {
   lanBusy: false,
 };
 
+/**
+ * 项目级 skills 夹具:`workspace.list` 里注册一个工作区,`fs.list`/`fs.read`
+ * 给出它下面的 `skills/` 目录(形状与 daemon 的 `fs_git.rs:98-196` 一致)。
+ *
+ * 与用户级夹具成对:两层各一条同名 `shadowed-skill`,用来在布局闸里验「被同名
+ * 覆盖」的降级态真的渲染出来了。
+ */
+const projectWorkspace = { id: "w1", title: "演示仓库", path: "E:/fixtures/demo-repo", order: 0 };
+const projectFs: Record<string, unknown> = {
+  [projectWorkspace.path]: [
+    { name: "skills", path: `${projectWorkspace.path}/skills`, is_dir: true, is_file: false },
+  ],
+  [`${projectWorkspace.path}/skills`]: [
+    { name: "shadowed-skill", path: `${projectWorkspace.path}/skills/shadowed-skill`, is_dir: true, is_file: false },
+  ],
+  [`${projectWorkspace.path}/skills/shadowed-skill`]: [
+    { name: "SKILL.md", path: `${projectWorkspace.path}/skills/shadowed-skill/SKILL.md`, is_dir: false, is_file: true },
+  ],
+};
+const projectFiles: Record<string, string> = {
+  [`${projectWorkspace.path}/skills/shadowed-skill/SKILL.md`]:
+    "---\nname: shadowed-skill\ndescription: 项目级同名条目。(layout fixture)\n---\n\n# Shadowed\n",
+};
+
+/**
+ * 用户级 skills 夹具(`skills_user_scan` 的回包形状,见 `src-tauri/src/skills.rs`)。
+ *
+ * 这里是**宿主命令**而不是 daemon rpc:用户级那两个根不在 daemon `fs.*` 的
+ * allowed_roots 里,布局回归要验的正是「宿主这一层真的被接上」——所以夹具给的
+ * 是宿主的形状,而不是把用户级伪装成一次 fs.list。
+ */
+const userSkillsFixture = {
+  roots: [
+    { path: "C:/Users/fixture/.qaqh/skills", label: "~/.qaqh/skills", exists: false },
+    { path: "C:/Users/fixture/.agents/skills", label: "~/.agents/skills", exists: true },
+  ],
+  skills: [
+    {
+      root: "C:/Users/fixture/.agents/skills",
+      path: "C:/Users/fixture/.agents/skills/mc-bug-audit/SKILL.md",
+      content: "---\nname: mc-bug-audit\ndescription: 独立审计 / 主动找 bug。(layout fixture)\n---\n\n# Independent bug audit\n",
+      bytes: 160,
+    },
+    {
+      root: "C:/Users/fixture/.agents/skills",
+      path: "C:/Users/fixture/.agents/skills/shadowed-skill/SKILL.md",
+      content: "---\nname: shadowed-skill\ndescription: 用户级同名条目,项目级已先占。(layout fixture)\n---\n\n# Shadowed(user)\n",
+      bytes: 160,
+    },
+  ],
+  diagnostics: [],
+};
+
 /** 假宿主的 merge patch 应用:与 daemon 同语义——缺字段不动,`"****"`/空串密钥保持。 */
 function applyMergePatch(target: ConfigDto, patch: Record<string, unknown>): void {
   for (const [key, value] of Object.entries(patch)) {
@@ -138,7 +191,18 @@ function serviceRpc(method: string, params: Record<string, unknown>): unknown {
     case "workspace.list":
       // 裸数组(service.rs:417 `Ok(Value::Array(items))`),与 `todo.list` 的
       // `{ items }` 不同形;侧栏按数组直接 `.map`,给成对象会当场halt掉反应式系统。
-      return [];
+      return [projectWorkspace];
+    // 项目级 skills 走 daemon 的 fs.*(宿主白名单放行,commands.rs:SERVICE_METHODS)。
+    case "fs.list": {
+      const entries = projectFs[String(params.path)];
+      if (entries == null) throw new Error(`fs.list ${String(params.path)}: 系统找不到指定的文件。(fixture)`);
+      return entries;
+    }
+    case "fs.read": {
+      const content = projectFiles[String(params.path)];
+      if (content == null) throw new Error(`fs.read ${String(params.path)}: 系统找不到指定的文件。(fixture)`);
+      return { path: params.path, size: content.length, truncated: false, content };
+    }
     // `?dev=1` 会真开一个标签,store 激活时按宿主白名单拉待办;夹具缺这条就会刷一条
     // 告警出来(真宿主放行,见 commands.rs:SERVICE_METHODS)。
     case "todo.list":
@@ -233,6 +297,7 @@ const internals = {
   },
   async invoke(cmd: string, args: Record<string, unknown> = {}): Promise<unknown> {
     if (cmd === "service_rpc") return serviceRpc(String(args.method), (args.params ?? {}) as Record<string, unknown>);
+    if (cmd === "skills_user_scan") return structuredClone(userSkillsFixture);
     if (cmd === "session_list") return [];
     if (cmd === "timeline_status") return null;
     if (cmd === "daemon_lan_status") return lanView();

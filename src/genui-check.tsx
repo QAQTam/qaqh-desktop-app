@@ -58,6 +58,16 @@ const ASK_TODO = [
   "ui.end();",
 ].join("\n");
 const JSONL_FENCE = "```qaqh-ui v=0.1 format=jsonl";
+/** 软告警:声明了 repeat 行却忘了挂进根容器 → 编译通过、界面少一块,只提示不报错。 */
+const ORPHAN = [
+  'ui.surface("orphan", { root: "card" });',
+  'const tags = ui.state("tags", "list", ["alpha"]);',
+  'ui.node("card", <Card title="标签" children={["tlist"]} />);',
+  'ui.node("tlist", <TagList items={tags} />);',
+  'ui.node("trow", <Row children={["trem"]} repeat={ui.for("tags", "item")} />);',
+  'ui.node("trem", <Button label={"× " + item} onPress={ui.remove("tags", item)} />);',
+  "ui.end();",
+].join("\n");
 
 /** 流式表格:jsonl 逐行到达,部分编译让行在围栏闭合前就开始渲染。 */
 const TABLE = [
@@ -108,6 +118,9 @@ render(() => (
     <section id="genui-ask">
       <AssistantContent text={() => `计划\n${FENCE}\n${ASK_TODO}\n\`\`\``} revision="ask" streaming={false} onFollowUp={(queued) => setQueued(`队列:${queued}`)} />
       <div id="genui-queued">{queued()}</div>
+    </section>
+    <section id="genui-warn">
+      <AssistantContent text={() => `孤儿节点\n${FENCE}\n${ORPHAN}\n\`\`\``} revision="orphan" streaming={false} />
     </section>
   </main>
 ), document.getElementById("root")!);

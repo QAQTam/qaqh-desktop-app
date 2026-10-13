@@ -6,6 +6,8 @@ import IconMoreHorizontal from "~icons/lucide/more-horizontal";
 import IconPlus from "~icons/lucide/plus";
 import { STR } from "../lib/strings";
 import { sessionCatalog, workspaceCatalog, type SidebarSession, type SidebarWorkspace } from "../tabs/store";
+import { SessionPendingCard } from "./SessionPendingCard";
+import { pendingPresentation, workingOnly } from "./session-pending";
 
 const pathName = (path: string | null | undefined): string => {
   const value = (path ?? "").replace(/[\\/]+$/, "");
@@ -64,51 +66,63 @@ export const MessageSidebar: Component<{
       </div>
       <div class="message-sidebar-groups">
         <Show when={groups().length > 0} fallback={<div class="message-sidebar-empty">暂无会话</div>}>
-          <For each={groups()}>{(group) => (
+          {/* 按 id 做键,不按引用:`pollSessions` 每轮都用 IPC 新解出来的对象
+              换掉整个目录(`tabs/store.ts:362`),引用键会让每次轮询把整棵侧栏
+              卸载重建——悬停态、焦点、正在播的入场动画全被打断。 */}
+          <For each={groups()} keyed={(group) => group.id}>{(group) => (
             <section class="message-workspace-group">
               <button
                 class="message-workspace-toggle"
                 type="button"
-                aria-expanded={collapsed().has(group.id) ? "false" : "true"}
-                onClick={() => toggle(group.id)}
-                title={group.path || group.title}
+                aria-expanded={collapsed().has(group().id) ? "false" : "true"}
+                onClick={() => toggle(group().id)}
+                title={group().path || group().title}
               >
-                <IconChevronDown class={{ collapsed: collapsed().has(group.id) }} />
-                <Show when={group.id !== "__ungrouped"}><IconFolder /></Show>
-                <span class="message-workspace-title">{group.title}</span>
-                <span class="message-workspace-count">{group.sessions.length}</span>
+                <IconChevronDown class={{ collapsed: collapsed().has(group().id) }} />
+                <Show when={group().id !== "__ungrouped"}><IconFolder /></Show>
+                <span class="message-workspace-title">{group().title}</span>
+                <span class="message-workspace-count">{group().sessions.length}</span>
               </button>
-              <Show when={!collapsed().has(group.id)}>
+              <Show when={!collapsed().has(group().id)}>
                 <div class="message-workspace-sessions">
-                  <For each={[...group.sessions].sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0))}>{(session) => {
-                    const active = () => props.activeSeed === session.session_id;
-                    const menuOpen = () => menuSeed() === session.session_id;
+                  <For each={[...group().sessions].sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0))} keyed={(session) => session.session_id}>{(session) => {
+                    const active = () => props.activeSeed === session().session_id;
+                    const menuOpen = () => menuSeed() === session().session_id;
                     // 归属看「名录里真有这个工作区」,而不是 workspace_id 非空:
                     // 工作区被删后 id 仍留在卡片上,那种会话显示在未分组里,
                     // 再给它「移出」就成了无意义动作。
-                    const grouped = () => allWorkspaces().some((workspace) => workspace.id === session.workspace_id);
+                    const grouped = () => allWorkspaces().some((workspace) => workspace.id === session().workspace_id);
+                    // 待人响应:整行让位给弹出卡(卡体 pointer-events:none,点击仍落到会话按钮)。
+                    const pending = () => pendingPresentation(session());
                     return (
                       <>
                         <div class={{ "message-session-row": true, active: active() }}>
                           <button
-                            class={{ "message-session-item": true, active: active(), running: session.busy === true }}
+                            class={{ "message-session-item": true, active: active(), running: workingOnly(session()) }}
                             type="button"
                             aria-current={active() ? "page" : undefined}
-                            onClick={() => props.onSelect(session.session_id)}
-                            title={session.title || session.cwd || session.session_id}
+                            // 待响应时把状态挂到按钮的可访问名上:卡体是
+                            // aria-hidden 的装饰(跑马灯文案重复,不能进朗读)。
+                            aria-label={pending()?.ariaLabel}
+                            onClick={() => props.onSelect(session().session_id)}
+                            title={session().title || session().cwd || session().session_id}
                           >
                             <IconMessageSquare />
-                            <span>{sessionName(session)}</span>
-                            <Show when={session.busy}><i class="message-session-running" aria-label="工作中" /></Show>
+                            <span class="message-session-title">{sessionName(session())}</span>
+                            <Show when={workingOnly(session())}><i class="message-session-running" aria-label={STR.running} /></Show>
+                            {/* 常驻挂载,不用 <Show> 包:状态一离开待人,父级若把组件
+                                从树上摘掉,slide-out 就永远没机会播(卡片会瞬间消失,
+                                而不是「原路滑回去」)。进出场由卡内相位机自己管。 */}
+                            <SessionPendingCard session={session()} />
                           </button>
                           <Show when={props.onMove != null && allWorkspaces().length > 0}>
                             <button
                               type="button"
                               class="message-session-more"
-                              aria-label={`${STR.sessionActions}:${sessionName(session)}`}
+                              aria-label={`${STR.sessionActions}:${sessionName(session())}`}
                               aria-expanded={menuOpen() ? "true" : "false"}
                               title={STR.sessionActions}
-                              onClick={() => setMenuSeed(menuOpen() ? null : session.session_id)}
+                              onClick={() => setMenuSeed(menuOpen() ? null : session().session_id)}
                             >
                               <IconMoreHorizontal />
                             </button>
@@ -121,9 +135,9 @@ export const MessageSidebar: Component<{
                               <button
                                 type="button"
                                 role="menuitemradio"
-                                aria-checked={session.workspace_id === workspace.id ? "true" : "false"}
-                                class={session.workspace_id === workspace.id ? "selected" : undefined}
-                                onClick={() => { setMenuSeed(null); props.onMove?.(session.session_id, workspace.id); }}
+                                aria-checked={session().workspace_id === workspace.id ? "true" : "false"}
+                                class={session().workspace_id === workspace.id ? "selected" : undefined}
+                                onClick={() => { setMenuSeed(null); props.onMove?.(session().session_id, workspace.id); }}
                               >
                                 <span>{workspace.title || pathName(workspace.path)}</span>
                                 <small class="message-session-menu-path">{workspace.path}</small>
@@ -134,7 +148,7 @@ export const MessageSidebar: Component<{
                                 type="button"
                                 role="menuitem"
                                 class="message-session-menu-detach"
-                                onClick={() => { setMenuSeed(null); props.onDetach?.(session.session_id); }}
+                                onClick={() => { setMenuSeed(null); props.onDetach?.(session().session_id); }}
                               >
                                 <span>{STR.detachWorkspace}</span>
                               </button>

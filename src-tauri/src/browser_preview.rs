@@ -146,6 +146,9 @@ async fn invoke(
                 let params = args.get("params").cloned().unwrap_or_else(|| json!({}));
                 commands::service_rpc(app.clone(), app.state::<HostState>(), method, params).await
             }
+            // 用户级 skills 由宿主自己读盘(daemon 的 fs.* 白名单不含 home 下的
+            // 那两个根),所以预览桥必须把它转发进来,否则浏览器里看不到这一层。
+            "skills_user_scan" => crate::skills::skills_user_scan().await,
             "timeline_status" => {
                 let seed = required_string(&args, "seed")?;
                 commands::timeline_status(app.clone(), seed)

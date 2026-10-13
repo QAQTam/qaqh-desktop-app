@@ -14,6 +14,7 @@ mod events;
 mod lan;
 mod pairing;
 mod procgroup;
+mod skills;
 mod version;
 
 use tauri::{
@@ -113,6 +114,9 @@ pub fn run() {
             set_window_theme,
             commands::session_list,
             commands::attach,
+            // 用户级 skills(`~/.qaqh/skills`、`~/.agents/skills`)不走 daemon 的
+            // `fs.*` 白名单——那两个根不在 allowed_roots 里,由宿主自己读。
+            skills::skills_user_scan,
             commands::pending_approvals,
             commands::respond_approval,
             commands::send_message,

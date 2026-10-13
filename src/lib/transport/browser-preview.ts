@@ -12,6 +12,7 @@ import type {
   TimelineStatusWire,
   TransportBackend,
   TauriHostSurface,
+  UserSkillsWire,
 } from "./backend";
 import { attachmentRefsOf } from "./backend";
 import { noteEvent, noteRpc } from "../devlog";
@@ -159,6 +160,11 @@ export class BrowserPreviewTransport implements TransportBackend, TauriHostSurfa
 
   sessionBootstrap(seed: string): Promise<unknown> {
     return invoke("session_bootstrap", { seed });
+  }
+
+  /** 用户级 skills:预览桥转发给宿主命令(宿主真读盘,预览里没有内存夹具)。 */
+  userSkills(): Promise<UserSkillsWire> {
+    return invoke<UserSkillsWire>("skills_user_scan");
   }
 
   /** 预览桥固定回 null(无原生窗口),前端按「用户取消」处理。 */

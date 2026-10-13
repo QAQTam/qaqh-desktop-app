@@ -24,6 +24,7 @@ import {
   type TimelinePageResponse,
   type TimelineStatusWire,
   type TransportBackend,
+  type UserSkillsWire,
 } from "./backend";
 
 type HostDiagnostics = {
@@ -101,6 +102,11 @@ export class TauriTransport implements TransportBackend {
         throw cause;
       },
     );
+  }
+
+  /** 用户级 skills:宿主自己扫 `~/.qaqh/skills` 与 `~/.agents/skills`(不经 daemon)。 */
+  userSkills(): Promise<UserSkillsWire> {
+    return invoke<UserSkillsWire>("skills_user_scan");
   }
 
   async timelinePage(seed: string, query = ""): Promise<TimelinePageResponse> {

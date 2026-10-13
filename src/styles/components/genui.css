@@ -40,6 +40,12 @@
     color: var(--err); font-size: var(--fs-xs);
     overflow-wrap: anywhere;
   }
+  /* 软告警:编译通过但树不完整(孤儿节点),渲染照旧,只提示。 */
+  .genui-surface-warn {
+    margin: 0; padding: 0 10px 8px;
+    color: var(--warn); font-size: var(--fs-xs);
+    overflow-wrap: anywhere;
+  }
 
   /* ── 受限组件目录渲染(spec §12):语义 variant,不接受任意样式 ── */
   .genui-view { display: grid; gap: 8px; margin: 10px 0; }

@@ -133,3 +133,8 @@ attach(宿主切 active + 重建 timeline/v2 流)+ 快照重建。重连/退避/
   `tauri.conf.json > app.security.csp` 单点接管(`default-src 'self'` + ipc)。
 - 外链/导航:webview 内不导航外站;IPC 面即 `invoke_handler` 注册白名单,
   `service_rpc` 另有方法白名单(与原 gateway 代理面一致)。
+- **用户级 skills**:`~/.qaqh/skills`、`~/.agents/skills` 不在 daemon `fs.*` 的
+  allowed_roots 内,由宿主命令 `skills_user_scan`(`src-tauri/src/skills.rs`)自己
+  读盘交给渲染层。命令**不收路径参数**——扫哪些根由宿主按平台 home 算死,渲染层
+  拿不到「读任意文件」的口子;回包只有这两个根下的 `SKILL.md` 正文(单文件 ≤512KB、
+  总量 ≤8MB)。

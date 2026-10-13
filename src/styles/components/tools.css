@@ -18,6 +18,117 @@
   .tools-empty h2 { font-size: var(--fs-md); font-weight: 600; }
   .tools-empty p { color: var(--muted); font-size: var(--fs-sm); }
 
+  /* Skills 实验面(ToolsPage v1):卡片 + 诊断条 + 只读表沿用 settings 的表样式。 */
+  .tools-page-head .tools-refresh { justify-self: start; }
+  .tools-refresh-icon.spinning { animation: tools-spin 1s linear infinite; }
+  @keyframes tools-spin { to { transform: rotate(360deg); } }
+  .tools-section { display: grid; gap: 10px; width: min(720px, 100%); }
+  .tools-section h2 {
+    display: flex; align-items: center; gap: 8px;
+    font-size: var(--fs-md); font-weight: 600;
+  }
+  .tools-section h2 svg { width: 16px; height: 16px; color: var(--accent); }
+  .tools-muted { color: var(--muted); font-size: var(--fs-sm); }
+
+  /* 两个发现范围各一组:项目级(工作区) / 用户级(home)。分组头把「扫的是哪」
+     摊开——用户级目录不在工作区里,不给路径就没法自查该往哪放文件。 */
+  .skill-group { display: grid; gap: 6px; }
+  .skill-group + .skill-group { margin-top: 4px; }
+  .skill-group-head {
+    display: flex; align-items: center; gap: 8px;
+    color: var(--muted); font-size: var(--fs-xs);
+  }
+  .skill-group-icon { flex: none; display: inline-grid; place-items: center; width: 14px; height: 14px; }
+  .skill-group-icon svg { width: 14px; height: 14px; }
+  .skill-group-head strong { color: var(--text); font-size: var(--fs-sm); font-weight: 600; }
+  .skill-group-count {
+    padding: 0 6px; border-radius: 999px;
+    border: 1px solid var(--border); font-variant-numeric: tabular-nums;
+  }
+  .skill-group-hint {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: var(--font-terminal);
+  }
+  .skill-group-empty { padding: 2px 0; }
+  .tools-note {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 12px 14px;
+    border: 1px solid var(--border); border-radius: var(--r-lg);
+    background: var(--surface);
+  }
+  .tools-note-icon { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--r-md); color: var(--accent); background: var(--accent-soft); }
+  .tools-note-icon svg { width: 15px; height: 15px; }
+  .tools-note strong { font-size: var(--fs-sm); font-weight: 600; }
+  .tools-note p { margin-top: 3px; color: var(--muted); font-size: var(--fs-xs); line-height: 1.55; }
+  .tools-issues { display: grid; gap: 6px; }
+  .tools-issue {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 8px 12px;
+    border: 1px solid var(--border); border-radius: var(--r-md);
+    background: var(--surface); color: var(--muted); font-size: var(--fs-xs);
+  }
+  .tools-issue svg { flex: none; width: 13px; height: 13px; margin-top: 2px; color: var(--warn); }
+  .tools-issue.is-forbidden { color: var(--text); }
+  .tools-issue.is-forbidden svg { color: var(--warn); }
+  .tools-issue b { font-family: var(--font-terminal); font-weight: 500; }
+
+  .skill-card {
+    border: 1px solid var(--border); border-radius: var(--r-lg);
+    background: var(--surface); overflow: hidden;
+  }
+  .skill-card-head {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    min-height: 48px; padding: 10px 14px;
+    text-align: left;
+    transition: background-color var(--dur-fast) var(--ease);
+  }
+  .skill-card-head:hover { background: var(--surface-2); }
+  .skill-card-icon { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--r-md); color: var(--accent); background: var(--accent-soft); }
+  .skill-card-icon svg { width: 15px; height: 15px; }
+  .skill-card-titles { flex: 1; min-width: 0; display: grid; gap: 2px; }
+  .skill-card-titles strong { font-size: var(--fs-sm); font-weight: 600; }
+  .skill-card-desc {
+    color: var(--muted); font-size: var(--fs-xs);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .skill-card-meta { flex: none; display: inline-flex; align-items: center; gap: 8px; }
+  .skill-card-source {
+    color: var(--muted); font-size: var(--fs-xs);
+    padding: 1px 8px; border-radius: 999px;
+    border: 1px solid var(--border);
+  }
+  /* 被同名覆盖:与 daemon 的 seen_names 同判据(项目 > 用户)。不删条目,只降级显示
+     ——否则「我明明放了 SKILL.md」在界面上无从解释。 */
+  .skill-card-flag {
+    color: var(--warn); font-size: var(--fs-xs);
+    padding: 1px 8px; border-radius: 999px;
+    border: 1px solid var(--border);
+  }
+  .skill-card.is-shadowed .skill-card-head { opacity: .72; }
+  .skill-card-chevron { width: 14px; height: 14px; color: var(--muted); transition: transform var(--dur-fast) var(--ease); }
+  .skill-card-chevron.is-open { transform: rotate(180deg); }
+  .skill-card-body {
+    display: grid; gap: 8px;
+    padding: 0 14px 12px;
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+    min-width: 0;
+  }
+  .skill-card-body .md-host { font-size: var(--fs-xs); color: var(--muted); max-height: 320px; overflow: auto; overscroll-behavior: contain; }
+  /* 卡片正文是**预览**:Markdown 的标题/段落尺度是给正文流定的绝对档位,直接沿用
+     会让 SKILL.md 的 `# 标题` 比卡片名还大。这里整体压回卡片尺度。 */
+  .skill-card-body .md-host :is(h1, h2, h3, h4, h5, h6) {
+    font-size: var(--fs-sm); margin: 10px 0 4px; padding-bottom: 0; border-bottom: 0;
+  }
+  .skill-card-body .md-host :is(h1, h2) { font-size: var(--fs-md); }
+  .skill-card-body .md-host p { margin: 0 0 8px; }
+  .skill-card-body .md-host :is(ul, ol) { margin: 4px 0; }
+  .skill-card-body .md-host pre { font-size: var(--fs-xs); padding: 8px 10px; }
+  .skill-card-path {
+    color: var(--muted); font-family: var(--font-terminal); font-size: var(--fs-xs);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
   /* 时间线(§7.3.1) */
   .timeline { border-left: 1px solid var(--border); margin: 8px 0 10px; padding-left: 14px; display: grid; gap: 4px; }
   .timeline-head { color: var(--muted); font-size: var(--fs-xs); }

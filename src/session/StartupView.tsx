@@ -122,12 +122,13 @@ export const StartupView: Component = () => {
   const handleSubmit = async (): Promise<void> => {
     const text = draftText().trim();
     if (!text || creating()) return;
-    await submitStartupSession({
+    const ok = await submitStartupSession({
       cwd: newSessionCwd(),
       profile: selectedProfile(),
       text,
       attachmentPaths: attachments(),
     });
+    if (!ok) return; // 失败保留草稿,用户改完重试
     setDraftText("");
     setAttachments([]);
   };

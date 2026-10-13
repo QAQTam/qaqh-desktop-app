@@ -21,6 +21,10 @@ import {
   type TimelineStatusWire,
   type TodoItemWire,
   type TransportBackend,
+  type UserSkillDiagnostic,
+  type UserSkillFile,
+  type UserSkillRoot,
+  type UserSkillsWire,
   isTauriRuntime,
   tauriHost,
 } from "./backend";
@@ -49,4 +53,8 @@ export type {
   TimelineStatusWire,
   TodoItemWire,
   TransportBackend,
+  UserSkillDiagnostic,
+  UserSkillFile,
+  UserSkillRoot,
+  UserSkillsWire,
 };

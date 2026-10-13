@@ -177,6 +177,69 @@ describe("genui DSL 编译器", () => {
     ].join("\n"), "repeat 需要 list 型状态");
   });
 
+  it("标量槽位接受纯表达式:label/placeholder 可用状态与循环变量拼接", () => {
+    const ir = compile([
+      'ui.surface("s");',
+      'const name = ui.state("name", "string", "QAQ");',
+      'const tags = ui.state("tags", "list", ["a"]);',
+      'ui.node("b", <Button label={"你好，" + name} onPress={ui.copy(name)} />);',
+      'ui.node("row", <Row children={["rem"]} repeat={ui.for("tags", "item")} />);',
+      'ui.node("rem", <Button label={"× " + item} onPress={ui.remove("tags", item)} />);',
+      "ui.end();",
+    ].join("\n"));
+    expect(ir.nodes.b!.props.label).toEqual({
+      kind: "expr",
+      expr: { op: "add", left: { op: "lit", value: "你好，" }, right: { op: "state", key: "name" } },
+    });
+    expect(ir.nodes.rem!.props.label).toEqual({
+      kind: "expr",
+      expr: { op: "add", left: { op: "lit", value: "× " }, right: { op: "item", as: "item" } },
+    });
+    // 放宽只到「表达式」为止:字面量类型不符照旧具名拒绝,两种载体一致。
+    fails('ui.surface("s");\nui.node("b", <Button label={1} />);\nui.end();', "属性 label 需要 string");
+    try {
+      compileSurface([
+        '{"op":"surface.open","surface":"s"}',
+        '{"op":"node","id":"b","component":"Button","props":{"label":1}}',
+        '{"op":"surface.close"}',
+      ].join("\n"), "jsonl");
+      throw new Error("应当编译失败:属性 label 需要 string");
+    } catch (cause) {
+      expect((cause as GenUiError).message).toContain("属性 label 需要 string");
+    }
+  });
+
+  it("孤儿节点:有 root 时未被任何 children 引用的节点只告警不报错", () => {
+    // 实测形态:模型声明了 repeat 行却忘了挂进根容器 → 编译全过、界面静默少一块。
+    const ir = compile([
+      'ui.surface("s", { root: "card" });',
+      'const tags = ui.state("tags", "list", ["a"]);',
+      'ui.node("card", <Stack children={["tlist"]} />);',
+      'ui.node("tlist", <TagList items={tags} />);',
+      'ui.node("trow", <Row children={["trem"]} repeat={ui.for("tags", "item")} />);',
+      'ui.node("trem", <Button label={"× " + item} onPress={ui.remove("tags", item)} />);',
+      "ui.end();",
+    ].join("\n"));
+    expect(ir.warnings).toEqual(["节点 trow 未被任何 children 引用,不会渲染;补进容器的 children 或删掉声明"]);
+    // 挂上去就干净;无 root(森林平铺)不存在孤儿。
+    expect(compile([
+      'ui.surface("s", { root: "card" });',
+      'const tags = ui.state("tags", "list", ["a"]);',
+      'ui.node("card", <Stack children={["tlist", "trow"]} />);',
+      'ui.node("tlist", <TagList items={tags} />);',
+      'ui.node("trow", <Row children={["trem"]} repeat={ui.for("tags", "item")} />);',
+      'ui.node("trem", <Button label="×" onPress={ui.remove("tags", "item")} />);',
+      "ui.end();",
+    ].join("\n")).warnings).toBeUndefined();
+    expect(compile([
+      'ui.surface("s");',
+      'ui.node("a", <Stack children={["b"]} />);',
+      'ui.node("b", <Text text="x" />);',
+      'ui.node("c", <Text text="y" />);',
+      "ui.end();",
+    ].join("\n")).warnings).toBeUndefined();
+  });
+
   it("多语句表达式与字符串属性转义", () => {
     const ir = compile([
       'ui.surface("s");',
@@ -430,6 +493,76 @@ describe("genui DSL 扩展(括号 / show / binding / jsonl)", () => {
 });
 
 describe("宽容换行与真实模型输出回归", () => {
+  it("ask v2 全家福:标量槽位写表达式(循环变量拼接 label)编译通过", () => {
+    const source = [
+      'ui.surface("asklike", { root: "root", title: "生成式 UI 版 ask" })',
+      'const q1 = ui.state("q1", "string", "")',
+      'const pickA = ui.state("pickA", "boolean", false)',
+      'const pickB = ui.state("pickB", "boolean", false)',
+      'const note = ui.state("note", "string", "")',
+      'const tagDraft = ui.state("tagDraft", "string", "")',
+      'const tags = ui.state("tags", "list", ["demo"])',
+      'const confirmed = ui.state("confirmed", "boolean", false)',
+      'const complete = ui.derive(q1 != "" && note != "" && confirmed)',
+      'ui.node("root", <Card title="三个问题（一次提交）" children={["h1","r1","r2","r3","h2","c1","c2","h3","in1","h4","trow","tlist","h5","conf","sub","copy","tip"]} />)',
+      'ui.node("h1", <Title text="Q1 选一个方案（单选，必答）" />)',
+      'ui.node("r1", <Row children={["bA","mA"]} />)',
+      'ui.node("bA", <Button label="方案 A" onPress={ui.set("q1", "A")} />)',
+      'ui.node("mA", <Badge text="已选" show={q1 == "A"} />)',
+      'ui.node("r2", <Row children={["bB","mB"]} />)',
+      'ui.node("bB", <Button label="方案 B" onPress={ui.set("q1", "B")} />)',
+      'ui.node("mB", <Badge text="已选" show={q1 == "B"} />)',
+      'ui.node("r3", <Text text="单选 = 一组 Button 写同一个 string 态 + show 回显选中项。" />)',
+      'ui.node("h2", <Title text="Q2 多选（可留空，等价 ask 的 options 多选）" />)',
+      'ui.node("c1", <Checkbox label="要点一" checked={pickA} />)',
+      'ui.node("c2", <Checkbox label="要点二" checked={pickB} />)',
+      'ui.node("h3", <Title text="Q3 补充说明（必填，等价 allow_custom）" />)',
+      'ui.node("in1", <TextInput label="备注" value={note} placeholder="随便写点" required={true} />)',
+      'ui.node("h4", <Title text="附加：list 态 append / remove / for" />)',
+      'ui.node("trow", <Row children={["tin","bAdd"]} />)',
+      'ui.node("tin", <TextInput label="新标签" value={tagDraft} placeholder="输入后点添加" />)',
+      'ui.node("bAdd", <Button label="添加" onPress={ui.append("tags", tagDraft)} />)',
+      'ui.node("tlist", <TagList items={tags} />)',
+      'ui.node("trow2", <Row children={["trem"]} repeat={ui.for("tags", "item")} />)',
+      'ui.node("trem", <Button label={"× " + item} onPress={ui.remove("tags", item)} />)',
+      'ui.node("h5", <Title text="提交" />)',
+      'ui.node("conf", <Checkbox label="确认提交（必勾）" checked={confirmed} />)',
+      'ui.node("sub", <Button label="提交回答" disabled={!complete} onPress={ui.followUp("回答如下", { "Q1": "q1", "要点一": "pickA", "要点二": "pickB", "备注": "note", "标签": "tags", "确认": "confirmed" })} />)',
+      'ui.node("copy", <Button label="复制备注" onPress={ui.copy(note)} />)',
+      'ui.node("tip", <Text text="disabled 仅是 UI 侧门控；真校验必须在后端。" />)',
+      "ui.end()",
+    ].join("\n");
+    const ir = compileSurface(source);
+    expect(ir.surfaceId).toBe("asklike");
+    expect(ir.rootId).toBe("root");
+    expect(ir.nodes.root!.props.children).toEqual({
+      kind: "list",
+      items: ["h1", "r1", "r2", "r3", "h2", "c1", "c2", "h3", "in1", "h4", "trow", "tlist", "h5", "conf", "sub", "copy", "tip"],
+    });
+    // derive 内联成 !complete 的 gating;循环变量拼接的 label 落到 expr 槽位。
+    expect(ir.nodes.sub!.props.disabled).toEqual({
+      kind: "expr",
+      expr: {
+        op: "not",
+        value: {
+          op: "and",
+          left: { op: "neq", left: { op: "state", key: "q1" }, right: { op: "lit", value: "" } },
+          right: {
+            op: "and",
+            left: { op: "neq", left: { op: "state", key: "note" }, right: { op: "lit", value: "" } },
+            right: { op: "state", key: "confirmed" },
+          },
+        },
+      },
+    });
+    const label = ir.nodes.trem!.props.label;
+    expect(evaluate((label as { kind: "expr"; expr: never }).expr, {}, { as: "item", value: "demo" })).toBe("× demo");
+    expect(ir.nodes.mA!.props.show).toEqual({
+      kind: "expr",
+      expr: { op: "eq", left: { op: "state", key: "q1" }, right: { op: "lit", value: "A" } },
+    });
+  });
+
   it("demo 全家福(省略分号 + 中文拼接 + 全家族组件)编译通过", () => {
     const source = [
       'ui.surface("demo", { title: "QAQ 结构化渲染演示" })',

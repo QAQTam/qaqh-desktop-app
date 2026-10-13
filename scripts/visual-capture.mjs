@@ -102,10 +102,10 @@ async function clickTodo() {
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
 }
 
-async function capture(name, { view, theme, material, width, height, section, closed = false, scale = 1, reduced = false, typography = false } ) {
+async function capture(name, { view, theme, material, width, height, section, closed = false, scale = 1, reduced = false, typography = false, pending = false } ) {
   await cdp.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
   await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: reduced ? "reduce" : "no-preference" }] });
-  const url = `${BASE}?view=${view}&theme=${theme}&material=${material}`;
+  const url = `${BASE}?view=${view}&theme=${theme}&material=${material}${pending ? "&pending=1" : ""}`;
   await cdp.send("Page.navigate", { url });
   await waitForFixture(view);
   if (scale !== 1) await cdp.evaluate(`document.documentElement.style.zoom = ${scale}`);
@@ -191,6 +191,59 @@ async function capture(name, { view, theme, material, width, height, section, cl
       if (await cdp.evaluate("!document.querySelector('.workspace-panel').classList.contains('collapsed')")) throw new Error(`${name}: keyboard collapse failed`);
     }
     console.log(`${name}: aligned ${JSON.stringify(geometry)}`);
+    // 待响应弹卡(§6.2):夹具给前几条会话铺了三种待人态(`?pending=1`)。这里验
+    // 三件真实引擎才知道的事——卡片渲染出来了、跑马灯的「半轨宽度」量测非零
+    // (量为 0 时轨道静止,动画看起来像坏了,而 jsdom 测不出来)、相位机真的
+    // 从 in 走进了 hold(animationend 没接上时卡片会停在入场终态上)。
+    if (pending) {
+      const cards = await cdp.evaluate(`(() => {
+        const cards = [...document.querySelectorAll('.session-pending')];
+        return {
+          kinds: cards.map((card) => card.dataset.kind).sort(),
+          // 相位机真的走完了一圈:入场动画结束的 animationend 把 in 推到了 hold。
+          // 引擎里动画名写错/被裁掉时,这里会停在 in——比肉眼看截图可靠。
+          phases: cards.map((card) => card.dataset.phase),
+          animations: cards.map((card) => getComputedStyle(card.querySelector('.session-pending-body')).animationName),
+          // 呼吸落在 ::before 上(动 opacity,不动 box-shadow):这张卡会挂几分钟,
+          // 每帧重绘阴影是不可接受的常驻成本。
+          breaths: cards.map((card) => getComputedStyle(card.querySelector('.session-pending-body'), '::before').animationName),
+          travels: cards.map((card) => {
+            const track = card.querySelector('.session-pending-track');
+            return Number(getComputedStyle(track).getPropertyValue('--mq-travel').replace('px', '')) || 0;
+          }),
+          coversRow: cards.every((card) => {
+            const row = card.closest('.message-session-row');
+            const box = card.getBoundingClientRect();
+            const item = row.querySelector('.message-session-item').getBoundingClientRect();
+            // inset:0 的绝对定位盒对齐的是会话按钮的 padding box(不含它自己
+            // 那 1px 透明边框),所以留 3px 容差;要的是「铺满整行」而不是像素级同框。
+            return Math.abs(box.width - item.width) <= 3 && Math.abs(box.height - item.height) <= 3;
+          }),
+        };
+      })()`);
+      if (cards.kinds.join(",") !== "ask,permission,plan") {
+        throw new Error(`${name}: pending cards missing ${JSON.stringify(cards)}`);
+      }
+      if (!cards.coversRow) throw new Error(`${name}: pending card must cover the whole session row ${JSON.stringify(cards)}`);
+      if (!reduced && cards.travels.some((travel) => travel <= 0)) {
+        throw new Error(`${name}: marquee half-track must be measured ${JSON.stringify(cards)}`);
+      }
+      // 相位机:入场必须已经播完并转进 hold(呼吸),否则说明 animationend 没接上,
+      // 卡片会一直停在 in 的 both 终态上(看起来像静止,其实动画链断了)。
+      if (!reduced && cards.phases.some((phase) => phase !== "hold")) {
+        throw new Error(`${name}: slide-in must settle into hold ${JSON.stringify(cards)}`);
+      }
+      if (!reduced && !cards.breaths.every((animation) => animation === "session-pending-breathe")) {
+        throw new Error(`${name}: hold phase must breathe ${JSON.stringify(cards)}`);
+      }
+      if (reduced && cards.breaths.some((animation) => animation !== "none")) {
+        throw new Error(`${name}: reduced motion must stop the breathe glow ${JSON.stringify(cards)}`);
+      }
+      if (reduced && cards.animations.some((animation) => animation !== "none")) {
+        throw new Error(`${name}: reduced motion must stop every card animation ${JSON.stringify(cards)}`);
+      }
+      console.log(`${name}: pending ${JSON.stringify(cards)}`);
+    }
   }
   if (section) {
     // 按 data-section-id 点，不按位置索引：设置分区一增删，索引版就静默拍错分区
@@ -222,7 +275,11 @@ try {
     ["messages-dark-narrow", { view: "messages", theme: "dark", material: "glass", width: 480, height: 640 }],
     ["messages-light-125pct", { view: "messages", theme: "light", material: "solid", width: 1280, height: 900, scale: 1.25 }],
     ["messages-dark-150pct", { view: "messages", theme: "dark", material: "solid", width: 1280, height: 900, scale: 1.5 }],
-    ["messages-reduced-motion", { view: "messages", theme: "light", material: "solid", width: 1280, height: 900, reduced: true, closed: true }],
+    ["messages-reduced-motion", { view: "messages", theme: "light", material: "solid", width: 1280, height: 900, reduced: true, closed: true, pending: true }],
+    // 侧栏待响应卡(§6.2):浅/深各一张,另有 reduced-motion 那张验「动画全停」。
+    ["sidebar-pending-light", { view: "messages", theme: "light", material: "solid", width: 1280, height: 900, pending: true }],
+    ["sidebar-pending-dark", { view: "messages", theme: "dark", material: "solid", width: 1280, height: 900, pending: true }],
+    ["sidebar-pending-640", { view: "messages", theme: "light", material: "solid", width: 640, height: 480, pending: true }],
     ["settings-light-solid-desktop", { view: "settings", theme: "light", material: "solid", width: 1280, height: 900 }],
     ["settings-dark-glass-narrow", { view: "settings", theme: "dark", material: "glass", width: 480, height: 820 }],
     ["settings-dark-glass-narrow-pairing", { view: "settings", theme: "dark", material: "glass", width: 480, height: 820, section: "section-pairing" }],

@@ -124,6 +124,17 @@ try {
     assert.equal(queued?.includes("说明：OK"), true, "字段值随提交上报");
     assert.equal(await evaluate("document.querySelector('#genui-ask .genui-todo')?.getAttribute('aria-checked')"), "true", "提交不重置 todo 本地态");
 
+    // 软告警:编译通过但节点挂不进树 → 照常渲染 + 非阻断提示(不是具名编译失败)。
+    assert.equal(await evaluate("document.querySelector('#genui-warn .genui-view')?.dataset.surface"), "orphan");
+    assert.equal(await evaluate("Array.from(document.querySelectorAll('#genui-warn .genui-badge')).map((b) => b.textContent).join(',')"), "alpha");
+    assert.equal(await evaluate("document.querySelector('#genui-warn .genui-surface-error') === null"), true, "软告警不算编译失败");
+    assert.equal(
+      await evaluate("document.querySelector('#genui-warn .genui-surface-warn')?.textContent.includes('trow')"),
+      true, "孤儿节点被点名提示");
+    assert.equal(
+      await evaluate("Array.from(document.querySelectorAll('#genui-warn .genui-btn')).length"),
+      0, "孤儿子树(含 repeat 行)确实没渲染");
+
     // 流式实例:阶段推进 md → holdback → 生成中 → seal(编译渲染) → 尾部 md。
     assert.equal(await evaluate("document.querySelector('#genui-stream').dataset.stage"), "0");
     assert.equal(await evaluate("document.querySelectorAll('#genui-stream .genui-surface,#genui-stream .genui-view').length"), 0);

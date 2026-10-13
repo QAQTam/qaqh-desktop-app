@@ -112,7 +112,46 @@ export interface TransportBackend {
    * 返回的引用直接进 `send_message` 的 `attachments`。
    */
   uploadAttachment(seed: string, path: string): Promise<AttachmentUploadWire>;
+
+  /**
+   * 用户级 skills 扫描结果(`~/.qaqh/skills`、`~/.agents/skills`)。
+   *
+   * 这两个根**不在** daemon `fs.*` 的 allowed_roots 里(数据根 + UI 注册工作区 +
+   * 会话 cwd,`qaqh-backend/crates/qaqh-runtime/src/service/fs_git.rs:28-51`),
+   * 渲染层读不到;daemon 自己的 catalog 又只经 Ringing 控制事件出去(投影里没有
+   * 对应 fact),所以由宿主按同一份规则读出来。
+   */
+  userSkills(): Promise<UserSkillsWire>;
 }
+
+/** 用户级发现根(展示用)。 */
+export type UserSkillRoot = {
+  /** 绝对路径。 */
+  path: string;
+  /** `~/.agents/skills` 形态的展示标签。 */
+  label: string;
+  /** 目录存在且可读。 */
+  exists: boolean;
+};
+
+/** 一条用户级 skill 的原始文件;frontmatter 由 `skills/parse.ts` 解析。 */
+export type UserSkillFile = {
+  /** 发现它的根(绝对路径)。 */
+  root: string;
+  /** `SKILL.md` 绝对路径。 */
+  path: string;
+  /** 正文(CRLF 已归一)。 */
+  content: string;
+  bytes: number;
+};
+
+export type UserSkillDiagnostic = { path: string; message: string };
+
+export type UserSkillsWire = {
+  roots: UserSkillRoot[];
+  skills: UserSkillFile[];
+  diagnostics: UserSkillDiagnostic[];
+};
 
 /** Tauri 宿主专属面。 */
 export interface TauriHostSurface {

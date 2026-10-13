@@ -88,6 +88,12 @@
     --tool-shimmer-highlight: color-mix(in srgb, var(--accent) 26%, rgba(255, 255, 255, 0.6));
     --tool-shimmer-dur: 1.6s;
 
+    /* 会话行「待响应」卡的语义色(§6.2 侧栏待响应):
+       授权=琥珀(有风险感)、回答=主色、计划评审=紫。深色表同步。 */
+    --pending-permission: #b45309;
+    --pending-ask: var(--accent);
+    --pending-plan: #6d28d9;
+
     --content-width: 760px;
     color-scheme: light dark;
   }
@@ -123,6 +129,9 @@
     --diff-del-bg: #3a2224;
     --diff-del-word: #6a3338;
     --tool-shimmer-highlight: rgba(255, 255, 255, 0.22);
+    --pending-permission: #f5c36d;
+    --pending-ask: var(--accent);
+    --pending-plan: #c4b5fd;
     color-scheme: dark;
   }
 
@@ -157,6 +166,9 @@
       --diff-del-bg: #3a2224;
       --diff-del-word: #6a3338;
       --tool-shimmer-highlight: rgba(255, 255, 255, 0.22);
+      --pending-permission: #f5c36d;
+      --pending-ask: var(--accent);
+      --pending-plan: #c4b5fd;
     }
   }
 }

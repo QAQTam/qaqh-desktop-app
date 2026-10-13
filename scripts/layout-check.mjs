@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const base = process.env.QAQH_LAYOUT_URL ?? "http://127.0.0.1:5173/settings-check.html";
+const base = process.env.QAQH_LAYOUT_URL ?? "http://localhost:5173/settings-check.html";
 const port = Number(process.env.QAQH_LAYOUT_CDP_PORT ?? "9335");
 const output = "out/layout-check";
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -58,7 +58,18 @@ try {
       if (await evaluate(expression)) return;
       await delay(100);
     }
-    throw new Error(`Fixture did not become ready: ${expression}`);
+    // 夹具超时:把探针与关键 DOM 一起带出来,省一轮盲猜。
+    const dump = await evaluate(`(() => {
+      const p = window.__composerProbe ?? null;
+      return JSON.stringify({ probe: p == null ? null : { creates: p.creates, sends: p.sends.length, failCreate: p.failCreate, failSend: p.failSend },
+        toasts: [...document.querySelectorAll('.toast')].map((el) => el.textContent),
+        toastLog: window.__toastLog ?? null,
+        panels: [...document.querySelectorAll('[id^="panel-tab-"]')].map((el) => el.id),
+        composerValue: document.querySelector('#composer textarea')?.value ?? null,
+        sendDisabled: document.querySelector('#composer .send')?.disabled ?? null,
+        startup: Boolean(document.querySelector('.startup-container')) });
+    })()`).catch(() => "(dump failed)");
+    throw new Error(`Fixture did not become ready: ${expression}\nstate: ${dump}`);
   };
   const geometry = () => evaluate(`(() => {
     const rect = (selector) => {
@@ -86,18 +97,22 @@ try {
   for (const [width, height] of [[1566, 790], [800, 600], [480, 640]]) {
     await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
     await send("Page.navigate", { url: base });
-    await waitFor("Boolean(document.querySelector('#app.tauri-shell .messages-empty')) && document.fonts.status === 'loaded'");
+    await waitFor("Boolean(document.querySelector('#app.tauri-shell .startup-container')) && document.fonts.status === 'loaded'");
     let g = await geometry();
     assert.ok(g.top != null, "Native messages view must render the shared titlebar");
     assert.ok(g.workspace.top >= g.top.bottom, "Messages must start below the titlebar");
     assert.ok(g.workspace.height > height - 110, "Messages must fill the shell below the titlebar");
-
     // Render actual Markdown inside a paint-contained turn in the actual message scroller.
+    // 启动页重构后没有 #messages 容器了:临时造一个挂在 #main 里,测 Markdown 排版。
     await evaluate(`(async () => {
       const { render } = await import('/node_modules/.vite/deps/@solidjs_web.js');
       const { Markdown } = await import('/src/markdown/Markdown.tsx');
-      const messages = document.querySelector('#messages');
-      messages.classList.remove('messages-empty');
+      let messages = document.querySelector('#messages');
+      if (messages == null) {
+        messages = document.createElement('div');
+        messages.id = 'messages';
+        document.querySelector('#main').append(messages);
+      }
       messages.replaceChildren();
       const turn = document.createElement('section');
       turn.className = 'turn';
@@ -159,6 +174,35 @@ try {
     assert.ok(g.workspace.bottom <= height + 1, "Tools must stay inside the window");
     assert.ok(g.main.height >= g.workspace.height - 60, "Tools content must fill the remaining height");
     assert.ok(g.tools.height > 200, "Tools must not collapse into the 56px tabs row");
+    // Skills 目录(§6.5.1):两层发现范围各一组,组头常显、卡片可展开。夹具的
+    // 用户级回包走宿主命令 `skills_user_scan`(settings-check.tsx 的假 invoke);
+    // 旧壳没有这条命令时这一组只剩提示条,所以这里断言的是「两组都在、组头带得出
+    // 发现根、展开后正文真的渲染」。
+    const skills = await evaluate(`(() => {
+      const groups = [...document.querySelectorAll('.skill-group')];
+      const cards = [...document.querySelectorAll('.skill-card')];
+      const heads = groups.map((group) => ({
+        title: group.querySelector('.skill-group-head strong')?.textContent ?? '',
+        hint: group.querySelector('.skill-group-hint')?.textContent ?? '',
+        cards: group.querySelectorAll('.skill-card').length,
+      }));
+      const shadowed = document.querySelectorAll('.skill-card.is-shadowed').length;
+      // 展开第一条:卡片的折叠是卸载子树,正文必须真的挂上。
+      cards[0]?.querySelector('.skill-card-head')?.click();
+      return { heads, shadowed, total: cards.length };
+    })()`);
+    assert.equal(skills.heads.length, 2, `Skills must show both scopes: ${JSON.stringify(skills)}`);
+    assert.equal(skills.heads[0]?.title, "项目级");
+    assert.equal(skills.heads[1]?.title, "用户级");
+    assert.ok(skills.heads[0]?.hint.includes(".agents/skills"), `项目级组头要写清扫的是哪些目录: ${JSON.stringify(skills)}`);
+    assert.ok(skills.heads[1]?.hint.includes("~/.agents/skills"), `用户级组头要带出发现根: ${JSON.stringify(skills)}`);
+    assert.ok(skills.heads[0].cards > 0, "项目级夹具至少一条 skill");
+    assert.ok(skills.heads[1].cards > 0, "用户级夹具至少一条 skill");
+    assert.ok(skills.shadowed > 0, "同名覆盖要标出来,不能静默删条目");
+    await waitFor("Boolean(document.querySelector('.skill-card-body .md-host'))");
+    g = await geometry();
+    // headless 首帧竞态:切视图后 ~100ms 内 elementFromPoint 可能命中未绘制的根节点,短暂等待重测。
+    for (let attempt = 0; attempt < 60 && g.backVisible !== true; attempt++) { await delay(50); g = await geometry(); }
     assert.equal(g.backVisible, true, "Global back button must remain unobstructed");
     assert.ok(g.scrollWidth <= width, "Shell must not overflow horizontally");
     await capture(`tools-${width}`);
@@ -169,6 +213,7 @@ try {
     assert.ok(g.workspace.top >= g.top.bottom, "Settings must start below the titlebar");
     assert.ok(g.body.height > 200, "Settings form must have a usable scroll area");
     assert.ok(g.foot.bottom <= g.workspace.bottom + 1, "Settings footer must stay inside its workspace");
+    for (let attempt = 0; attempt < 60 && g.backVisible !== true; attempt++) { await delay(50); g = await geometry(); }
     assert.equal(g.backVisible, true, "Settings back button must remain unobstructed");
     await capture(`settings-${width}`);
     await evaluate("document.querySelector('.titlebar-back').click()");
@@ -180,7 +225,7 @@ try {
 
   await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await send("Page.navigate", { url: base });
-  await waitFor("Boolean(document.querySelector('.messages-empty-copy button'))");
+  await waitFor("Boolean(document.querySelector('#composer .send'))");
   // Override only session IPC; keep the real App, Composer, tab store and transport.
   await evaluate(`(() => {
     const internals = window.__TAURI_INTERNALS__;
@@ -200,6 +245,14 @@ try {
         if (listener.event === event) callbacks.get(listener.handler)?.({ event, id, payload });
       }
     };
+    // toast 是先到先得的证据:自动消失后 MutationObserver 日志还在。
+    window.__toastLog = [];
+    new MutationObserver(() => {
+      for (const el of document.querySelectorAll('.toast')) {
+        const text = el.textContent ?? '';
+        if (window.__toastLog.at(-1) !== text) window.__toastLog.push(text);
+      }
+    }).observe(document.body, { childList: true, subtree: true });
     internals.invoke = async (cmd, args = {}) => {
       if (cmd === 'plugin:event|listen') {
         const id = ++listenerId;
@@ -246,15 +299,13 @@ try {
 
   assert.equal(await evaluate("document.querySelector('.message-create').disabled"), false, "Session list must expose an enabled create action");
   await capture("composer-empty-shell");
+  // 启动页重构后空态按钮没了:StartupView 的发送键就是「建会话+发首条消息」的原子提交。
   await typeDraft("你好，先写草稿再新建对话");
-  await evaluate("document.querySelector('.messages-empty-copy button').click()");
-  await waitFor("Boolean(document.querySelector('.connection-notice')) && !document.querySelector('.messages-empty-copy button').disabled");
+  await evaluate("document.querySelector('#composer .send').click()");
+  await waitFor("Boolean(document.querySelector('.toast.err')) && !document.querySelector('#composer .send').disabled");
   assert.equal(await evaluate("document.querySelector('#composer textarea').value"), "你好，先写草稿再新建对话", "Failed creation must preserve the draft");
-  await evaluate("window.__composerProbe.failCreate = false; document.querySelector('.messages-empty-copy button').click()");
-  await waitFor("Boolean(document.querySelector('#panel-tab-composer-2')) && !document.querySelector('#composer .send').disabled");
-  assert.equal(await evaluate("document.querySelector('#composer textarea').value"), "你好，先写草稿再新建对话", "New session must inherit the empty-shell draft");
-  await clickSend();
-  await waitFor("document.querySelector('#composer textarea').value === '' && document.querySelector('#composer .send').disabled");
+  await evaluate("window.__composerProbe.failCreate = false; document.querySelector('#composer .send').click()");
+  await waitFor("window.__composerProbe.sends.length === 1 && Boolean(document.querySelector('#panel-tab-composer-2'))");
   assert.deepEqual(await evaluate("window.__composerProbe.sends[0]"), { seed: "composer-2", text: "你好，先写草稿再新建对话" });
 
   await typeDraft("   ");
@@ -279,7 +330,7 @@ try {
 
   await evaluate("window.__composerProbe.failSend = true");
   await clickSend();
-  await waitFor("Boolean(document.querySelector('.toast.err')) && !document.querySelector('#composer .send').disabled");
+  await waitFor("window.__composerProbe.sends.length === 3 && Boolean(document.querySelector('.toast.err')) && !document.querySelector('#composer .send').disabled");
   assert.equal(await evaluate("document.querySelector('#composer textarea').value"), "等待发送确认时写的下一条草稿", "Rejected send must preserve its draft");
   await evaluate("window.__composerProbe.failSend = false");
   await key("t", "ctrlKey: true");
@@ -293,11 +344,11 @@ try {
   await key("w", "ctrlKey: true");
   await waitFor("Boolean(document.querySelector('#panel-tab-composer-3')) && document.querySelector('#composer textarea').value === ''");
   await key("w", "ctrlKey: true");
-  await waitFor("Boolean(document.querySelector('.messages-empty-copy button'))");
+  await waitFor("Boolean(document.querySelector('#composer .send'))");
   await key("t", "ctrlKey: true");
   await waitFor("Boolean(document.querySelector('#panel-tab-composer-4')) && window.__composerProbe.creates === 4");
   await capture("composer-created-session");
-  console.log("PASS composer: empty-session create/retry, reactive drafts, successful clear, whitespace/IME guards, duplicate-send prevention, late/rejected acknowledgements, tab isolation, Ctrl+T with no tabs");
+  console.log("PASS composer: startup atomic create+send (failure keeps draft), whitespace/IME guards, duplicate-send prevention, late/rejected acknowledgements, tab isolation, Ctrl+T with no tabs");
 
   // 侧栏工作区归属:会话行的「…」菜单 → workspace.move_session / workspace.detach。
   // 只断言「发了什么参数 + 分组怎么变」;seed 由宿主注入与否是 Rust 侧的事。
@@ -322,6 +373,9 @@ try {
   const rows = await evaluate("document.querySelectorAll('.message-session-item').length");
   assert.ok(rows >= 2, "Fixture needs several sessions to exercise grouping");
   assert.equal(await evaluate("document.querySelectorAll('.message-session-more').length"), rows, "Every session row must expose a workspace action once a workspace exists");
+  // 条目胶囊必须拉满行宽:长短不一的悬停/激活底色就是这里跑出来的。
+  const widths = await evaluate("[...document.querySelectorAll('.message-session-item')].map((el) => Math.round(el.getBoundingClientRect().width))");
+  assert.equal(new Set(widths).size, 1, `Session rows must render uniform-width pills, got ${JSON.stringify(widths)}`);
 
   await openRowMenu();
   const menuItems = await rowMenu();
@@ -346,6 +400,53 @@ try {
   await evaluate("document.querySelector('.message-session-more').click()");
   assert.deepEqual(await groupTitles(), ['未分组'], "A workspace left with no session must not render an empty group");
   console.log("PASS workspace: row menu moves a session between workspaces, detaches it to 未分组, and hides detach once ungrouped");
+
+  // 待响应弹卡(§6.2):status 翻转 → slide-in;响应完 → slide-out 卸载。
+  // 走真实 App + 真实 transport,只把 `session_list` 回包里的 status 换成待人态。
+  await evaluate(`(() => {
+    const probe = window.__composerProbe;
+    probe.sessions[0].status = 'waiting_permission';
+    probe.sessions[1].status = 'waiting_ask';
+    window.dispatchEvent(new Event('focus'));
+  })()`);
+  await waitFor("document.querySelectorAll('.session-pending').length === 2");
+  // 入场是 240ms 的 slide-in,播完由 animationend 推相位;停在 in 说明动画链断了。
+  await waitFor("[...document.querySelectorAll('.session-pending')].every((el) => el.dataset.phase === 'hold')");
+  const cards = await evaluate(`[...document.querySelectorAll('.session-pending')].map((el) => ({
+    kind: el.dataset.kind,
+    phase: el.dataset.phase,
+    travel: Number(getComputedStyle(el.querySelector('.session-pending-track')).getPropertyValue('--mq-travel').replace('px', '')),
+    breathe: getComputedStyle(el.querySelector('.session-pending-body'), '::before').animationName,
+    label: el.closest('.message-session-item').getAttribute('aria-label'),
+    coversRow: Math.abs(el.getBoundingClientRect().width - el.closest('.message-session-item').getBoundingClientRect().width) <= 3,
+  }))`);
+  assert.deepEqual(cards.map((card) => card.kind), ["permission", "ask"], `Pending cards must map status → kind, got ${JSON.stringify(cards)}`);
+  assert.ok(cards.every((card) => card.phase === "hold" && card.breathe === "session-pending-breathe"), `Hold phase must breathe, got ${JSON.stringify(cards)}`);
+  // 半轨宽度是量出来的:为 0 时轨道静止(动画看起来像坏了),而 jsdom 测不出来。
+  assert.ok(cards.every((card) => card.travel > 0), `Marquee half-track must be measured, got ${JSON.stringify(cards)}`);
+  assert.ok(cards.every((card) => card.coversRow), `Card must cover the whole session row, got ${JSON.stringify(cards)}`);
+  // 卡体是装饰(aria-hidden),可读名必须落在会话按钮上,否则读屏只听到跑马灯重复文案。
+  assert.ok(cards.every((card) => card.label?.endsWith(`:${card.kind === "permission" ? "请求授权" : "请求回答"}`)), `Session button must carry the pending label, got ${JSON.stringify(cards)}`);
+  await capture("sidebar-pending-cards");
+
+  // 响应完成:状态回到非待人 → 原路 slide-out 并卸载(不是直接消失)。
+  // 用 animationstart 事件记账,不用轮询撞相位:slide-out 只有 180ms,100ms 的
+  // waitFor 去撞它是碰运气;而动画事件在卸载前必然派发,且顺带验了关键帧名接对。
+  await evaluate(`(() => {
+    window.__pendingAnims = [];
+    document.addEventListener('animationstart', (event) => {
+      if (String(event.animationName).startsWith('session-pending-')) window.__pendingAnims.push(event.animationName);
+    }, true);
+    const probe = window.__composerProbe;
+    probe.sessions[0].status = 'working';
+    probe.sessions[1].status = 'idle';
+    window.dispatchEvent(new Event('focus'));
+  })()`);
+  await waitFor("document.querySelectorAll('.session-pending').length === 0");
+  assert.equal(await evaluate("document.querySelectorAll('.message-session-item[aria-label]').length"), 0, "Resolved sessions must drop the pending aria-label");
+  const anims = await evaluate("JSON.stringify(window.__pendingAnims)");
+  assert.ok(anims.includes("session-pending-slide-out"), `Resolving must play slide-out before unmounting, got ${anims}`);
+  console.log("PASS pending: status flips slide the card in (measured marquee, whole-row cover, labelled button) and slide it back out on resolve");
 
   // Reuse the existing message timeline: exactly one four-line thinking scroller,
   // with full history, and no second rendering beside the composer.

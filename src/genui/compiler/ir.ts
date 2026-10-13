@@ -51,6 +51,8 @@ export type SurfaceIR = {
   /** 插入顺序;nodes 是 id → 节点映射。 */
   order: string[];
   nodes: Record<string, IRNode>;
+  /** 编译期软告警(不阻断渲染):目前只有「孤儿节点」。空/缺省 = 无告警。 */
+  warnings?: string[];
 };
 
 /** 带行号的具名错误:渲染层直接展示,不静默吞。 */
@@ -62,7 +64,12 @@ export class GenUiError extends Error {
 }
 
 /** 受信组件目录(spec §5.1/§8.1):封闭 props,未知组件/属性一律拒绝。
- *  `show`(条件渲染)与 `children` 一样是所有节点可用的通用属性。 */
+ *  `show`(条件渲染)与 `children` 一样是所有节点可用的通用属性。
+ *
+ *  `string`/`number`/`boolean` 是**标量槽位**:字面量与纯表达式都收(协议对模型的
+ *  描述是「属性值是字符串字面量或 {表达式}」,spec §8.3 也允许表达式);`expr`
+ *  槽位反过来同样收字面量。两向放宽只影响取值形状,不放松目录封闭性——表达式仍
+ *  走 checkExpr,只读 Surface local 状态域。 */
 export type PropKind = "string" | "number" | "boolean" | "expr" | "action" | "list" | "binding";
 const withCommon = (props: Record<string, PropKind>): Record<string, PropKind> => ({ ...props, show: "expr" });
 export const CATALOG: Record<string, Record<string, PropKind>> = {
@@ -122,6 +129,32 @@ export function normalizeBindings(ir: SurfaceIR, catalog: Record<string, Record<
   }
 }
 
+/**
+ * 编译期软告警(不阻断渲染)。目前只有一类:**孤儿节点**。
+ *
+ * 有 root 时渲染器只从根往下走(无 root 才按森林顶层平铺),所以「既不是 root、
+ * 也没有被任何 children 引用」的节点永远不会出现在屏幕上。实测形态是模型把
+ * 循环行(repeat)声明出来了却忘了挂进根容器的 children——编译全过、界面静默
+ * 少一块,比整树报错更难发现。这里只报警不报错:漏挂的节点可能是模型有意的
+ * 中间态(例如后续 record 才把它挂上去),阻断渲染的代价更大。
+ */
+export function surfaceWarnings(ir: SurfaceIR): string[] {
+  // 无 root(或 root 未到齐)时渲染器平铺森林顶层,不存在孤儿。
+  if (ir.rootId == null || ir.nodes[ir.rootId] == null) return [];
+  // 「未被任何 children 引用」= 森林顶层。去掉真正的 root 后剩下的就是永远
+  // 渲染不到的子树根(它们的孩子由这些根带着走,不必逐个再报)。
+  const referenced = new Set<string>();
+  for (const id of ir.order) {
+    const children = ir.nodes[id]!.props.children;
+    if (children?.kind === "list") for (const child of children.items) referenced.add(child);
+  }
+  const orphans = ir.order.filter((id) => id !== ir.rootId && !referenced.has(id));
+  if (orphans.length === 0) return [];
+  const head = orphans.slice(0, 8).join("、");
+  const tail = orphans.length > 8 ? ` 等 ${orphans.length} 个` : "";
+  return [`节点 ${head}${tail} 未被任何 children 引用,不会渲染;补进容器的 children 或删掉声明`];
+}
+
 /** 编译期校验:目录封闭性、引用完整性、拓扑(环/深度)。 */
 export function validateSurface(ir: SurfaceIR, catalog: Record<string, Record<string, PropKind>> = CATALOG, options: { partial?: boolean } = {}): void {
   const partial = options.partial === true;
@@ -141,12 +174,15 @@ export function validateSurface(ir: SurfaceIR, catalog: Record<string, Record<st
       if (kind === "expr") {
         if (value.kind === "expr") checkExpr(value.expr, ir);
         else if (value.kind !== "lit") fail();
-      } else if (kind === "string") {
-        if (!(value.kind === "lit" && typeof value.value === "string")) fail();
-      } else if (kind === "number") {
-        if (!(value.kind === "lit" && typeof value.value === "number")) fail();
-      } else if (kind === "boolean") {
-        if (!(value.kind === "lit" && typeof value.value === "boolean")) fail();
+      } else if (kind === "string" || kind === "number" || kind === "boolean") {
+        // 标量槽位:字面量与纯表达式都收(两种载体的「字面量」形状不同,语义相同)。
+        // 裸字面量按类型校验——TSX 的 {1} 与 jsonl 的 1 都落到这里,拒绝也一致。
+        if (value.kind === "expr") {
+          checkExpr(value.expr, ir);
+          if (value.expr.op === "lit" && typeof value.expr.value !== kind) fail();
+        } else if (value.kind === "lit") {
+          if (typeof value.value !== kind) fail();
+        } else fail();
       } else if (kind === "action") {
         const hasOwn = (key: string): boolean => Object.hasOwn(ir.states, key);
         if (value.kind !== "action") fail();
