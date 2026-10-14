@@ -1,0 +1,186 @@
+# 五平台出包：Windows x64(NSIS) / Linux x64(.deb + .rpm，即 Debian 与 Fedora)
+# / macOS x86_64(.app+.dmg) / macOS arm64(.app+.dmg)。
+#
+# 为什么这个工作流住在**前端仓**：壳包必须内嵌与其平台匹配的 daemon 侧车
+# （`bundle.externalBin = binaries/qaqh-daemon`，文件名带目标三元组），而 daemon 的
+# 权威构建在后端仓（见 justfile 顶部与 scripts/place-sidecar.*）。所以这里把两仓按
+# `src-tauri/Cargo.toml` 的 path 依赖布局放成同级（`../qaqh-backend`），后端取
+# **同名 tag** —— 前后端版本因此天然成对，不会出现"壳是 RC1、侧车是 beta.3"。
+#
+# 工具链钉死成本地实测口径，避免"CI 里换了个 pnpm/node 于是行为不同"这类幽灵：
+#   node v26.10.0 / pnpm 12.8.1 / rustc 1.99.0
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# 末段要往 Release 里塞资产。
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: "26"
+  PNPM_VERSION: "12.8.1"
+  RUST_TOOLCHAIN: "1.99.0"
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # 一个平台挂了不要连坐——其余平台的包仍然要出，便于分辨是平台问题还是通用问题。
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+            artifact: qaqh-windows-x64
+          - name: linux-x64-deb-rpm
+            os: ubuntu-22.04 # 22.04 的 glibc 2.35 比 24.04 覆盖更广；deb 与 rpm 同一次构建
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,rpm
+            artifact: qaqh-linux-x64
+          - name: macos-x86_64
+            os: macos-14
+            # Intel 那条走交叉编译：macos-13(x86_64) 镜像正在退场，arm64 runner 上
+            # `--target x86_64-apple-darwin` 可直接产出 x86_64 包（justfile 里
+            # MAC_X64_TARGET 就是它，README「Intel macOS」一节同口径）。
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+            artifact: qaqh-macos-x86_64
+          - name: macos-arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+            artifact: qaqh-macos-arm64
+
+    steps:
+      - name: 取前端仓（本仓）
+        uses: actions/checkout@v4
+        with:
+          path: qaqh-desktop-app
+
+      - name: 取后端仓（同名 tag = 前后端成对）
+        uses: actions/checkout@v4
+        with:
+          repository: QAQTam/qaqh-backend
+          ref: ${{ github.ref_name }}
+          path: qaqh-backend
+
+      # justfile 的 `verify-backend` 钉了契约提交（221f58e：壳要用 qaqh-memwatch 的
+      # snapshot）。tag 取错（打了旧提交）在这里当场红，而不是等编译到一半 E0609。
+      - name: 断言后端含壳所需契约提交
+        shell: bash
+        run: git -C qaqh-backend merge-base --is-ancestor 221f58e HEAD
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: qaqh-desktop-app/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+
+      # 两个 target 目录一起缓存：后端 daemon 与壳各自都要编译整套依赖。
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            qaqh-backend
+            qaqh-desktop-app
+
+      - name: Linux 系统依赖（webkit2gtk-4.1 / rpmbuild）
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libssl-dev patchelf file rpm
+
+      - name: 渲染层闸（类型 + 单测）
+        working-directory: qaqh-desktop-app
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run typecheck
+          pnpm run test
+
+      - name: 构建 daemon（后端权威构建，release）
+        working-directory: qaqh-backend
+        run: cargo build --release -p qaqh-daemon --target ${{ matrix.target }}
+
+      # sidecar 的路径与命名是 justfile/README 的口径：Windows 用 ps1（带 .exe），
+      # 其余平台用 posix 版（同名脚本，语义必须一致）。放错名字壳的 build.rs 会断言失败。
+      - name: 放置 sidecar（Windows）
+        if: runner.os == 'Windows'
+        working-directory: qaqh-desktop-app
+        run: pwsh -NoLogo -File scripts/place-sidecar.ps1 release ${{ matrix.target }}
+
+      - name: 放置 sidecar（POSIX，含交叉编译）
+        if: runner.os != 'Windows'
+        working-directory: qaqh-desktop-app
+        run: sh scripts/place-sidecar.sh release ${{ matrix.target }}
+
+      - name: 核对 sidecar 就位
+        working-directory: qaqh-desktop-app
+        shell: bash
+        run: ls -l src-tauri/binaries
+
+      # macOS 的 .app/.dmg 与最低系统版本来自 src-tauri/tauri.macos.conf.json，
+      # Tauri 按三元组自动合并，所以这里不必额外 --config。
+      - name: 打包
+        working-directory: qaqh-desktop-app
+        run: pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      - name: 产物清单（空 = 打包步骤没产出，别让"成功"含糊过去）
+        working-directory: qaqh-desktop-app
+        shell: bash
+        run: |
+          find target/${{ matrix.target }}/release/bundle -type f | sort
+          test -n "$(find target/${{ matrix.target }}/release/bundle -type f -print -quit)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          if-no-files-found: error
+          path: |
+            qaqh-desktop-app/target/${{ matrix.target }}/release/bundle/**/*.exe
+            qaqh-desktop-app/target/${{ matrix.target }}/release/bundle/**/*.deb
+            qaqh-desktop-app/target/${{ matrix.target }}/release/bundle/**/*.rpm
+            qaqh-desktop-app/target/${{ matrix.target }}/release/bundle/**/*.dmg
+            qaqh-desktop-app/target/${{ matrix.target }}/release/bundle/macos/*.app
+
+  # 全部平台到齐才发布：缺一个平台的半成品 release 比没有 release 更容易骗人。
+  release:
+    name: 发布到 Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 待发布资产清单
+        run: find dist -type f | sort
+
+      # RC 一律预发布：不想让它盖掉 latest，也不想让 updater 的稳定通道看到。
+      # 未签名说明：macOS/Windows 目前都没有配签名证书，包能装但会触发 Gatekeeper /
+      # SmartScreen 警告；要签名再往这里加 secrets（APPLE_* / TAURI_SIGNING_*）。
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: QAQ-Harness ${{ github.ref_name }}
+          prerelease: true
+          generate_release_notes: true
+          files: dist/**/*
