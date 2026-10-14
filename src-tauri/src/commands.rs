@@ -75,6 +75,17 @@ const SERVICE_METHODS: &[&str] = &[
     "siwc.sign_in.cancel",
     "siwc.profile.select",
     "siwc.sign_out",
+    // DeepSeek 账号（账号余额）。与 siwc 同档：daemon 侧同样是 admin_only，
+    // 设备令牌调不动（`service_methods.rs` 那张表是权威）。
+    "dsaccount.status",
+    "dsaccount.balance",
+    "dsaccount.bonuses",
+    "dsaccount.sign_in.start",
+    "dsaccount.sign_in.status",
+    "dsaccount.sign_in.cancel",
+    "dsaccount.sign_out",
+    "dsaccount.bonus.ack",
+    "dsaccount.models",
 ];
 
 /// 这些方法之外都要注入 active session_id(gateway 语义平移)。
@@ -118,6 +129,16 @@ fn service_requires_session(method: &str) -> bool {
             | "siwc.sign_in.cancel"
             | "siwc.profile.select"
             | "siwc.sign_out"
+            // DeepSeek 账号：同样不绑会话（凭据/余额是**本机**的事，与哪个会话无关）。
+            | "dsaccount.status"
+            | "dsaccount.balance"
+            | "dsaccount.bonuses"
+            | "dsaccount.sign_in.start"
+            | "dsaccount.sign_in.status"
+            | "dsaccount.sign_in.cancel"
+            | "dsaccount.sign_out"
+            | "dsaccount.bonus.ack"
+            | "dsaccount.models"
     )
 }
 

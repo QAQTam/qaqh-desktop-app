@@ -12,15 +12,42 @@
  */
 import type { ConfigDto } from "../api/qaqh/ConfigDto";
 
-/** 凭据来源的两个取值（与 `qaqh_types::CredentialSource` 的 serde 表示同源）。 */
-export type CredentialSource = "api_key" | "chatgpt_plan";
+/**
+ * 凭据来源的三个取值（与 `qaqh_types::CredentialSource` 的 serde 表示同源）：
+ * `api_key` = BYOK；`chatgpt_plan` = 本机 ChatGPT 套餐；`deepseek_account` =
+ * 本机 DeepSeek 账号余额。
+ */
+export type CredentialSource = "api_key" | "chatgpt_plan" | "deepseek_account";
 
-/** 当前是否处于 OAuth（套餐）模式。 */
-export function isOauthMode(
+/** 是否是**套餐**模式（本函数的老名字叫 `isOauthMode`：它只回答"是不是套餐"）。 */
+export function isPlanMode(
   config: Pick<ConfigDto, "credential"> | null | undefined,
 ): boolean {
   return config?.credential === "chatgpt_plan";
 }
+
+/** 是否是 **DeepSeek 账号**模式。 */
+export function isDeepseekAccountMode(
+  config: Pick<ConfigDto, "credential"> | null | undefined,
+): boolean {
+  return config?.credential === "deepseek_account";
+}
+
+/**
+ * 是否用的是**账号类**额度（套餐或 DeepSeek 账号）：两者都不用 API key，
+ * 但**各有各的 wire 与官方端点**——调用方别拿这一个判断去套另一家的规则。
+ */
+export function isAccountCredential(
+  config: Pick<ConfigDto, "credential"> | null | undefined,
+): boolean {
+  return isPlanMode(config) || isDeepseekAccountMode(config);
+}
+
+/**
+ * @deprecated 名字来自只有两档的年代，语义 **= [`isPlanMode`]**。
+ * 新代码请直接写明是套餐还是账号，别再用这个含混的名字。
+ */
+export const isOauthMode = isPlanMode;
 
 /**
  * 套餐模式下的上下文窗口：**统一 565K**（产品口径）。

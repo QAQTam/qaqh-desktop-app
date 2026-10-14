@@ -17,10 +17,11 @@
 import { createSignal } from "solid-js";
 
 import type { ConfigDto } from "../api/qaqh/ConfigDto";
+import { dsaccountModels } from "../lib/dsaccount";
 import { siwcModels, type SiwcModelEntry } from "../lib/siwc";
 import { transport } from "../lib/transport";
 import { modelEfforts, modelSpec, type ReasoningTier, type SpecBucket } from "../models/specs";
-import { isOauthMode } from "../oauth/mode";
+import { isAccountCredential, isDeepseekAccountMode, isPlanMode } from "../oauth/mode";
 import {
   activeProviderId,
   loadState,
@@ -41,14 +42,19 @@ export { busy as configBusy, catalogError, error as configError };
 const messageOf = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
 
-/** 当前凭据来源决定模型特判读哪个桶。 */
+/** 当前凭据来源决定模型特判读哪个桶（套餐 / DeepSeek 账号 / BYOK）。 */
 export function specBucket(): SpecBucket {
-  return isOauthMode(config()) ? "plan" : "byok";
+  const current = config();
+  if (isPlanMode(current)) return "plan";
+  if (isDeepseekAccountMode(current)) return "account";
+  return "byok";
 }
 
 export const currentModel = (): string => config()?.model ?? "";
 export const currentEffort = (): string => config()?.reasoningEffort ?? "";
-export const oauthActive = (): boolean => isOauthMode(config());
+export const oauthActive = (): boolean => isPlanMode(config());
+/** 账号类额度（套餐或 DeepSeek 账号）：都要拉账户级模型目录。 */
+export const accountActive = (): boolean => isAccountCredential(config());
 export const catalogModels = (): SiwcModelEntry[] | null => catalog();
 
 /** 当前模型可用的档位（缺省全阶梯）。 */
@@ -74,13 +80,20 @@ export async function refreshConfig(): Promise<void> {
 }
 
 /**
- * 拉一次套餐模型目录。BYOK 模式下**不拉**——那个目录是账户级的，与自带端点无关。
+ * 拉一次账户级模型目录。BYOK 模式下**不拉**——那个目录是账户级的，与自带端点无关。
  * 失败不清空已有目录：一次网络抖动不该让选择器变空。
  */
 export async function loadCatalog(): Promise<void> {
-  if (!oauthActive()) return;
+  const current = config();
+  if (!isAccountCredential(current)) {
+    setCatalog(null);
+    setCatalogError(null);
+    return;
+  }
   try {
-    setCatalog(await siwcModels());
+    // 两家的目录各有各的来源：套餐走 `siwc.models`（ChatGPT 目录），
+    // DeepSeek 账号走推理 origin 自己的 `/models`（`dsaccount.models`）。
+    setCatalog(isDeepseekAccountMode(current) ? await dsaccountModels() : await siwcModels());
     setCatalogError(null);
   } catch (cause) {
     setCatalogError(messageOf(cause));

@@ -21,7 +21,7 @@ import { toast } from "../../ui/toast";
 import { MASK, WIRE_PROTOCOLS, toInt } from "../patch";
 import { applyProfile, busy, deleteProfile, draft, saveProfileAs, setField } from "../store";
 import { Field, Section, TextInput } from "../controls";
-import { isOauthMode } from "../../oauth/mode";
+import { isAccountCredential } from "../../oauth/mode";
 
 /** 预设模板:预填 endpoint + wire(与后端 FIRST_RUN_CONFIG 的 DeepSeek 示例一致);
  *  model 各家变动频繁,留空让用户填,不硬编码会过期的 id。 */
@@ -41,7 +41,14 @@ const secretPlaceholder = (masked: string): string =>
   masked === MASK ? "已配置(留空保持不变)" : "未配置";
 
 /** OAuth（套餐）模式下 wire/endpoint 由那个模式接管，所以本分区的输入置灰。 */
-const oauthOn = (): boolean => isOauthMode(draft());
+/**
+ * 当前是否走**账号额度**（ChatGPT 套餐或 DeepSeek 账号）。
+ *
+ * 这两种模式下 BYOK 的模型/端点/密钥都不参与请求，所以整段置灰并指路。
+ * 名字与判定一起改了：原来叫 `oauthOn`，它把"账号额度"窄化成"OAuth"，
+ * 加进 DeepSeek 账号后那个名字会变成误导。
+ */
+const accountRoute = (): boolean => isAccountCredential(draft());
 
 export const ByokSection: Component = () => {
   const [showKey, setShowKey] = createSignal(false);
@@ -70,12 +77,16 @@ export const ByokSection: Component = () => {
        disabled 少一圈维护。它包住整个 Section，所以是个普通块级盒、不参与
        `.settings-fields` 的两列网格（**不要**改成 `display:contents`：那会让
        fieldset 在布局树里消失，而 Chromium 的置灰传播依赖布局祖先）。 */
-    <fieldset class="settings-fieldset" disabled={oauthOn()}>
+    <fieldset class="settings-fieldset" disabled={accountRoute()}>
       <Section
         id="section-byok"
         title="模型与端点(BYOK)"
         desc={STR.settingsByokDesc}
-        aside={oauthOn() ? "当前处于 OAuth 状态，请到「接入」页关闭 OAuth 开关" : undefined}
+        aside={
+          accountRoute()
+            ? "当前用账号额度（ChatGPT 套餐 / DeepSeek 账号）：到「接入」页切换服务商"
+            : undefined
+        }
       >
         <Field label={STR.settingsTemplate} wide hint={STR.settingsTemplateHint}>
           <select
@@ -183,7 +194,7 @@ export const ProfilesSection: Component = () => {
       desc="把当前的六字段配置存成命名档案,随时一键切换(切换会整段覆盖草稿,有未保存改动时先保存)。"
       /* 切档案会整段重写激活配置、**包含 credential**——OAuth 模式下点它等于
          把刚打开的模式静默切回 BYOK，所以在那种状态下把三个动作都禁掉。 */
-      aside={oauthOn() ? "OAuth 模式下请先到「接入」页关闭开关" : undefined}
+      aside={accountRoute() ? "账号额度模式下请先到「接入」页切换服务商" : undefined}
     >
       <div class="profile-list">
         <For each={config().profiles}>
@@ -196,7 +207,7 @@ export const ProfilesSection: Component = () => {
               <button
                 type="button"
                 class="ghost-mini"
-                disabled={busy() || oauthOn()}
+                disabled={busy() || accountRoute()}
                 onClick={() => void applyProfile(name)}
               >
                 切换
@@ -204,7 +215,7 @@ export const ProfilesSection: Component = () => {
               <button
                 type="button"
                 class="ghost-mini is-danger button-danger"
-                disabled={busy() || oauthOn() || name === config().activeProfile}
+                disabled={busy() || accountRoute() || name === config().activeProfile}
                 onClick={() => void deleteProfile(name)}
               >
                 删除
@@ -219,7 +230,7 @@ export const ProfilesSection: Component = () => {
           <button
             type="button"
             class="ghost-mini"
-            disabled={busy() || oauthOn() || profileName().trim() === ""}
+            disabled={busy() || accountRoute() || profileName().trim() === ""}
             onClick={() => {
               const name = profileName().trim();
               if (name === "") return;

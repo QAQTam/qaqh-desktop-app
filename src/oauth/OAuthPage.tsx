@@ -20,6 +20,17 @@ import { createSignal, For, Match, onCleanup, onSettled, Show, Switch, type Comp
 import IconChevronLeft from "~icons/lucide/chevron-left";
 
 import type { ConfigDto } from "../api/qaqh/ConfigDto";
+import { DsAccountCard } from "../dsaccount/components/AccountCard";
+import type { DsAccountStatus } from "../dsaccount/state";
+import {
+  defaultDsSignInDeps,
+  dsaccountBalance,
+  dsaccountSignInCancel,
+  dsaccountSignOut,
+  dsaccountStatus,
+  runDeepSeekSignIn,
+  type DsBalance,
+} from "../lib/dsaccount";
 import {
   openExternal,
   runSignInFlow,
@@ -48,6 +59,7 @@ import {
 } from "./provider-state";
 import {
   BYOK_PROVIDER_ID,
+  DSACCOUNT_PROVIDER_ID,
   PLAN_PROVIDER_ID,
   PROVIDERS,
   providerById,
@@ -195,6 +207,13 @@ const ProviderCard: Component<{
                 </dl>
               </Show>
             </Match>
+            <Match when={props.entry.kind === "account"}>
+              <p class="oauth-card__blurb">
+                DeepSeek 账号的登录、余额与赠金在页面下方的「DeepSeek 账号」区。切到这一家时，
+                只写它需要的三个字段（凭据 / openai 协议 / 官方端点）——端点换成别的地址会被
+                后端在保存期直接拒绝。
+              </p>
+            </Match>
             <Match when={props.entry.kind === "byok"}>
               <p class="oauth-card__blurb">
                 自带 key 的模型与端点由你在设置页维护；切换回来时，我们把你**切走之前**
@@ -230,6 +249,11 @@ export const OAuthPage: Component = () => {
   const [error, setError] = createSignal<string | null>(null);
   const [flowId, setFlowId] = createSignal<string | null>(null);
   const [firstRun, setFirstRun] = createSignal(false);
+  /** DeepSeek 账号态与余额（余额只在已登录时读）。 */
+  const [dsStatus, setDsStatus] = createSignal<DsAccountStatus | null>(null);
+  const [dsBalance, setDsBalance] = createSignal<DsBalance | null>(null);
+  const [dsBusy, setDsBusy] = createSignal(false);
+  const [dsAttempt, setDsAttempt] = createSignal<string | null>(null);
 
   const oauthOn = (): boolean => isOauthMode(config());
   const activeId = (): string | null => {
@@ -256,12 +280,27 @@ export const OAuthPage: Component = () => {
     }
   };
 
+  /** 读 DeepSeek 账号态；已登录才去读余额（未登录时后端给 not_signed_in）。 */
+  const refreshDs = async (): Promise<void> => {
+    if (!available) return;
+    try {
+      const next = await dsaccountStatus();
+      setDsStatus(next);
+      setDsBalance(next.signedIn ? await dsaccountBalance() : null);
+    } catch (cause) {
+      setError(messageOf(cause));
+    }
+  };
+
   onSettled(() => {
     if (!available) return;
     void loadConfig();
     void refreshStatus();
+    void refreshDs();
     const timer = window.setInterval(() => {
       if (flowId() == null) void refreshStatus();
+      // 登录进行中由流程驱动自己轮询，页面这边不掺和（免得两个轮询抢状态）。
+      if (dsAttempt() == null) void refreshDs();
     }, 10_000);
     onCleanup(() => window.clearInterval(timer));
   });
@@ -279,7 +318,13 @@ export const OAuthPage: Component = () => {
     setError(null);
     try {
       let next = rememberState(states(), activeProviderId(current), captureProviderState(current));
-      const fields = switchFields(target, next, siwcApiBase(status()));
+      // 官方端点只从后端取：ChatGPT 那条来自 `siwc.status.apiBase`，DeepSeek 账号
+      // 这条来自 `dsaccount.status.inferenceOrigin`。前端**不拼** URL。
+      const apiBase =
+        target.kind === "account"
+          ? (dsStatus()?.inferenceOrigin ?? null)
+          : siwcApiBase(status());
+      const fields = switchFields(target, next, apiBase);
       await transport.rpc("config.save", fields);
       const model = fields.model;
       if (typeof model === "string" && model !== "") {
@@ -289,7 +334,11 @@ export const OAuthPage: Component = () => {
       saveState(next);
       await loadConfig();
       toast(
-        target.kind === "plan" ? "已切换到 ChatGPT 套餐" : "已切回自带 API key",
+        target.kind === "plan"
+          ? "已切换到 ChatGPT 套餐"
+          : target.kind === "account"
+            ? "已切换到 DeepSeek 账号"
+            : "已切回自带 API key",
         "ok",
         { dedupeKey: "provider-switch" },
       );
@@ -363,6 +412,52 @@ export const OAuthPage: Component = () => {
     if (target != null) void switchTo(target);
   };
 
+  const dsSignIn = async (): Promise<void> => {
+    setDsBusy(true);
+    setError(null);
+    try {
+      const outcome = await runDeepSeekSignIn(
+        { onStarted: (attemptId) => setDsAttempt(attemptId) },
+        defaultDsSignInDeps,
+      );
+      if (outcome.kind === "completed") {
+        await refreshDs();
+        toast("DeepSeek 账号已连接", "info", { dedupeKey: "dsaccount-connected" });
+      } else if (outcome.kind === "failed") {
+        setError(outcome.message);
+      }
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setDsAttempt(null);
+      setDsBusy(false);
+    }
+  };
+
+  const dsCancel = async (): Promise<void> => {
+    const attemptId = dsAttempt();
+    if (attemptId == null) return;
+    try {
+      await dsaccountSignInCancel(attemptId);
+    } catch (cause) {
+      setError(messageOf(cause));
+    }
+  };
+
+  const dsSignOut = async (): Promise<void> => {
+    setDsBusy(true);
+    try {
+      await dsaccountSignOut();
+      setDsBalance(null);
+      await refreshDs();
+      toast("已断开 DeepSeek 账号", "info", { dedupeKey: "dsaccount-signout" });
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setDsBusy(false);
+    }
+  };
+
   return (
     <div class="oauth-page">
       <header class="oauth-page-head">
@@ -422,6 +517,32 @@ export const OAuthPage: Component = () => {
               />
             )}
           </For>
+        </section>
+
+        <section class="oauth-section">
+          <h2 class="oauth-section-title">DeepSeek 账号</h2>
+          <DsAccountCard
+            status={dsStatus()}
+            balance={dsBalance()}
+            busy={dsBusy()}
+            onSignIn={() => void dsSignIn()}
+            onCancel={() => void dsCancel()}
+            onSignOut={() => void dsSignOut()}
+            onOpenLink={(url) => void openExternal(url)}
+          />
+          <Show when={activeId() !== DSACCOUNT_PROVIDER_ID}>
+            <button
+              type="button"
+              class="ghost-mini"
+              disabled={busy()}
+              onClick={() => {
+                const entry = providerById(DSACCOUNT_PROVIDER_ID);
+                if (entry != null) void switchTo(entry);
+              }}
+            >
+              用本机 DeepSeek 账号余额
+            </button>
+          </Show>
         </section>
 
         <Show when={error()}>

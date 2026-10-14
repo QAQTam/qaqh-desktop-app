@@ -11,8 +11,11 @@
  * - 名册自检见 `providerRegistryProblems()`——加一条写错当场露馅（有测试）。
  */
 
-/** 凭据来源的两种形态。`byok` = 自带端点与密钥；`plan` = 账号套餐额度。 */
-export type ProviderKind = "byok" | "plan";
+/**
+ * 凭据来源的三种形态。`byok` = 自带端点与密钥；`plan` = ChatGPT 套餐额度；
+ * `account` = DeepSeek 账号余额（同样是"账号额度"，但**另一家**、另一套 wire）。
+ */
+export type ProviderKind = "byok" | "plan" | "account";
 
 export type ProviderEntry = {
   /** 稳定 id：既做列表 key，也做每 provider 状态的槽位名。 */
@@ -29,6 +32,9 @@ export const BYOK_PROVIDER_ID = "byok";
 
 /** 套餐那一家。当前只有 OpenAI（友商接入时另加条目）。 */
 export const PLAN_PROVIDER_ID = "openai";
+
+/** DeepSeek 账号那一家（`credential = deepseek_account`）。 */
+export const DSACCOUNT_PROVIDER_ID = "deepseek-account";
 
 /**
  * 名录。顺序即展示顺序：先套餐（用户最常开的），再自带 key。

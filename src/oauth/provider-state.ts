@@ -14,7 +14,12 @@
  */
 import type { ConfigDto } from "../api/qaqh/ConfigDto";
 import { OAUTH_CONTEXT_LENGTH } from "./mode";
-import { BYOK_PROVIDER_ID, PLAN_PROVIDER_ID, type ProviderEntry } from "./providers";
+import {
+  BYOK_PROVIDER_ID,
+  DSACCOUNT_PROVIDER_ID,
+  PLAN_PROVIDER_ID,
+  type ProviderEntry,
+} from "./providers";
 
 /** 一家 provider 记住的东西。全可选：没抓过的字段就不写回。 */
 export type ProviderState = {
@@ -52,7 +57,9 @@ export function captureProviderState(config: CapturableConfig): ProviderState {
  * 两者可能不一致（别的端改过配置），以配置为准。
  */
 export function activeProviderId(config: Pick<ConfigDto, "credential">): string {
-  return config.credential === "chatgpt_plan" ? PLAN_PROVIDER_ID : BYOK_PROVIDER_ID;
+  if (config.credential === "chatgpt_plan") return PLAN_PROVIDER_ID;
+  if (config.credential === "deepseek_account") return DSACCOUNT_PROVIDER_ID;
+  return BYOK_PROVIDER_ID;
 }
 
 /** 记下某一家这份状态（浅合并：没给的字段保留旧的）。 */
@@ -89,6 +96,17 @@ export function switchFields(
       // 套餐直连只提供 Responses API；这里先归位，免得到保存期才被后端拒绝。
       wire: "responses",
       contextLength: saved.contextLength ?? OAUTH_CONTEXT_LENGTH,
+      ...(apiBase == null ? {} : { baseUrl: apiBase }),
+      ...(given(saved.model) ? { model: saved.model } : {}),
+    };
+  }
+  if (provider.kind === "account") {
+    return {
+      credential: "deepseek_account",
+      // DeepSeek 账号余额走 OpenAI 兼容的 chat completions；官方 base 由后端的
+      // `apply_deepseek_account` 钉死，这里只在**已知**时写（`apiBase` 取自
+      // `dsaccount.status.inferenceOrigin`，前端不拼 URL）。
+      wire: "openai",
       ...(apiBase == null ? {} : { baseUrl: apiBase }),
       ...(given(saved.model) ? { model: saved.model } : {}),
     };

@@ -50,7 +50,11 @@ export type ModelSpec = {
  * 账户 tsy3minso@gmail.com）；`byok` 只收我们确实知道差异的模型——用户自己的
  * 端点上的模型千变万化，编一份表反而有害。
  */
-export const MODEL_SPECS: { plan: Record<string, ModelSpec>; byok: Record<string, ModelSpec> } = {
+export const MODEL_SPECS: {
+  plan: Record<string, ModelSpec>;
+  account: Record<string, ModelSpec>;
+  byok: Record<string, ModelSpec>;
+} = {
   plan: {
     // 套餐模式统一 565K（产品口径）：上游目录不给窗口，按同一个数字收口，
     // 免得每个模型各写一个没人验证过的值。
@@ -64,10 +68,35 @@ export const MODEL_SPECS: { plan: Record<string, ModelSpec>; byok: Record<string
   },
   // BYOK：空是有意的。收录一条就必须能说出它的差异；说不出就别写。
   byok: {},
+  /*
+   * DeepSeek 账号（`deepseek_account`）：**实测**（2026-10-14，
+   * `GET https://api.deepseek.com/models` 带账号凭据）拿到 1M 窗口 / 393216 输出。
+   *
+   * 档位只收**平台自己声明的**：它给的是 `effort.supported_levels: ["low","high","max"]`。
+   * 我们的阶梯里没有 `max`（见 `ReasoningTier`），所以这里只放 `low` / `high`——
+   * 放一个平台不认的档，请求会以 400 打在推理端点上（比"少一档"糟得多）。
+   * 平台真有 `max` 而我们没暴露，是**已知缺口**，等阶梯对齐后再补。
+   */
+  account: {
+    "deepseek-flash": {
+      displayName: "DeepSeek Flash",
+      contextWindow: 1_000_000,
+      efforts: ["low", "high"],
+      defaultEffort: "high",
+      notes: "实测：1M 窗口 / 393216 输出 / 多模态；平台档位 low|high|max",
+    },
+    "deepseek-v4-pro": {
+      displayName: "DeepSeek V4 Pro",
+      contextWindow: 1_000_000,
+      efforts: ["low", "high"],
+      defaultEffort: "high",
+      notes: "实测：1M 窗口 / 393216 输出 / 纯文本；平台档位同 flash",
+    },
+  },
 };
 
-/** Provider 归类：套餐 slug 走 `plan`，其余走 `byok`。 */
-export type SpecBucket = "plan" | "byok";
+/** Provider 归类：套餐走 `plan`，DeepSeek 账号走 `account`，其余（BYOK）走 `byok`。 */
+export type SpecBucket = "plan" | "account" | "byok";
 
 export type ModelSpecLookup = {
   spec: ModelSpec;
