@@ -146,6 +146,12 @@ export function parseUnifiedDiff(text: string): ParsedFile[] {
       hunk = h;
       oldNo = h.oldStart;
       newNo = h.newStart;
+      // 后端 `similar` 的新建文件 diff 不写 `/dev/null`,只以 `@@ -0,0 +N @@` 表达;
+      // 不据此补判,整文件新建会被标成 modified(交付卡 A 徽标退化)。
+      if (current.status === "modified") {
+        if (h.oldLines === 0 && h.newLines > 0) current.status = "added";
+        else if (h.newLines === 0 && h.oldLines > 0) current.status = "deleted";
+      }
       continue;
     }
     if (hunk == null) continue;
@@ -227,13 +233,6 @@ export function fileContentChars(file: ParsedFile): number {
   let total = 0;
   for (const hunk of file.hunks) for (const line of hunk.lines) total += line.text.length;
   return total;
-}
-
-/** 降级渲染的截断:保留 head+tail,中段合成一条省略行。 */
-export function truncateRows(rows: DiffRow[], head: number, tail: number): DiffRow[] {
-  if (rows.length <= head + tail) return rows;
-  const omitted = rows.length - head - tail;
-  return [...rows.slice(0, head), { kind: "omit", count: omitted }, ...rows.slice(rows.length - tail)];
 }
 
 // ── 词级高亮配对(spec §9.3) ──────────────────────────────────────────────────

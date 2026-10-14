@@ -1,7 +1,7 @@
-/** 本地 dev-only 视觉验收:ask v2 内嵌卡 + 模态栈 ask 过滤,不连接 daemon。 */
+/** 本地 dev-only 视觉验收:ask 走居中模态(#approval-slot),不连接 daemon。 */
 import { render } from "@solidjs/web";
 import { createSignal, Show } from "solid-js";
-import { ApprovalStack, AskInline } from "./approval/ApprovalCards";
+import { ApprovalStack } from "./approval/ApprovalCards";
 import { applyTheme } from "./lib/theme";
 import { STR } from "./lib/strings";
 import type { ApprovalView } from "./lib/transport";
@@ -29,9 +29,10 @@ const respond = async (challengeId: string, decision: string, payload?: Record<s
 
 render(() => (
   <main style={{ "max-width": "760px", margin: "36px auto", padding: "0 20px", display: "grid", gap: "18px" }}>
-    <h2 style={{ "font-size": "16px", "font-weight": "500", margin: "0" }}>ask v2 内嵌卡</h2>
-    <p style={{ color: "var(--muted)", "font-size": "13px", margin: "0" }}>停靠消息区尾部,不遮罩;模态栈仅保留授权/计划。</p>
-    <AskInline pending={askViews} respond={respond} />
+    <h2 style={{ "font-size": "16px", "font-weight": "500", margin: "0" }}>ask 居中模态</h2>
+    <p style={{ color: "var(--muted)", "font-size": "13px", margin: "0" }}>
+      授权/计划评审/AskUser 共用同一个遮罩栈;只展示最早一个 challenge。
+    </p>
     <ApprovalStack pending={showPerm() ? [permView, ...askViews] : askViews} respond={respond} />
     <div class="ask-check-last" data-last-submit={last()} data-expected-more={STR.morePending(1)}>{last()}</div>
     <Show when={!showPerm()}>

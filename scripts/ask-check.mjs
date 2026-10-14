@@ -1,4 +1,4 @@
-/** Headless Edge + 真实 AskInline/ApprovalStack 验收,无 daemon / 外部数据。pnpm dev 后运行。 */
+/** Headless Edge + 真实 ApprovalStack 验收(ask 居中模态),无 daemon / 外部数据。pnpm dev 后运行。 */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const port = 9343;
-const base = process.env.QAQH_ASK_CHECK_URL ?? "http://localhost:5173/ask-inline-check.html";
-const out = "artifacts/ask-inline-review";
+const base = process.env.QAQH_ASK_CHECK_URL ?? "http://localhost:5173/ask-check.html";
+const out = "artifacts/ask-review";
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const child = spawn(process.env.QAQH_EDGE ?? "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", [
   "--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${mkdtempSync(join(tmpdir(), "qaqh-ask-check-"))}`,
@@ -55,37 +55,38 @@ try {
     await send("Emulation.setDeviceMetricsOverride", { width, height: 1000, deviceScaleFactor: 1, mobile: false });
     await send("Page.navigate", { url: base + '?theme=' + theme });
     for (let i = 0; i < 100; i++) {
-      if (await evaluate("document.querySelectorAll('.ask-inline .card.ask').length === 1 && document.querySelectorAll('#approval-slot .card').length === 0 && document.fonts.status === 'loaded'")) break;
+      if (await evaluate("document.querySelectorAll('#approval-slot .card.ask').length === 1 && document.fonts.status === 'loaded'")) break;
       await delay(100);
     }
     await delay(300);
-    assert.equal(await evaluate("document.querySelectorAll('.ask-inline .card.ask').length"), 1);
-    assert.equal(await evaluate("document.querySelector('.ask-inline [role=\"dialog\"]') === null"), true, "内嵌卡不携带对话框语义");
-    assert.equal(await evaluate("document.querySelectorAll('#approval-slot .card').length"), 0, "纯 ask 待处理时模态栈为空(不遮罩)");
-    assert.equal(await evaluate("document.querySelectorAll('#approval-dialog-title').length"), 0, "无模态卡时 dialog 标题 id 不出现");
-    assert.equal(await evaluate("document.querySelector('.ask-inline .card-more')?.textContent"), await evaluate("document.querySelector('.ask-check-last').dataset.expectedMore"), "内嵌卡「还有 N 个」计数");
+    assert.equal(await evaluate("document.querySelectorAll('#approval-slot .card.ask').length"), 1, "ask 走居中模态");
+    assert.equal(await evaluate("getComputedStyle(document.querySelector('#approval-slot')).position"), "fixed", "遮罩脱离文档流,不再嵌进消息列");
+    assert.equal(await evaluate("(() => { const r = document.querySelector('#approval-slot .card.ask').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth; })()"), true, "卡片完整落在视口内");
+    assert.equal(await evaluate("document.querySelectorAll('#approval-dialog-title').length"), 1, "dialog 标题 id 唯一");
+    assert.equal(await evaluate("document.querySelector('#approval-slot .card-more')?.textContent"), await evaluate("document.querySelector('.ask-check-last').dataset.expectedMore"), "模态卡「还有 N 个」计数");
     assert.equal(await evaluate("document.documentElement.scrollWidth > innerWidth"), false);
 
-    await evaluate("(() => { const el = document.querySelector('.ask-inline [data-qid=\"q1\"] input[data-custom]'); el.value = '3000'; return true; })()");
+    await evaluate("(() => { const el = document.querySelector('#approval-slot [data-qid=\"q1\"] input[data-custom]'); el.value = '3000'; return true; })()");
     // 提交逻辑在点击时直接读 DOM(checked/value),无需合成 change/input 事件。
-    await evaluate("(() => { const el = document.querySelector('.ask-inline [data-qid=\"q2\"] input[type=radio]'); el.checked = true; return true; })()");
-    await click("document.querySelector('.ask-inline .card-actions .primary')");
+    await evaluate("(() => { const el = document.querySelector('#approval-slot [data-qid=\"q2\"] input[type=radio]'); el.checked = true; return true; })()");
+    await click("document.querySelector('#approval-slot .card-actions .primary')");
     assert.equal(await evaluate("document.querySelector('.ask-check-last').dataset.lastSubmit"),
       '{"challengeId":"ask-1","decision":"submit","payload":{"answers":[{"question_id":"q1","answer":"3000"},{"question_id":"q2","answer":"包含"}]}}',
       "自定义答案优先且逐题作答");
-    await click("document.querySelector('.ask-inline .card-actions .button-secondary')");
+    await click("document.querySelector('#approval-slot .card-actions .button-secondary')");
     assert.equal(await evaluate("document.querySelector('.ask-check-last').dataset.lastSubmit"),
       '{"challengeId":"ask-1","decision":"dismiss","payload":{}}', "跳过走 dismiss");
 
-    // 注入模态授权:内嵌卡仍在原位,模态栈只出现授权卡且 ask 不进入。
-    await click("document.querySelector('#ask-check-show-perm')");
+    // 注入模态授权:同一个遮罩栈改挂授权卡,ask 退回队列尾部。
+    // 遮罩 fixed inset:0 会吃掉坐标点击,这里只能走 DOM 直调。
+    await evaluate("(() => { document.querySelector('#ask-check-show-perm').click(); return true; })()");
+    await delay(300);
     assert.equal(await evaluate("document.querySelector('#approval-slot [role=\"dialog\"] .card.perm') != null"), true);
-    assert.equal(await evaluate("document.querySelectorAll('#approval-slot .card.ask').length"), 0, "ask 不进入模态栈");
+    assert.equal(await evaluate("document.querySelectorAll('#approval-slot .card.ask').length"), 0, "授权在队首时 ask 不展示");
     assert.equal(await evaluate("document.querySelectorAll('#approval-dialog-title').length"), 1, "dialog 标题 id 唯一");
-    assert.equal(await evaluate("document.querySelectorAll('.ask-inline .card.ask').length"), 1);
     assert.equal(await evaluate("document.documentElement.scrollWidth > innerWidth"), false);
     await snapshot(`${theme}-${width}`);
-    console.log(`PASS ${theme} ${width}: inline ask / modal filter / submit+dismiss / overflow`);
+    console.log(`PASS ${theme} ${width}: modal ask / viewport containment / submit+dismiss / modal queue / overflow`);
   }
   assert.deepEqual(diagnostics, [], `运行时诊断: ${JSON.stringify(diagnostics)}`);
   console.log(`Screenshots: ${out}`);

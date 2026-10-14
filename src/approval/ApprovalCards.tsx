@@ -97,7 +97,7 @@ export const ApprovalCard: Component<{ view: ApprovalView; pendingCount: number;
   );
 };
 
-export const AskCard: Component<{ view: ApprovalView; pendingCount: number; busy: () => boolean; error: () => string | null; respond: (payload: Record<string, unknown>) => void; skip: () => void; inline?: boolean }> = (props) => {
+export const AskCard: Component<{ view: ApprovalView; pendingCount: number; busy: () => boolean; error: () => string | null; respond: (payload: Record<string, unknown>) => void; skip: () => void }> = (props) => {
   let root: HTMLDivElement | undefined;
   const [validationError, setValidationError] = createSignal(false);
   const questions = (): Array<Record<string, any>> => (Array.isArray(props.view.details?.questions) ? props.view.details.questions : []);
@@ -124,7 +124,7 @@ export const AskCard: Component<{ view: ApprovalView; pendingCount: number; busy
   useCardKeys(() => false, submit, props.skip, () => root);
   return (
     <div class="card ask" tabindex={-1} ref={root}>
-      <div class="card-head"><span id={props.inline ? undefined : "approval-dialog-title"}>{STR.askTitle}</span><Show when={props.pendingCount > 1}><span class="card-more">{STR.morePending(props.pendingCount - 1)}</span></Show></div>
+      <div class="card-head"><span id="approval-dialog-title">{STR.askTitle}</span><Show when={props.pendingCount > 1}><span class="card-more">{STR.morePending(props.pendingCount - 1)}</span></Show></div>
       <div class="card-body">
         <Show when={questions().length === 0}>
           <div class="card-line">(缺少问题详情)</div>
@@ -188,14 +188,13 @@ export const PlanCard: Component<{ view: ApprovalView; pendingCount: number; bus
 };
 
 /** 卡片组:只展示最早一个,头部显示「还有 N 个待处理」;滚动滚入视野。
- *  ask 类走 SessionView 尾部的内嵌卡(AskInline),模态栈只保留授权/计划评审。 */
+ *  授权/计划评审/AskUser 共用同一个居中模态(`#approval-slot`)。 */
 export const ApprovalStack: Component<{ pending: ApprovalView[]; respond: (challengeId: string, decision: string, payload?: Record<string, unknown>) => Promise<void> }> = (props) => {
   const { busy, error, send } = useApprovalSend(props.respond);
   let root: HTMLDivElement | undefined;
-  const modal = createMemo(() => props.pending.filter((view) => view.kind !== "ask"));
-  const head = createMemo(() => modal()[0] ?? null);
+  const head = createMemo(() => props.pending[0] ?? null);
   createEffect(
-    () => modal().length,
+    () => props.pending.length,
     (count) => {
       // 焦点在 body 时才自动聚焦卡片(§11.1),不抢输入框。
       if (count > 0 && document.activeElement === document.body) {
@@ -222,8 +221,7 @@ export const ApprovalStack: Component<{ pending: ApprovalView[]; respond: (chall
       first.focus();
     }
   };
-  // 模态栈为空时不挂 #approval-slot 容器本身:fixed inset:0 的空遮罩会拦截
-  // 全页面点击(实测 ask 内嵌卡在下方被挡住,提交点不进去)。
+  // 模态栈为空时不挂 #approval-slot 容器本身:fixed inset:0 的空遮罩会拦截全页面点击。
   return (
     <Show when={head()} keyed>
       {(view) => (
@@ -231,30 +229,13 @@ export const ApprovalStack: Component<{ pending: ApprovalView[]; respond: (chall
           {/* keyed:换一个 challenge 就是一张新卡(内部草稿/展开态不该串到下一个请求) */}
           <div class="approval-wrap" role="dialog" aria-modal="true" aria-labelledby="approval-dialog-title" tabindex={-1} onKeyDown={trapTab}>
             {view.kind === "tool_permission" ? (
-              <ApprovalCard view={view} pendingCount={modal().length} busy={() => busy(view.challenge_id)} error={error} respond={(decision) => void send(view, decision)} />
+              <ApprovalCard view={view} pendingCount={props.pending.length} busy={() => busy(view.challenge_id)} error={error} respond={(decision) => void send(view, decision)} />
             ) : view.kind === "plan" ? (
-              <PlanCard view={view} pendingCount={modal().length} busy={() => busy(view.challenge_id)} error={error} respond={(approved, message, autonomous) => void send(view, approved ? "approve" : "reject", { message: message || null, autonomous })} />
+              <PlanCard view={view} pendingCount={props.pending.length} busy={() => busy(view.challenge_id)} error={error} respond={(approved, message, autonomous) => void send(view, approved ? "approve" : "reject", { message: message || null, autonomous })} />
             ) : (
-              <AskCard view={view} pendingCount={modal().length} busy={() => busy(view.challenge_id)} error={error} respond={(payload) => void send(view, "submit", payload)} skip={() => void send(view, "dismiss")} />
+              <AskCard view={view} pendingCount={props.pending.length} busy={() => busy(view.challenge_id)} error={error} respond={(payload) => void send(view, "submit", payload)} skip={() => void send(view, "dismiss")} />
             )}
           </div>
-        </div>
-      )}
-    </Show>
-  );
-};
-
-/** ask v2 内嵌卡:停靠消息列尾部,不遮罩视口、不抢焦点、无焦点陷阱;
- *  协议不变——仍是 approvals challenge 的 submit/dismiss。多问时展示最早一个。 */
-export const AskInline: Component<{ pending: ApprovalView[]; respond: (challengeId: string, decision: string, payload?: Record<string, unknown>) => Promise<void> }> = (props) => {
-  const { busy, error, send } = useApprovalSend(props.respond);
-  const asks = createMemo(() => props.pending.filter((view) => view.kind === "ask"));
-  const head = createMemo(() => asks()[0] ?? null);
-  return (
-    <Show when={head()} keyed>
-      {(view) => (
-        <div class="ask-inline" aria-label={STR.askTitle}>
-          <AskCard view={view} inline pendingCount={asks().length} busy={() => busy(view.challenge_id)} error={error} respond={(payload) => void send(view, "submit", payload)} skip={() => void send(view, "dismiss")} />
         </div>
       )}
     </Show>

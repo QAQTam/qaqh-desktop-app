@@ -10,7 +10,6 @@
  */
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type Component } from "solid-js";
 import IconArrowDown from "~icons/lucide/arrow-down";
-import { AskInline } from "../approval/ApprovalCards";
 import { TurnView } from "../turn/TurnView";
 import { anchorScrollTop, clampPlaceholderHeight, EVICT_SCREENS, shouldLoadOlder, TURN_WINDOW } from "../session/pagination";
 import { STR } from "../lib/strings";
@@ -41,8 +40,6 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
   const [hoveredNavKey, setHoveredNavKey] = createSignal<string | null>(null);
   const store = props.tab.store;
   const state = () => store.state[0];
-  /** ask v2:待回答的提问停靠消息区尾部(不遮罩);协议仍是 approvals challenge。 */
-  const askPending = createMemo(() => store.pending[0]().filter((view) => view.kind === "ask"));
   /** 压缩卡片只在非 idle 时渲染;`Show` 的回调因此能拿到收窄后的联合类型。 */
   const compactCard = () => {
     const current = store.compact[0]();
@@ -338,9 +335,6 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
           )}</For></div>}
         </For>
       </div>
-      <Show when={askPending().length > 0}>
-        <AskInline pending={askPending()} respond={(challengeId, decision, payload) => props.tab.store.respondApproval(challengeId, decision, payload)} />
-      </Show>
       <Show when={compactCard()}>
         {(compact) => {
           // JSX 里的条件不会收窄联合类型,这几处显式收窄后再给 Show 用。

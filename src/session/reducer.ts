@@ -184,9 +184,14 @@ export function outputFromDisplay(display: ToolDisplay | undefined, legacy: Tool
   switch (body.kind) {
     case "none":
       // 显式无展示内容，不是缺失投影；不能复活 legacy 原始输出。
-      return undefined;
+      // display.diff 是与之正交的展示面槽位，不属于 legacy 输出。
+      return display?.diff ? { diffText: display.diff } : undefined;
     case "text":
-      return { text: body.text, truncated: body.truncated };
+      // 后端 write/edit 一律发 `body:text`(工具收据文本),权威 unified diff 只在
+      // 顶层 `display.diff` 槽——`ToolBody::Diff` 全仓没有生产者。不接这一槽,
+      // 交付卡片的「修改结果」与 Diff 审查抽屉都永远取不到 diff 原文。
+      // 归档 rebuild 会把 legacy `tool.diff` 硬置 None,所以 display.diff 优先。
+      return { text: body.text, truncated: body.truncated, diffText: display?.diff ?? legacy?.diffText };
     case "diff":
       return { diffText: body.unified };
     case "shell":

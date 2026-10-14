@@ -14,6 +14,7 @@ import { SessionView } from "./session/SessionView";
 import { WorkspacePanel } from "./workspace/WorkspacePanel";
 import { Composer } from "./composer/Composer";
 import { ApprovalStack } from "./approval/ApprovalCards";
+import { DiffReviewDrawer } from "./diff/DiffReviewDrawer";
 import { GlobalNav } from "./app/GlobalNav";
 import { MessageSidebar } from "./app/MessageSidebar";
 import IconArrowLeft from "~icons/lucide/arrow-left";
@@ -592,7 +593,15 @@ const frames = async (count: number): Promise<void> => {
 };
 
 /** 帧间隔采样:p50/p95/max + 掉帧数(>50ms 算一次卡顿)。 */
-async function sampleFrames(ms: number, work: () => Promise<void>): Promise<Record<string, unknown>> {
+interface FrameCadence {
+  frames: number;
+  p50: number;
+  p95: number;
+  max: number;
+  janks: number;
+}
+
+async function sampleFrames(ms: number, work: () => Promise<void>): Promise<FrameCadence> {
   const gaps: number[] = [];
   let last = performance.now();
   let stop = false;
@@ -1171,6 +1180,154 @@ const scenarios = {
     report.push(out);
     return out;
   },
+  /**
+   * Diff 审查抽屉:验证「过大只降级、不藏行」这条契约。
+   * 1. 走真 wire 形状(``body:text`` + 顶层 ``display.diff``),顺带守住 reducer 接 diff 槽那条链;
+   * 2. 3000 行文件远超富渲染门槛(1200 行),行集必须仍全量可达——中段滚过去要看得见;
+   * 3. DOM 只挂可见行 ±overscan,滚动帧间隔不许出现长任务。
+   */
+  async diffDrawer(): Promise<Record<string, unknown>> {
+    const id = "t900";
+    // 单步跑(QAQH_ONLY)时 liveSeq 还停在假页水位之下,onTimelineEntry 会把
+    // 条目当重放丢掉。显式越过水位,让本场景与执行顺序无关。
+    liveSeq = Math.max(liveSeq, untrack(() => store.state[0].watermark) + 1);
+    const total = 3000;
+    const line = (index: number): string => `+  const drawerRow${index} = compute(${index}, "diff 抽屉压力夹具");`;
+    const bigDiff = `--- a/src/drawer_big.ts\n+++ b/src/drawer_big.ts\n@@ -0,0 +1,${total} @@\n${Array.from({ length: total }, (_, i) => line(i)).join("\n")}\n`;
+    const smallDiff = `--- a/src/drawer_small.ts\n+++ b/src/drawer_small.ts\n@@ -0,0 +1,40 @@\n${Array.from({ length: 40 }, (_, i) => `+  const small${i} = ${i};`).join("\n")}\n`;
+
+    const feedWrite = (blockId: string, diff: string): void => {
+      feed(id, { type: "block_opened", block: { block_id: blockId, kind: "tool", tool: { name: "write", state: "running" } } });
+      feed(id, {
+        type: "tool_updated", block_id: blockId,
+        tool: {
+          name: "write", state: "succeeded",
+          display: {
+            diff,
+            lines_added: diff.split("\n").length - 3,
+            header: { kind: "path", path: blockId, op: "write" },
+            body: { kind: "text", text: `[OK] ${blockId} — written`, truncated: false },
+          },
+        },
+      });
+    };
+
+    feed(id, { type: "turn_opened", user_text: "第 900 问：把抽屉撑爆试试" });
+    feedWrite("drawer-small", smallDiff);
+    feedWrite("drawer-big", bigDiff);
+    feed(id, { type: "turn_sealed", state: "completed" });
+    await frames(20);
+
+    // 别的夹具也往同一个 store 里塞过带写入的回合,所以整页首个卡片未必是本次的——按槽位取。
+    const slot = document.querySelector<HTMLElement>(`[data-slot-key="${CSS.escape(id)}"]`);
+    if (slot == null) throw new Error("回合未落到时间线槽位");
+    const card = slot.querySelector<HTMLElement>(".turn-deliverables-card");
+    if (card == null) throw new Error("回合密封后交付卡未挂载");
+    const collapsedRows = card.querySelectorAll(".deliverables-file-item").length;
+    if (collapsedRows > 3) throw new Error(`交付卡折叠态应只留 3 行,实测 ${collapsedRows}`);
+
+    card.querySelector<HTMLElement>(".deliverables-file-item")!.click();
+    await wait(400); // 抽屉滑入 200ms 后才挂载虚拟视图
+    await frames(10);
+    const panel = document.querySelector<HTMLElement>(".diff-drawer-panel");
+    if (panel == null) throw new Error("点击文件行未唤起审查抽屉");
+
+    // 侧栏里选中那个 3000 行的文件(按路径认,不按下标)。
+    const bigRow = [...panel.querySelectorAll<HTMLElement>(".diff-drawer-file-row")]
+      .find((row) => row.textContent?.includes("drawer_big.ts"));
+    if (bigRow == null) throw new Error("侧栏未列出超限文件");
+    bigRow.click();
+    await frames(10);
+    if (panel.querySelector<HTMLElement>(".diff-scroll") != null) throw new Error("3000 行文件默认就该折叠(BIG_DIFF_LINES=400)");
+    panel.querySelector<HTMLElement>(".diff-file-head")!.click();
+    await frames(10);
+    const scroll = panel.querySelector<HTMLElement>(".diff-scroll");
+    if (scroll == null) throw new Error("展开后未挂载虚拟滚动容器");
+    const windowEl = scroll.querySelector<HTMLElement>(".diff-rows-window")!;
+    const domRowsAt = (): number => windowEl.querySelectorAll(".diff-row").length;
+    const mounted = domRowsAt();
+    if (mounted > 140) throw new Error(`虚拟开窗未收束 DOM:可见 ${mounted} 行 / 总 ${total + 1} 行`);
+
+    // 滚到正中:截断版这里会是「省略 N 行」占位,全量版必须交出第 1500 行原文。
+    // 速度取人类快速滚动量级(16ms 走 120px ≈ 每帧换 6 行)。刻意「每帧换掉整个
+    // 视口」的量级(240px/6ms)测的是 For 的回收上限,不是真实交互,会把 p50 顶到
+    // 40ms 却说明不了任何事——对照组 tableStream 在同一环境是 16.7ms / 0 jank。
+    const middleTop = Math.floor((total / 2) * 21);
+    const walk = 2400;
+    scroll.scrollTop = middleTop - walk;
+    scroll.dispatchEvent(new Event("scroll"));
+    await frames(4);
+    const cadence = await sampleFrames(360, async () => {
+      for (let offset = 0; offset <= walk; offset += 120) {
+        scroll.scrollTop = middleTop - walk + offset;
+        scroll.dispatchEvent(new Event("scroll"));
+        await wait(16);
+      }
+      await frames(4);
+    });
+    const middleText = windowEl.textContent ?? "";
+    if (!middleText.includes("drawerRow1500")) {
+      throw new Error(`超限文件的中段行被藏掉了(截断未取消):${middleText.slice(0, 80)}`);
+    }
+    if (cadence.janks > 0) throw new Error(`人工滚动速度下出现 ${cadence.janks} 个 >50ms 长帧(p50 ${cadence.p50}ms)`);
+    const omittedMarkers = windowEl.querySelectorAll(".diff-row.omit").length;
+
+    scroll.scrollTop = total * 21;
+    scroll.dispatchEvent(new Event("scroll"));
+    await frames(6);
+    const tailVisible = (windowEl.textContent ?? "").includes(`drawerRow${total - 1}`);
+    const drawerDomNodes = panel.querySelectorAll("*").length;
+
+    panel.querySelector<HTMLElement>(".diff-drawer-close-btn")!.click();
+    await frames(6);
+    if (document.querySelector(".diff-drawer-panel") != null) throw new Error("关闭抽屉后子树未物理卸载");
+
+    // 监听器泄漏闸:effect 的 apply 作用域里 onCleanup 是惰性的,曾经每开一次抽屉
+    // 就多挂一个 keydown。数两轮开/关的 add 与 remove 是否配平。
+    type ListenerArgs = Parameters<typeof window.addEventListener>;
+    const addRef = window.addEventListener;
+    const removeRef = window.removeEventListener;
+    let keydownAdds = 0;
+    let keydownRemoves = 0;
+    window.addEventListener = (...args: ListenerArgs): void => {
+      if (args[0] === "keydown") keydownAdds += 1;
+      (addRef as (...items: ListenerArgs) => void)(...args);
+    };
+    window.removeEventListener = (...args: ListenerArgs): void => {
+      if (args[0] === "keydown") keydownRemoves += 1;
+      (removeRef as (...items: ListenerArgs) => void)(...args);
+    };
+    for (let cycle = 1; cycle <= 2; cycle += 1) {
+      card.querySelector<HTMLElement>(".deliverables-file-item")!.click();
+      await frames(8);
+      if (document.querySelector(".diff-drawer-panel") == null) throw new Error(`第 ${cycle} 轮未能重开抽屉`);
+      document.querySelector<HTMLElement>(".diff-drawer-close-btn")!.click();
+      await frames(8);
+      if (document.querySelector(".diff-drawer-panel") != null) throw new Error(`第 ${cycle} 轮关闭后未卸载`);
+    }
+    window.addEventListener = addRef;
+    window.removeEventListener = removeRef;
+    if (keydownAdds !== keydownRemoves) throw new Error(`keydown 监听泄漏: add ${keydownAdds} / remove ${keydownRemoves}`);
+    if (keydownAdds < 2) throw new Error(`两轮开关只挂了 ${keydownAdds} 个监听,计数本身不可信`);
+
+    const out = {
+      name: "diffDrawer",
+      diffLines: total,
+      collapsedCardRows: collapsedRows,
+      virtualDomRows: mounted,
+      scrollCadence: cadence,
+      middleRowReachable: true,
+      tailVisible,
+      omittedMarkers,
+      keydownAdds,
+      keydownRemoves,
+      drawerDomNodes,
+      retainedDiffChars: bigDiff.length + smallDiff.length,
+      ...metrics(),
+    };
+    report.push(out);
+    return out;
+  },
   material(mode: SessionMaterial): Record<string, unknown> {
     setSessionMaterial(mode);
     return { name: "material", mode, dataset: document.documentElement.dataset.material };
@@ -1349,6 +1506,8 @@ render(
               <Show when={previewActiveTab().store.pending[0]().length > 0}>
                 <ApprovalStack pending={previewActiveTab().store.pending[0]()} respond={async () => { previewActiveTab().store.pending[1]([]); }} />
               </Show>
+              {/* 与 App 同位:抽屉是全局单例,不挂在消息列里,否则测不到它的物理卸载。 */}
+              <DiffReviewDrawer />
               <Composer
                 draft={draft}
                 onDraft={setDraft}

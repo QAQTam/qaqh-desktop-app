@@ -181,6 +181,9 @@ try {
     if (name.startsWith("progressStream")) {
       console.log(`  ${name}: DOM 重写 ${value?.progressWrites} 次 / 喂 ${value?.fedChunks} 条, elapsed ${value?.elapsedMs}ms, 帧 p50 ${value?.cadence?.p50} max ${value?.cadence?.max} janks ${value?.cadence?.janks}, tail ${value?.tailChars}, churn ${JSON.stringify(value?.churn)}`);
     }
+    if (name === "diffDrawer") {
+      console.log(`  ${name}: ${value?.diffLines} 行 diff → DOM 仅 ${value?.virtualDomRows} 行 / 抽屉节点 ${value?.drawerDomNodes}, 中段可达 ${value?.middleRowReachable} 尾行 ${value?.tailVisible} 省略占位 ${value?.omittedMarkers}, 滚动帧 p50 ${value?.scrollCadence?.p50} max ${value?.scrollCadence?.max} janks ${value?.scrollCadence?.janks}`);
+    }
     return value;
   };
 
@@ -242,6 +245,8 @@ try {
   await step("tableStream", `window.__stress.scenarios.tableStream()`);
   await step("realign", `window.__stress.scenarios.realign().then(r=>({churn:r.churn, before:r.before, after:r.after, m:r.after}))`);
   await step("expand", `window.__stress.scenarios.expand().then(r=>({clickedRows:r.clickedRows, timelines:r.timelines, clickedHeads:r.clickedHeads, scrollDeltaFromExpand:r.scrollDeltaFromExpand, m:r}))`);
+  // 3000 行 diff 开抽屉 + 滚到中段:堆与 DOM 节点数由 step() 采样,后续 afterEvict/idle 抓残留。
+  await step("diffDrawer", `Promise.resolve(window.__stress.scenarios.diffDrawer())`);
 
   // 动画帧成本(§10 的 C 项):对照组 → 折叠展开 → 工具详情 → 待办停靠
   await perfSample("control-idle-4s", `new Promise(r=>setTimeout(()=>r({acted:0}),4000))`);
@@ -261,6 +266,7 @@ try {
       if (name.startsWith("rate") && (detail.lostChars !== 0 || !detail.renderedCorrect || detail.textIdentityLost || !detail.remainedCollapsed || detail.cadence.janks > 0)) failures.push(name);
       if ((name === "checkpoint" || name === "thinking") && !detail.correct) failures.push(name);
       if (name === "tableStream" && detail.tableRows !== 201) failures.push(name);
+      if (name === "diffDrawer" && (!detail.middleRowReachable || !detail.tailVisible || detail.virtualDomRows > 140 || detail.collapsedCardRows > 3)) failures.push(name);
     }
     if (diagnostics.length) failures.push("browser diagnostics");
     out.assertions = { passed: failures.length === 0, failures };

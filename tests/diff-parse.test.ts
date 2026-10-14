@@ -1,6 +1,6 @@
 /** diff 配对与词级高亮(spec §1.3 允许的纯逻辑单测)。 */
 import { describe, expect, test } from "vitest";
-import { findWordPairs, flattenFileRows, languageOf, omittedLinesBefore, pairLines, parseUnifiedDiff, trailingWhitespace, truncateRows, wordSegments, type DiffRow } from "../src/diff/parse";
+import { fileTotalLines, findWordPairs, flattenFileRows, languageOf, omittedLinesBefore, pairLines, parseUnifiedDiff, trailingWhitespace, wordSegments } from "../src/diff/parse";
 
 const SAMPLE = `diff --git a/src/a.ts b/src/a.ts
 index 111..222 100644
@@ -159,7 +159,7 @@ describe("findWordPairs / wordSegments(§9.3 宁缺毋滥)", () => {
   });
 });
 
-describe("flattenFileRows / truncateRows(虚拟化与降级)", () => {
+describe("flattenFileRows(虚拟化)", () => {
   const SAMPLE = `diff --git a/f b/f
 --- a/f
 +++ b/f
@@ -184,16 +184,17 @@ describe("flattenFileRows / truncateRows(虚拟化与降级)", () => {
     expect(omit).toEqual({ kind: "omit", count: 16 });
   });
 
-  test("truncateRows:保留 head+tail,中段合成省略行", () => {
-    const rows: DiffRow[] = Array.from({ length: 10 }, (_, i) => ({
-      kind: "line",
-      line: { t: "ctx" as const, oldNo: i + 1, newNo: i + 1, text: `l${i}`, noeol: false },
-    }));
-    const truncated = truncateRows(rows, 3, 3);
-    expect(truncated).toHaveLength(7);
-    expect(truncated[3]).toEqual({ kind: "omit", count: 4 });
-    expect(truncated[6]).toMatchObject({ line: { text: "l9" } });
-    expect(truncateRows(rows, 5, 5)).toHaveLength(10);
+  test("超过富渲染门槛的行集仍全量展开(降级只砍每行代价,不藏行)", () => {
+    // DiffFileView 的 rich 门槛是 1200 行;超限后过去会被 head/tail 截到 800 行,
+    // 中段行用户永远看不到。现在两条路径都走固定行高虚拟开窗,DOM 只挂可见行,
+    // 所以行集必须保持完整——这里锁住「flatten 不产生截断 omit」这条前提。
+    const total = 1300;
+    const body = Array.from({ length: total }, (_, i) => `+line ${i}`).join("\n");
+    const file = parseUnifiedDiff(`--- a/big.ts\n+++ b/big.ts\n@@ -0,0 +1,${total} @@\n${body}\n`)[0]!;
+    expect(fileTotalLines(file)).toBe(total);
+    const rows = flattenFileRows(file);
+    expect(rows).toHaveLength(total + 1); // +1 = hunk 头
+    expect(rows.some((row) => row.kind === "omit")).toBe(false);
   });
 
   test("pairLines:廉价映射,含超长行守卫", () => {

@@ -5,6 +5,7 @@ import IconChevronRight from "~icons/lucide/chevron-right";
 import { Collapse } from "../ui/Collapse";
 import { AssistantContent } from "../genui/AssistantContent";
 import { StepRow } from "../tools/StepRow";
+import { TurnDeliverablesCard } from "../diff/TurnDeliverablesCard";
 import { STR, formatWorkDuration } from "../lib/strings";
 import { workDurationMs } from "../lib/time";
 import type { SessionStore } from "../session/store";
@@ -165,6 +166,11 @@ export const TurnView: Component<{ turn: Turn; waits: Wait[]; store: SessionStor
       <For each={segments()} keyed={(segment) => segment.key}>{(segment) => <SegmentView segment={segment} turn={props.turn} waits={props.waits} cwd={cwd()} latestToolStepId={latestToolStepId()} onFollowUp={(text) => void props.store.sendMessage(text)} />}</For>
       <Show when={props.turn.status === "aborted" && props.turn.steps.length === 0}><div class="turn-aborted">{STR.interrupted}</div></Show>
       <Show when={props.turn.status === "failed" && props.turn.error != null}><div class="turn-error">{props.turn.error!.message}</div></Show>
+      {/* 只在回合密封后挂载:运行中每帧都要重扫全部工具步做指纹聚合,
+          而且列到一半的文件清单读起来像是「本回合最终交付」,实际是过程态。 */}
+      <Show when={props.turn.status !== "running"}>
+        <TurnDeliverablesCard turn={props.turn} sessionId={props.store.seed} cwd={cwd()} />
+      </Show>
     </section>
   );
 };

@@ -6,10 +6,10 @@
  * 性能分级(吸收 ZCode 的降级纪律,补上它缺的行虚拟化):
  *  - 所有展开的文件走固定行高虚拟开窗:DOM 只挂可见行 ± overscan,
  *    万行文件不再是 DOM 爆炸点(ZCode 富渲染整段无虚拟化,靠前置门槛兜底)。
- *  - 富渲染门槛:单文件 >1200 行或 >180k 字符 → 降级纯文本(head+tail 共 800
- *    行,中段省略标记):不做词级 diff、不做 shiki。ZCode 卡死的主因就是富路径
- *    的同步解析 + 主线程词级 diff(其 patchDiffPreview.ts 注释自证),这里把
- *    超限输入直接挡在富路径之外。
+ *  - 富渲染门槛:单文件 >1200 行或 >180k 字符 → 只停掉「每行都付」的词级 diff 与
+ *    shiki,行集合仍全量交给虚拟开窗。ZCode 卡死的主因是富路径的同步解析 +
+ *    主线程词级 diff(其 patchDiffPreview.ts 注释自证),把超限输入挡在富路径
+ *    之外即可;它还需要 head/tail 截断是因为它没有虚拟化,我们不需要。
  *  - 词级 diff 惰性化:配对映射只做廉价扫描(parse.pairLines),Myers 代价
  *    「渲染到哪行付哪行」(WeakMap 缓存),展开时不再整文件一次算完。
  */
@@ -23,7 +23,6 @@ import {
   pairLines,
   parseUnifiedDiff,
   trailingWhitespace,
-  truncateRows,
   wordSegments,
   type DiffRow,
   type ParsedFile,
@@ -35,12 +34,9 @@ import { STR } from "../lib/strings";
 
 /** 超过该改动行数默认折叠(§9.5 大 diff);展开后走虚拟开窗,只挂可见行。 */
 const BIG_DIFF_LINES = 400;
-/** 富渲染门槛:任一超限即降级纯文本(对齐 ZCode patchDiffPreview 的量级)。 */
+/** 富渲染门槛:任一超限即停掉词级 diff 与 shiki 这两项「每行都付」的代价。 */
 const RICH_MAX_LINES = 1200;
 const RICH_MAX_CHARS = 180_000;
-/** 降级渲染保留的 head/tail 行数(共 800,同 ZCode 的纯文本上限)。 */
-const FALLBACK_HEAD = 400;
-const FALLBACK_TAIL = 400;
 /** 虚拟开窗的固定行高(px);必须与 CSS `.diff-row` 的行高严格一致。 */
 const ROW_HEIGHT = 21;
 const OVERSCAN = 12;
@@ -185,9 +181,13 @@ const VirtualRows: Component<{ rows: DiffRow[]; row: (row: DiffRow) => JSX.Eleme
   /** 等宽字体下的行宽估算(ch 单位,CJK/全角按 2 列、tab 按 4 列):给窗口一个
    *  稳定的 min-width,横向滚动条范围不随「当前渲染到哪些行」跳动。 */
   const minWidth = createMemo((): string => {
+    // 精确列数要逐字符数,但不必每行都付:`units >= text.length` 恒成立(CJK 只加不减、
+    // tab 记 4 列),所以比当前最优还短的行不可能翻盘,直接跳过。截断取消后这里
+    // 面对的是整篇行集,少付一次内层循环就是少一次主线程长任务。
     let units = 0;
     for (const row of props.rows) {
       const text = row.kind === "line" ? row.line.text : row.kind === "hunkhead" ? row.text : "";
+      if (text.length < units) continue;
       let lineUnits = 0;
       for (const char of text) lineUnits += char.charCodeAt(0) > 0x2e7f ? 2 : 1;
       lineUnits += (text.match(/\t/g)?.length ?? 0) * 3;
@@ -212,9 +212,11 @@ export const DiffFileView: Component<{ file: ParsedFile; hidePath?: boolean }> =
   const file = () => props.file;
   const rows = createMemo(() => flattenFileRows(file()));
   const totalLines = () => fileTotalLines(file());
-  // 富渲染门槛:超限即降级——降级路径不跑词级 diff 与 shiki,输入先被截到 800 行。
+  // 富渲染门槛:超限只砍「每行的代价」——词级 diff 与 shiki 都不跑。
+  // 行集合不再做 head/tail 截断:两条路径都走固定行高虚拟开窗,DOM 里永远只有
+  // 可见行 ±overscan,截断既省不下节点也省不下堆,只是把中段的行藏起来。
+  // (ZCode 需要前置门槛是因为它富渲染整段无虚拟化;我们不是那个形状。)
   const rich = () => totalLines() <= RICH_MAX_LINES && fileContentChars(file()) <= RICH_MAX_CHARS;
-  const displayRows = createMemo(() => (rich() ? rows() : truncateRows(rows(), FALLBACK_HEAD, FALLBACK_TAIL)));
   const [expanded, setExpanded] = createSignal(untrack(() => totalLines() <= BIG_DIFF_LINES));
 
   // 词级配对映射:廉价扫描(O(行数),无 Myers);真正的 diff 在渲染时逐行结算。
@@ -337,7 +339,7 @@ export const DiffFileView: Component<{ file: ParsedFile; hidePath?: boolean }> =
         </span>
       </button>
       <Show when={expanded()}>
-        <Show when={file().binary} fallback={<VirtualRows rows={displayRows()} row={renderRow} />}>
+        <Show when={file().binary} fallback={<VirtualRows rows={rows()} row={renderRow} />}>
           <div class="diff-binary">{STR.binaryChanged ?? "二进制文件已变更"}</div>
         </Show>
       </Show>

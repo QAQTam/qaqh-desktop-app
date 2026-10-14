@@ -30,6 +30,7 @@
 @import "./components/settings.css";
 @import "./components/dev-console.css";
 @import "./components/feedback.css";
+@import "./components/deliverables.css";
 
 /* 6. 主题预设 */
 @import "./themes/macos-liquid-glass.css";
