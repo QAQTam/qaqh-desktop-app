@@ -10,7 +10,7 @@
 import { serviceRpc } from "./service-rpc";
 import { openExternalUrl } from "./transport";
 import type { DsSignInDeps, DsSignInStart } from "../dsaccount/flow";
-import type { DsAccountStatus, DsFlowProjection } from "../dsaccount/state";
+import type { DsAccountStatus, DsFlowProjection, DsVerifyResult } from "../dsaccount/state";
 
 /** 一个钱包条目。金额是**原串**（平台用 big.js 语法：`0E-16` 就是 0）。 */
 export interface DsWallet {
@@ -100,6 +100,15 @@ export async function dsaccountModels(): Promise<DsModelEntry[]> {
     return [{ slug, displayName }];
   });
 }
+
+/**
+ * 验证凭据现在还有效吗（读一次只读远端）。
+ *
+ * 失效时**后端会顺手清掉本地凭据**（`cleared: true`），所以调用方拿到结果后
+ * 要把状态与余额都重新读一遍，别让界面停留在"已登录"上。
+ */
+export const dsaccountVerify = (): Promise<DsVerifyResult> =>
+  serviceRpc("DeepSeek 账号", "dsaccount.verify");
 
 /** 流程驱动本体在 `../dsaccount/flow`（纯逻辑，依赖注入，可脱浏览器单测）。 */
 export { runDeepSeekSignIn } from "../dsaccount/flow";

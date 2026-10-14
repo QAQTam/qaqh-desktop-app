@@ -10,6 +10,8 @@ import {
   dsAccountView,
   dsFlowRunning,
   dsRevokeNotice,
+  dsFrontAccountState,
+  dsVerifyNotice,
   formatAmount,
   isPositive,
   type DsAccountStatus,
@@ -30,6 +32,45 @@ describe("远端撤销的提示", () => {
     expect(text).toContain("已重试 6 次");
     expect(text).toContain("平台开小差");
     expect(text).toContain("官网");
+  });
+});
+
+describe("验证（刷新）的提示与正面账号态", () => {
+  it("有效时不出字；失效必须说清到底清没清凭据", () => {
+    expect(dsVerifyNotice(null)).toBeNull();
+    expect(dsVerifyNotice({ valid: true, reason: null, cleared: false })).toBeNull();
+    const cleared = dsVerifyNotice({
+      valid: false,
+      reason: "Authentication Fails (invalid dsh token)",
+      cleared: true,
+    });
+    expect(cleared).toContain("已清除");
+    expect(cleared).toContain("Authentication Fails");
+    // 端点/网络问题**没有**清凭据：不说清的话用户会白去重新登录一次。
+    const kept = dsVerifyNotice({ valid: false, reason: "请求失败: 连接被拒绝", cleared: false });
+    expect(kept).toContain("清除");
+    expect(kept).toContain("端点/网络");
+  });
+
+  it("正面账号态：本地有凭据就是「已登录」（它不等于凭据有效）", () => {
+    expect(dsFrontAccountState(null)).toContain("读取中");
+    expect(dsFrontAccountState(status({ signedIn: false }))).toContain("未登录");
+    const signedIn = dsFrontAccountState(
+      status({
+        signedIn: true,
+        account: {
+          user_id: "u-1",
+          label: "测试用户",
+          provider: null,
+          currency: null,
+          inference_origin: "https://api.deepseek.com",
+          saved_at_ms: 0,
+          has_credential: true,
+        },
+      }),
+    );
+    expect(signedIn).toContain("已登录");
+    expect(signedIn).toContain("测试用户");
   });
 });
 

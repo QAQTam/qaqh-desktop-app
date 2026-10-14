@@ -86,6 +86,7 @@ const SERVICE_METHODS: &[&str] = &[
     "dsaccount.sign_out",
     "dsaccount.bonus.ack",
     "dsaccount.models",
+    "dsaccount.verify",
 ];
 
 /// 这些方法之外都要注入 active session_id(gateway 语义平移)。
@@ -139,6 +140,7 @@ fn service_requires_session(method: &str) -> bool {
             | "dsaccount.sign_out"
             | "dsaccount.bonus.ack"
             | "dsaccount.models"
+            | "dsaccount.verify"
     )
 }
 

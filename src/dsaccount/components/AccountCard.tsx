@@ -15,9 +15,11 @@ import type { DsBalance } from "../../lib/dsaccount";
 import {
   dsAccountView,
   dsRevokeNotice,
+  dsVerifyNotice,
   formatAmount,
   isPositive,
   type DsAccountStatus,
+  type DsVerifyResult,
 } from "../state";
 
 type Props = {
@@ -28,6 +30,11 @@ type Props = {
   onSignIn: () => void;
   onCancel: () => void;
   onSignOut: () => void;
+  /** 刷新 = 验证：问一次远端"这把凭据还有效吗"。 */
+  onVerify: () => void;
+  verifyBusy?: boolean;
+  /** 上一次验证的结果（null / 缺省 = 还没验过）。 */
+  verify?: DsVerifyResult | null;
   /** 由宿主用系统浏览器打开（Tauri: `open_external`）；缺省走普通链接。 */
   onOpenLink?: (url: string) => void;
 };
@@ -63,6 +70,9 @@ export const DsAccountCard: Component<Props> = (props) => {
       <p class="siwc-card__body">{view().subtitle}</p>
       <Show when={view().error}>
         {(message) => <p class="siwc-card__error">{message()}</p>}
+      </Show>
+      <Show when={dsVerifyNotice(props.verify)}>
+        {(text) => <p class="siwc-card__error">{text()}</p>}
       </Show>
 
       <Show when={view().kind === "signed-in" && props.balance}>
@@ -128,6 +138,18 @@ export const DsAccountCard: Component<Props> = (props) => {
           </button>
         </Show>
         <Show when={view().kind === "signed-in"}>
+          {/*
+            刷新 = **验证**：本地有密文不等于凭据还有效（平台侧撤销之后本地仍是
+            "已登录"的样子）。失效时后端顺手清凭据，这里只要重读一遍状态。
+          */}
+          <button
+            type="button"
+            class="ghost-mini"
+            disabled={props.verifyBusy === true}
+            onClick={() => props.onVerify()}
+          >
+            {props.verifyBusy === true ? "验证中…" : "刷新"}
+          </button>
           <Show when={props.status?.usageUrl}>
             {(url) => (
               <button

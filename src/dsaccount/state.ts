@@ -72,6 +72,20 @@ export interface DsRevoke {
   message: string | null;
 }
 
+/**
+ * `dsaccount.verify` 的结果：凭据**现在**还有效吗。
+ *
+ * 这是唯一能回答那个问题的动作——本地有密文不等于凭据有效（平台侧撤销之后，
+ * 本地仍然是"已登录"的样子，直到验证或下一次真实请求失败）。
+ */
+export interface DsVerifyResult {
+  valid: boolean;
+  /** 失败原因（端点不可用、凭据失效都会填）。 */
+  reason: string | null;
+  /** 是否因为判为失效而**已经清掉本地凭据**（后端做的决定）。 */
+  cleared: boolean;
+}
+
 export type DsAccountViewKind =
   | "loading"
   | "signed-out"
@@ -110,6 +124,31 @@ export function dsRevokeNotice(revoke: DsRevoke | null | undefined): string | nu
   const reason =
     revoke.message == null || revoke.message === "" ? "" : `：${revoke.message}`;
   return `远端授权撤销未完成${tried}${reason}——官网上可能仍显示本应用的授权。`;
+}
+
+/**
+ * 「验证」结果怎么说话：**有效时不出字**（用户刚点完，界面不必复述成功），
+ * 只有失效、或"端点不可用但没清凭据"才说话——后者必须点明**没有清**，
+ * 否则用户会白去重新登录一次。
+ */
+export function dsVerifyNotice(result: DsVerifyResult | null | undefined): string | null {
+  if (result == null || result.valid) return null;
+  const reason = result.reason == null || result.reason === "" ? "" : `：${result.reason}`;
+  return result.cleared
+    ? `凭据已失效，本机凭据已清除，请重新登录${reason}`
+    : `凭据验证失败（**未**清除本地凭据：可能只是端点/网络问题）${reason}`;
+}
+
+/**
+ * 卡片**正面**那一行账号态：不用翻面就知道登录没。
+ *
+ * 「已登录」的判据是**本地有凭据**——它不等于凭据有效（见 [`dsVerifyNotice`]）：
+ * 平台侧撤销之后本地仍会是这个状态，直到验证或下一次真实请求失败。
+ */
+export function dsFrontAccountState(status: DsAccountStatus | null): string {
+  if (status == null) return "账号：读取中…";
+  if (status.signedIn) return `账号：已登录（${dsAccountView(status).displayName ?? "已连接"}）`;
+  return "账号：未登录";
 }
 
 /**

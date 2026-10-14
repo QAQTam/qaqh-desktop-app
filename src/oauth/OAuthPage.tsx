@@ -21,13 +21,18 @@ import IconChevronLeft from "~icons/lucide/chevron-left";
 
 import type { ConfigDto } from "../api/qaqh/ConfigDto";
 import { DsAccountCard } from "../dsaccount/components/AccountCard";
-import type { DsAccountStatus } from "../dsaccount/state";
+import {
+  dsFrontAccountState,
+  type DsAccountStatus,
+  type DsVerifyResult,
+} from "../dsaccount/state";
 import {
   defaultDsSignInDeps,
   dsaccountBalance,
   dsaccountSignInCancel,
   dsaccountSignOut,
   dsaccountStatus,
+  dsaccountVerify,
   runDeepSeekSignIn,
   type DsBalance,
 } from "../lib/dsaccount";
@@ -112,6 +117,10 @@ const ProviderCard: Component<{
   onDsSignIn: () => void;
   onDsCancel: () => void;
   onDsSignOut: () => void;
+  /** 刷新 = 验证（见 `dsVerifyNotice`）。 */
+  dsVerify: DsVerifyResult | null;
+  dsVerifyBusy: boolean;
+  onDsVerify: () => void;
   onDsOpenLink: (url: string) => void;
 }> = (props) => {
   const [flipped, setFlipped] = createSignal(false);
@@ -177,6 +186,10 @@ const ProviderCard: Component<{
                 ? "点击卡片：使用 DeepSeek 账号登录"
                 : "点击卡片：查看怎么切回来"}
           </span>
+          {/* 账号态放正面：不用翻面就知道登录没（"已登录"= 本地有凭据）。 */}
+          {props.entry.kind === "account" ? (
+            <span class="oauth-card__hint">{dsFrontAccountState(props.dsStatus)}</span>
+          ) : null}
         </button>
 
         <div class="oauth-card__face oauth-card__back">
@@ -227,6 +240,9 @@ const ProviderCard: Component<{
                 onSignIn={() => props.onDsSignIn()}
                 onCancel={() => props.onDsCancel()}
                 onSignOut={() => props.onDsSignOut()}
+                verify={props.dsVerify}
+                verifyBusy={props.dsVerifyBusy}
+                onVerify={() => props.onDsVerify()}
                 onOpenLink={(url) => props.onDsOpenLink(url)}
               />
             </Match>
@@ -460,11 +476,36 @@ export const OAuthPage: Component = () => {
     }
   };
 
+  const [dsVerify, setDsVerify] = createSignal<DsVerifyResult | null>(null);
+  const [dsVerifyBusy, setDsVerifyBusy] = createSignal(false);
+
+  /**
+   * 「刷新」的真实含义是**验证**：问一次远端"这把凭据还有效吗"。
+   *
+   * 这是唯一能回答它的动作——本地有密文不等于凭据有效。失效时后端会**顺手清掉
+   * 本地凭据**（那条一直缺的 401→清凭据链），所以这里只负责把状态与余额重读一遍。
+   */
+  const dsVerifyNow = async (): Promise<void> => {
+    setDsVerifyBusy(true);
+    try {
+      const result = await dsaccountVerify();
+      setDsVerify(result);
+      if (result.cleared) setDsBalance(null);
+      await refreshDs();
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setDsVerifyBusy(false);
+    }
+  };
+
   const dsSignOut = async (): Promise<void> => {
     setDsBusy(true);
     try {
       await dsaccountSignOut();
       setDsBalance(null);
+      // 刚断开就不该再挂着上一次"验证失败"的提示。
+      setDsVerify(null);
       await refreshDs();
       toast("已断开 DeepSeek 账号", "info", { dedupeKey: "dsaccount-signout" });
     } catch (cause) {
@@ -536,6 +577,9 @@ export const OAuthPage: Component = () => {
                 onDsSignIn={() => void dsSignIn()}
                 onDsCancel={() => void dsCancel()}
                 onDsSignOut={() => void dsSignOut()}
+                dsVerify={dsVerify()}
+                dsVerifyBusy={dsVerifyBusy()}
+                onDsVerify={() => void dsVerifyNow()}
                 onDsOpenLink={(url) => void openExternal(url)}
               />
             )}
