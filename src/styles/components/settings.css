@@ -209,3 +209,18 @@
   .readonly-table th { text-align: left; color: var(--muted); font-weight: 500; padding: 2px 8px 2px 0; }
   .readonly-table td { padding: 2px 8px 2px 0; overflow-wrap: anywhere; }
 }
+
+/* Section 标题行右侧旁注（`Section` 的 `aside`）。
+ * 未给 aside 时 DOM 里只有 h3，与历史完全一致——这里只补新形状的样式。 */
+.settings-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.settings-section-aside {
+  color: var(--warn);
+  font-size: 0.85em;
+  text-align: right;
+}

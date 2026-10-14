@@ -38,9 +38,17 @@ export const TextInput: Component<{
   />
 );
 
-export const Section: ParentComponent<{ title: string; desc?: string; id?: string }> = (props) => (
+export const Section: ParentComponent<{ title: string; desc?: string; id?: string; aside?: string }> = (
+  props,
+) => (
   <section class="settings-section" id={props.id}>
-    <h3>{props.title}</h3>
+    {/* 未给 aside 时 DOM 与历史完全一致（只多一个 h3），免得动到既有布局。 */}
+    <Show when={props.aside != null} fallback={<h3>{props.title}</h3>}>
+      <div class="settings-section-head">
+        <h3>{props.title}</h3>
+        <span class="settings-section-aside">{props.aside}</span>
+      </div>
+    </Show>
     <Show when={props.desc != null && props.desc !== ""}>
       <p class="settings-section-desc">{props.desc}</p>
     </Show>

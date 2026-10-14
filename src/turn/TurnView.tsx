@@ -11,10 +11,14 @@ import { workDurationMs } from "../lib/time";
 import type { SessionStore } from "../session/store";
 import type { Step, Turn, Wait } from "../session/types";
 import { turnSegments, type TurnSegment, type WorkSegment } from "./segments";
+import { thinkingLabel, thinkingTitle } from "./thinking-label";
 import { sessionCatalog } from "../tabs/store";
 
 const WorkStep: Component<{ step: Accessor<Step>; turn: Turn; cwd?: string | null; isLatest?: boolean }> = (props) => {
   const thinking = createMemo(() => { const step = props.step(); return step.kind === "thinking" ? step : null; });
+  // 套餐路径的思考是服务端摘要而非模型原文:标签必须分开(见 ./thinking-label)。
+  const thinkingText = () => thinkingLabel(thinking()?.reasoningKind);
+  const thinkingHint = () => thinkingTitle(thinking()?.reasoningKind);
   const tool = createMemo(() => { const step = props.step(); return step.kind === "tool" ? step : null; });
   const [thinkingOverride, setThinkingOverride] = createSignal<boolean | null>(null);
   const thinkingOpen = () => thinkingOverride() ?? (thinking() != null && props.turn.status === "running" && thinking()?.endedAt == null);
@@ -47,12 +51,12 @@ const WorkStep: Component<{ step: Accessor<Step>; turn: Turn; cwd?: string | nul
           resizeObserver = new ResizeObserver(followTail);
           resizeObserver.observe(node);
         }}>
-          <button type="button" class="timeline-label" aria-expanded={thinkingOpen() ? "true" : "false"} onClick={() => {
+          <button type="button" class="timeline-label" title={thinkingHint()} aria-expanded={thinkingOpen() ? "true" : "false"} onClick={() => {
             following = true;
             setThinkingOverride(!thinkingOpen());
-          }}>{STR.thinking}</button>
+          }}>{thinkingText()}</button>
           <Collapse open={thinkingOpen()} instant={thinkingOverride() == null}>
-            <div class="thinking-full" tabindex={0} role="region" aria-label={STR.thinking}
+            <div class="thinking-full" tabindex={0} role="region" aria-label={thinkingText()}
               onScroll={(event) => {
                 const el = event.currentTarget;
                 // Layout/resize can also emit scroll events; only user input
@@ -71,6 +75,25 @@ const WorkStep: Component<{ step: Accessor<Step>; turn: Turn; cwd?: string | nul
     </Switch>
   );
 };
+
+const DURATION_CACHE_PREFIX = "qaqh.duration.";
+
+function cacheWorkDuration(turnKey: string, workKey: string, duration: number): void {
+  try {
+    if (duration > 0) localStorage.setItem(`${DURATION_CACHE_PREFIX}${turnKey}.${workKey}`, String(duration));
+  } catch {}
+}
+
+function getCachedWorkDuration(turnKey: string, workKey: string): number | undefined {
+  try {
+    const raw = localStorage.getItem(`${DURATION_CACHE_PREFIX}${turnKey}.${workKey}`);
+    if (raw) {
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+  } catch {}
+  return undefined;
+}
 
 const WorkGroup: Component<{ group: WorkSegment; turn: Turn; waits: Wait[]; cwd?: string | null; latestToolStepId?: string | null }> = (props) => {
   const [override, setOverride] = createSignal<boolean | null>(null);
@@ -93,7 +116,19 @@ const WorkGroup: Component<{ group: WorkSegment; turn: Turn; waits: Wait[]; cwd?
     const steps = props.group.steps;
     const start = steps[0]?.startedAt ?? props.turn.workStartedAt;
     const end = props.group.until ?? steps[steps.length - 1]?.endedAt;
-    const duration = workDurationMs(start, end, waits());
+    let duration = workDurationMs(start, end, waits());
+
+    // 防御自愈：若当前段已关闭，实时算出了有效耗时，则写入持久账本；
+    // 若因刷新/快照重建丢失了时间戳导致算出的 duration 为空或 0，则从本地账本回填！
+    if (props.group.closed) {
+      if (duration != null && duration > 0) {
+        cacheWorkDuration(props.turn.key, props.group.key, duration);
+      } else {
+        const cached = getCachedWorkDuration(props.turn.key, props.group.key);
+        if (cached != null) duration = cached;
+      }
+    }
+
     const text = duration == null ? "" : formatWorkDuration(duration);
     if (props.turn.status === "failed") return STR.failedWorked(text);
     if (props.turn.status === "aborted") return STR.interruptedWorked(text);

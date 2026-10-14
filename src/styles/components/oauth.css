@@ -1,0 +1,230 @@
+/* OAuth（ChatGPT 套餐）分区：胶囊开关 + provider 翻转卡片 + 额度区。
+ *
+ * 置灰规则也在这里：OAuth 打开后，`模型与端点(BYOK)` 的 wire/endpoint 由该模式
+ * 接管（套餐只走 Responses + 官方端点），所以那些输入必须不可改——否则用户改了也
+ * 会在保存/请求时被打回，等于给了个假控件。
+ *
+ * 视觉沿用设置页 token（`tokens/base.css`），不引入新变量。
+ */
+
+@layer components {
+  /* ── 页面骨架（GlobalNav 独立页，与 `.tools-page` 同构）────────────── */
+  .oauth-page {
+    display: grid; align-content: start; justify-items: center; gap: 20px;
+    min-width: 0; min-height: 0; overflow: auto; padding: clamp(24px, 8vh, 72px) 24px;
+  }
+  .oauth-page-head { width: min(720px, 100%); }
+  .oauth-page-head h1 { font-size: var(--fs-lg); font-weight: 600; }
+  .oauth-page-head p { margin-top: 4px; color: var(--muted); font-size: var(--fs-sm); }
+  .oauth-section { display: grid; gap: 10px; width: min(720px, 100%); }
+  .oauth-section-title { color: var(--muted); font-size: var(--fs-sm); font-weight: 500; }
+  .oauth-page-error { width: min(720px, 100%); }
+  /* 正在被使用的服务商：给卡片正面一个可见的边（不是唯一的状态信号，
+     状态文字仍在卡上——颜色不承担唯一语义）。 */
+  .oauth-card.is-active .oauth-card__front {
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  }
+
+  .oauth-mode {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .oauth-pill {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    background: var(--surface-2);
+    cursor: pointer;
+  }
+
+  .oauth-mode.is-on .oauth-pill {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    background: var(--accent-soft);
+  }
+
+  /* 真 checkbox 留在 DOM 里（键盘/无障碍），视觉用 track+thumb 表达。 */
+  .oauth-pill input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+  }
+
+  .oauth-pill__track {
+    position: relative;
+    flex: 0 0 auto;
+    width: 44px;
+    height: 24px;
+    border-radius: var(--radius-pill);
+    background: var(--border-strong);
+    transition: background 120ms ease;
+  }
+
+  .oauth-pill input:checked + .oauth-pill__track {
+    background: var(--accent);
+  }
+
+  .oauth-pill__thumb {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--surface);
+    transition: transform 140ms ease;
+  }
+
+  .oauth-pill input:checked + .oauth-pill__track .oauth-pill__thumb {
+    transform: translateX(20px);
+  }
+
+  .oauth-pill input:focus-visible + .oauth-pill__track {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  .oauth-pill__text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .oauth-pill__title {
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .oauth-pill__hint,
+  .oauth-mode__note {
+    color: var(--muted);
+    font-size: 0.88em;
+  }
+
+  .oauth-mode__note {
+    margin: 0;
+  }
+
+  /* ── provider 翻转卡片 ───────────────────────────────────────── */
+  .oauth-card {
+    perspective: 1000px;
+  }
+
+  .oauth-card__inner {
+    display: grid;
+    transition: transform 320ms cubic-bezier(0.2, 0.7, 0.3, 1);
+    transform-style: preserve-3d;
+  }
+
+  .oauth-card.is-flipped .oauth-card__inner {
+    transform: rotateY(180deg);
+  }
+
+  /* 两面共用同一格：高度取较高者，翻转时不会跳。 */
+  .oauth-card__face {
+    grid-area: 1 / 1;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+
+  .oauth-card__front {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: var(--space-1);
+    padding: var(--space-4);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-panel);
+    background: var(--surface);
+    box-shadow: var(--shadow-soft);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .oauth-card__brand {
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .oauth-card__state,
+  .oauth-card__hint {
+    color: var(--muted);
+    font-size: 0.88em;
+  }
+
+  .oauth-card__back {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    transform: rotateY(180deg);
+  }
+
+  .oauth-card__back-btn {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  /* ── 额度区（登录后）─────────────────────────────────────────── */
+  .oauth-quota {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--space-1) var(--space-3);
+    margin: 0;
+    padding: var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-panel);
+    background: var(--surface-2);
+  }
+
+  .oauth-quota dt {
+    color: var(--muted);
+    font-size: 0.9em;
+  }
+
+  .oauth-quota dd {
+    margin: 0;
+    color: var(--text);
+    font-size: 0.9em;
+    overflow-wrap: anywhere;
+  }
+
+  .oauth-quota dd.is-muted {
+    color: var(--muted);
+  }
+
+  .oauth-quota dd.is-ok {
+    color: var(--ok);
+    font-weight: 600;
+  }
+
+  /* ── OAuth 打开时 BYOK 分区置灰 ──────────────────────────────── */
+  /* fieldset 包住整个 Section（见 `byok`），所以它是个普通块级盒，不参与
+     `.settings-fields` 的两列网格——不需要 `display:contents`。**刻意不用它**：
+     那会让 fieldset 在布局树里消失，而 Chromium 的 `fieldset[disabled]` 传播
+     依赖布局祖先，置灰可能整个失效（这是本功能的核心，不拿引擎行为赌）。
+     这里只把 UA 默认样式清掉。 */
+  .settings-fieldset {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    min-inline-size: 0;
+  }
+
+  .settings-fieldset[disabled] .field-input,
+  .settings-fieldset[disabled] .secret-eye {
+    opacity: 0.5;
+  }
+
+  .settings-fieldset[disabled] .field {
+    cursor: not-allowed;
+  }
+}

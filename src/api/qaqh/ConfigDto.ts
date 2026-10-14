@@ -16,7 +16,16 @@ baseUrl: string,
 /**
  * 该 endpoint 说的 wire：`openai` | `responses` | `anthropic` | `gemini`。
  */
-wire: string, maxTokens: number, 
+wire: string, 
+/**
+ * 该 endpoint 的**凭据来源**：`api_key`（BYOK，缺省）| `chatgpt_plan`（本机
+ * ChatGPT 套餐额度）。
+ *
+ * 显式声明而不是从「apiKey 是否为空」推导——隐式推导会把一个配置错误变成
+ * 「静默用了别的额度」。`chatgpt_plan` 只与 `responses` wire + 官方 base_url
+ * 配套；请求期的权威判定在 `qaqh-runtime` 的 `provider_for`。
+ */
+credential: string, maxTokens: number, 
 /**
  * 端点声明的上下文窗口——本地压缩的唯一分母（软阈值与硬 pre-flight 同源）。
  */

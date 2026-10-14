@@ -11,6 +11,7 @@
  */
 import type { SessionRunStatus } from "../api/qaqh/SessionRunStatus";
 import type { SidebarSession } from "../tabs/store";
+import type { ApprovalView } from "../lib/transport";
 import { STR } from "../lib/strings";
 
 export type PendingKind = "permission" | "ask" | "plan";
@@ -39,11 +40,22 @@ export function runStatusOf(session: Pick<SidebarSession, "status" | "busy">): S
   return session.busy === true ? "working" : "idle";
 }
 
-/** `status` → 待响应呈现;非待人态返回 null。 */
+/** `status` 或本地实时审批(fast path) → 待响应呈现;非待人态返回 null。 */
 export function pendingPresentation(
   session: Pick<SidebarSession, "title" | "status" | "busy">,
+  fastApproval?: Pick<ApprovalView, "kind"> | null,
 ): PendingPresentation | null {
   const title = session.title?.trim() || "该会话";
+  if (fastApproval != null) {
+    switch (fastApproval.kind) {
+      case "tool_permission":
+        return { kind: "permission", label: STR.pendingPermission, ariaLabel: `${title}:${STR.pendingPermission}`, phase: "pending" };
+      case "ask":
+        return { kind: "ask", label: STR.pendingAsk, ariaLabel: `${title}:${STR.pendingAsk}`, phase: "pending" };
+      case "plan":
+        return { kind: "plan", label: STR.pendingPlan, ariaLabel: `${title}:${STR.pendingPlan}`, phase: "pending" };
+    }
+  }
   switch (runStatusOf(session)) {
     case "waiting_permission":
       return { kind: "permission", label: STR.pendingPermission, ariaLabel: `${title}:${STR.pendingPermission}`, phase: "pending" };
@@ -62,6 +74,10 @@ export function pendingPresentation(
  * 待人态刻意**不**落进这里:那时卡片本身就是提示,再点一个圆点就是两个信号
  * 说同一件事,而且圆点还会和卡片抢右端的位置。
  */
-export function workingOnly(session: Pick<SidebarSession, "status" | "busy">): boolean {
+export function workingOnly(
+  session: Pick<SidebarSession, "status" | "busy">,
+  hasFastPending = false,
+): boolean {
+  if (hasFastPending) return false;
   return runStatusOf(session) === "working";
 }

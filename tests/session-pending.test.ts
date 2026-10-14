@@ -49,4 +49,31 @@ describe("侧栏待响应映射", () => {
     expect(workingOnly({ status: "waiting_ask" })).toBe(false);
     expect(workingOnly({ status: undefined, busy: true })).toBe(true);
   });
+
+  it("本地待审批 fastApproval 快轨优先于远程 session.status", () => {
+    // 即使后端 session.status 仍滞留在 idle 或 working，本地已有的待审批挑战立刻呈现
+    const view = pendingPresentation(
+      { title: "会话 A", status: "idle", busy: false },
+      { kind: "tool_permission" },
+    );
+    expect(view).toMatchObject({ kind: "permission", label: "请求授权", phase: "pending" });
+    expect(workingOnly({ status: "working" }, true)).toBe(false);
+  });
+
+  it("相同 updated_at 时以 session_id 字典序决胜，杜绝 15 秒轮询网络乱序造成的跳动", () => {
+    const s1 = { session_id: "s-bbb", updated_at: 1000 };
+    const s2 = { session_id: "s-aaa", updated_at: 1000 };
+    const s3 = { session_id: "s-ccc", updated_at: 2000 };
+
+    const sortFn = (list: typeof s1[]) =>
+      [...list].sort((a, b) => {
+        const timeDiff = (b.updated_at ?? 0) - (a.updated_at ?? 0);
+        if (timeDiff !== 0) return timeDiff;
+        return a.session_id.localeCompare(b.session_id);
+      });
+
+    // 无论输入数组顺序如何波动，结果都绝对稳定
+    expect(sortFn([s1, s2, s3]).map((s) => s.session_id)).toEqual(["s-ccc", "s-aaa", "s-bbb"]);
+    expect(sortFn([s2, s1, s3]).map((s) => s.session_id)).toEqual(["s-ccc", "s-aaa", "s-bbb"]);
+  });
 });

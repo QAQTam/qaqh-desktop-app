@@ -1,13 +1,16 @@
 import { For, type Component } from "solid-js";
+import IconKeyRound from "~icons/lucide/key-round";
 import IconMessageSquare from "~icons/lucide/message-square";
 import IconSettings from "~icons/lucide/settings";
 import IconWrench from "~icons/lucide/wrench";
 
-export type GlobalSection = "messages" | "tools" | "settings";
+export type GlobalSection = "messages" | "tools" | "oauth" | "settings";
 
+/** 标签用中文与其它项对齐；「接入」涵盖后续友商（不都是 OAuth），改词只改这里。 */
 const ITEMS = [
   { id: "messages", label: "消息", Icon: IconMessageSquare },
   { id: "tools", label: "工具", Icon: IconWrench },
+  { id: "oauth", label: "接入", Icon: IconKeyRound },
   { id: "settings", label: "设置", Icon: IconSettings },
 ] as const;
 

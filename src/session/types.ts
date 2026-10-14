@@ -10,6 +10,7 @@
  *   时)中间叙述 TextStep。
  */
 import type { TimelineEntry } from "../api/qaqh/TimelineEntry";
+import type { ReasoningKind } from "../api/qaqh/ReasoningKind";
 import type { TimelineToolDisplay } from "../api/qaqh/TimelineToolDisplay";
 import type { TimelineToolPermission } from "../api/qaqh/TimelineToolPermission";
 
@@ -61,6 +62,14 @@ export interface ThinkingStep {
   endedAt?: number;
   /** 完整思考文本,始终保留(spec §10.2)。 */
   text: string;
+  /**
+   * 思考类别(wire `TimelineBlock.reasoning_kind`)。订阅套餐路径只有 `summary`
+   * ——服务端给的**摘要**,不是模型原文(完整思考在 `encrypted_content` 里,客户端
+   * 拿不到)。标签决策见 `../turn/thinking-label`。
+   * 缺失 = 后端未标注(本字段引入前的历史),或本块只收到 delta、还没等到
+   * `block_opened`——两种都按「思考」显示,不猜。
+   */
+  reasoningKind?: ReasoningKind;
 }
 
 export interface TextStep {

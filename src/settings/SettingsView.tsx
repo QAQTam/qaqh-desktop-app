@@ -9,7 +9,8 @@
  *    清空不会生效(dto.rs:10-11),所以这些框清空即视作未改动。
  *  - MCP/LSP 只有读模型(ConfigDto:56-59 注明写模型另立),这里只读展示。
  *
- * BYOK 六字段与档案预设拆在 `byok/ProfileManager`;设备配对在 `PairingSection`;
+ * BYOK 六字段与档案预设拆在 `byok/Sections`(两个分区按导航顺序分别渲染);
+ * 设备配对在 `PairingSection`;
  * 左侧分区导航按 section id 跳转(长表单不再一滚到底)。
  */
 import { createEffect, createMemo, createSignal, For, onSettled, Show, type Component } from "solid-js";
@@ -50,7 +51,7 @@ import {
   setSubagent,
 } from "./store";
 import { Field, Section, Switch, TextInput } from "./controls";
-import { ProfileManager } from "./byok/ProfileManager";
+import { ByokSection, ProfilesSection } from "./byok/Sections";
 import { PairingSection } from "./PairingSection";
 import { AboutSection } from "./AboutSection";
 
@@ -139,10 +140,24 @@ export const SettingsView: Component = () => {
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
   };
 
+  /**
+   * 跳到某分区。**只滚 `.settings-body`**，不用 `scrollIntoView`：
+   * 后者会把**所有可滚动祖先**一起滚，包括 document / 外壳——于是整页连底栏
+   * 一起被向上顶起、窗口底部露出一块空白，左侧图标栏的首项也会被滚出视野
+   * （真机截图实证）。分区导航的语义是「在内容区内滚动」，不该动外层的壳。
+   */
   const jumpTo = (id: string): void => {
     setActiveSection(id);
     revealNavItem(id);
-    document.getElementById(id)?.scrollIntoView({ block: "start" });
+    const target = document.getElementById(id);
+    if (target == null) return;
+    const scroller = target.closest<HTMLElement>(".settings-body");
+    if (scroller == null) {
+      target.scrollIntoView({ block: "start" });
+      return;
+    }
+    const delta = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    scroller.scrollTo({ top: scroller.scrollTop + delta, behavior: "smooth" });
   };
 
   const syncActiveSection = (scroller: HTMLDivElement): void => {
@@ -205,7 +220,9 @@ export const SettingsView: Component = () => {
                   </For>
                 </nav>
                 <div class="settings-content">
-                  <ProfileManager />
+                  <ByokSection />
+
+                  <ProfilesSection />
 
                   <Section
                     id="section-permission"

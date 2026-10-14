@@ -22,6 +22,7 @@ import { STR } from "../lib/strings";
 import type { SidebarWorkspace } from "../tabs/store";
 import type { ComposerMetrics, PendingAttachment, SessionProfileView } from "../session/store";
 import { tailName } from "./identity";
+import { EffortCard } from "./EffortCard";
 
 export type SendBlockReason = "running" | "pending" | "offline" | "no-session" | null;
 
@@ -87,8 +88,25 @@ export const Composer: Component<{
   onRemoveAttachment?: (id: string) => void;
 }> = (props) => {
   let textarea: HTMLTextAreaElement | undefined;
-  const [openMenu, setOpenMenu] = createSignal<"profile" | "workspace" | "context" | null>(null);
+  const [openMenu, setOpenMenu] = createSignal<"profile" | "workspace" | "context" | "effort" | null>(null);
   const [submitting, setSubmitting] = createSignal(false);
+  const [stopping, setStopping] = createSignal(false);
+  createEffect(
+    () => props.running(),
+    (running) => {
+      if (!running) setStopping(false);
+    },
+  );
+
+  const stop = async (): Promise<void> => {
+    if (stopping()) return;
+    setStopping(true);
+    try {
+      await props.onStop();
+    } catch {
+      setStopping(false);
+    }
+  };
 
   const attachments = (): PendingAttachment[] => props.attachments?.() ?? [];
   /** 还在上传的附件不能发:命令里只允许出现已换回的 `ContentRef`。 */
@@ -250,6 +268,11 @@ export const Composer: Component<{
                 </div>
               )}
             </Show>
+            {/* 强度与模型（全局）：与 profile/workspace 共用一个菜单位，同时只开一个。 */}
+            <EffortCard
+              open={openMenu() === "effort"}
+              onToggle={() => setOpenMenu(openMenu() === "effort" ? null : "effort")}
+            />
             <Show when={props.onWorkspace != null}>
               <div class="composer-control-wrap">
                 <button
@@ -314,7 +337,14 @@ export const Composer: Component<{
                 </button>
               }
             >
-              <button type="button" class="icon-btn stop button-danger" aria-label={STR.stop} title={STR.stop} onClick={() => props.onStop()}>
+              <button
+                type="button"
+                class="icon-btn stop button-danger"
+                aria-label={stopping() ? "正在停止" : STR.stop}
+                title={stopping() ? "正在停止…" : STR.stop}
+                disabled={stopping()}
+                onClick={() => void stop()}
+              >
                 <IconSquare />
               </button>
             </Show>
@@ -341,49 +371,61 @@ export const Composer: Component<{
                   .sort(([a], [b]) => a.localeCompare(b));
               return (
                 <>
-                  <Show when={metrics().tokensPerSecond != null}>
-                    <span class="composer-identity-item" title="completion tokens ÷ 前端观察到的首末答案增量间隔；SSE 网络缓冲可能影响读数">
-                      <strong>{metrics().tokensPerSecond!.toFixed(1)}</strong> tok/s
-                    </span>
-                  </Show>
-                  <Show when={metrics().contextPercent != null}>
-                    <span class="composer-context-wrap">
-                      <button
-                        type="button"
-                        class="composer-context-trigger"
-                        aria-expanded={openMenu() === "context" ? "true" : "false"}
-                        title="上下文窗口：点开查看占用与压缩"
-                        onClick={() => setOpenMenu(openMenu() === "context" ? null : "context")}
-                      >
-                        上下文 <strong>{metrics().contextPercent!.toFixed(0)}%</strong>
-                      </button>
-                      <Show when={openMenu() === "context"}>
-                        <div class="composer-menu composer-context-menu" role="dialog" aria-label={STR.contextWindowTitle}>
-                          <div class="composer-context-head">
-                            <strong>{STR.contextWindowTitle}</strong>
-                            <span>{metrics().contextPercent!.toFixed(0)}%</span>
-                          </div>
-                          <span class="composer-context-bar" aria-hidden="true">
-                            <span style={{ width: `${Math.min(100, Math.max(0, metrics().contextPercent!))}%` }} />
-                          </span>
-                          <p class="composer-context-note">{STR.contextOccupied}</p>
-                          <div class="composer-context-breakdown">
-                            <strong>{STR.contextBreakdownPending}</strong>
-                            <small>{STR.contextBreakdownNote}</small>
-                          </div>
-                          <button
-                            type="button"
-                            class="composer-context-compact"
-                            disabled={props.running() || props.compactPhase?.() === "running"}
-                            title={props.running() ? STR.contextCompactDisabledRunning : STR.contextCompactAction}
-                            onClick={() => { props.onCompact?.(); setOpenMenu(null); }}
-                          >
-                            <IconArchive />{STR.contextCompactAction}
-                          </button>
+                  <span
+                    class={{
+                      "composer-identity-item": true,
+                      "is-live": metrics().isStreaming === true,
+                      "is-idle": metrics().tokensPerSecond == null && !metrics().isStreaming,
+                    }}
+                    title={
+                      metrics().isStreaming
+                        ? "实时吐字速率：基于流式增量滑动窗口实时测算"
+                        : metrics().tokensPerSecond != null
+                          ? "最近一轮完成速率：completion tokens ÷ 首末输出间隔"
+                          : "吐字速率：模型生成时将实时显示 (tok/s)"
+                    }
+                  >
+                    <Show when={metrics().isStreaming}>
+                      <span class="composer-live-dot" aria-hidden="true" />
+                    </Show>
+                    <strong>{metrics().tokensPerSecond != null ? metrics().tokensPerSecond!.toFixed(1) : "--"}</strong> tok/s
+                  </span>
+                  <span class="composer-context-wrap">
+                    <button
+                      type="button"
+                      class="composer-context-trigger"
+                      aria-expanded={openMenu() === "context" ? "true" : "false"}
+                      title="上下文窗口：点开查看占用与压缩"
+                      onClick={() => setOpenMenu(openMenu() === "context" ? null : "context")}
+                    >
+                      上下文 <strong>{metrics().contextPercent != null ? `${metrics().contextPercent!.toFixed(0)}%` : "0%"}</strong>
+                    </button>
+                    <Show when={openMenu() === "context"}>
+                      <div class="composer-menu composer-context-menu" role="dialog" aria-label={STR.contextWindowTitle}>
+                        <div class="composer-context-head">
+                          <strong>{STR.contextWindowTitle}</strong>
+                          <span>{metrics().contextPercent != null ? `${metrics().contextPercent!.toFixed(0)}%` : "0%"}</span>
                         </div>
-                      </Show>
-                    </span>
-                  </Show>
+                        <span class="composer-context-bar" aria-hidden="true">
+                          <span style={{ width: `${Math.min(100, Math.max(0, metrics().contextPercent ?? 0))}%` }} />
+                        </span>
+                        <p class="composer-context-note">{STR.contextOccupied}</p>
+                        <div class="composer-context-breakdown">
+                          <strong>{STR.contextBreakdownPending}</strong>
+                          <small>{STR.contextBreakdownNote}</small>
+                        </div>
+                        <button
+                          type="button"
+                          class="composer-context-compact"
+                          disabled={props.running() || props.compactPhase?.() === "running"}
+                          title={props.running() ? STR.contextCompactDisabledRunning : STR.contextCompactAction}
+                          onClick={() => { props.onCompact?.(); setOpenMenu(null); }}
+                        >
+                          <IconArchive />{STR.contextCompactAction}
+                        </button>
+                      </div>
+                    </Show>
+                  </span>
                   <Show when={metrics().cacheHitPercent != null}>
                     <span class="composer-identity-item" title="本轮 prompt cache 命中 token / 已报告的命中与未命中 token">
                       缓存命中 <strong>{metrics().cacheHitPercent!.toFixed(0)}%</strong>

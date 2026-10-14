@@ -33,8 +33,12 @@ export type ConfigPatchWire = Optionalize<Omit<ConfigPatch, "subagent">> & {
   subagent?: SubagentPatchWire;
 };
 
-/** 允许值来自 ConfigPatch::validate()(lib.rs:283-288);空串不在其中——别发。 */
-export const REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+/** 允许值来自 `ConfigPatch::validate()`;空串不在其中——别发。
+ *
+ *  与后端 `EFFORT_LADDER`(`qaqh-gate/src/types.rs`)同序。`ultra` 是最高档:
+ *  2026-10-14 起 `mutil-ai 0.6.0` 的 `ReasoningEffort` 已含 `Ultra`,所以这里
+ *  与后端可以一起放开;`max` 仍被接受(旧配置),但选择器不再列它。 */
+export const REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "ultra"] as const;
 /** BYOK 的四条 wire——没有 provider 目录可查,协议由用户直接声明。 */
 export const WIRE_PROTOCOLS = ["openai", "responses", "anthropic", "gemini"] as const;
 

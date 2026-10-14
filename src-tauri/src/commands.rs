@@ -55,12 +55,26 @@ const SERVICE_METHODS: &[&str] = &[
     // 该会话,不动全局 `active_profile`,所以它不在上面那批「会话无关」豁免里——
     // `service_requires_session` 会注入活动 seed,前端另传 seed 时以参数为准。
     "session.set_profile",
+    // 用户重命名会话标题(方案B):写 meta.title 并广播 TitleChanged(user)。
+    "session.rename",
     // 开发者控制台的内存探测面(daemon 侧 admin scope,service_methods.rs:126-128)。
     // 采集是 opt-in:`start` 之前 daemon 不采样,`snapshot` 只是读环形缓冲——所以
     // 这三个方法本身无副作用,放行不扩大写面。
     "diagnostics.memory.start",
     "diagnostics.memory.stop",
     "diagnostics.memory.snapshot",
+    // Sign in with ChatGPT（套餐用量，daemon 侧全部 admin_only）。
+    // 凭据留在 daemon 的 DPAPI 密文里；壳只转发方法名与拿回状态投影,
+    // 前端永远看不到 token。授权 URL 由前端交给 `open_external` 用系统浏览器打开
+    // （daemon 不 spawn 进程,也不内嵌 webview）。
+    "siwc.status",
+    "siwc.profiles",
+    "siwc.models",
+    "siwc.sign_in.start",
+    "siwc.sign_in.status",
+    "siwc.sign_in.cancel",
+    "siwc.profile.select",
+    "siwc.sign_out",
 ];
 
 /// 这些方法之外都要注入 active session_id(gateway 语义平移)。
@@ -93,6 +107,17 @@ fn service_requires_session(method: &str) -> bool {
             | "diagnostics.memory.start"
             | "diagnostics.memory.stop"
             | "diagnostics.memory.snapshot"
+            // siwc.* 同理豁免：ChatGPT 账户与套餐用量是 daemon 全局态,
+            // 与活动会话无关。注入会在零会话（引导页第一件事就是登录）时
+            // 直接报 `no_active_seed`,把登录入口彻底堵死。
+            | "siwc.status"
+            | "siwc.profiles"
+            | "siwc.models"
+            | "siwc.sign_in.start"
+            | "siwc.sign_in.status"
+            | "siwc.sign_in.cancel"
+            | "siwc.profile.select"
+            | "siwc.sign_out"
     )
 }
 
@@ -304,14 +329,18 @@ pub async fn send_message(
     ack_to_result(ack)
 }
 
-/// `(seed) → ack`。
+/// `(seed, turn_id?) → ack`。
 #[tauri::command]
-pub async fn cancel_turn(app: AppHandle, seed: String) -> Result<Value, String> {
+pub async fn cancel_turn(
+    app: AppHandle,
+    seed: String,
+    turn_id: Option<String>,
+) -> Result<Value, String> {
     let client = daemon::ensure_connected(&app).await?;
     let ack = client
         .send_command(
             Some(&seed),
-            RingingCommand::Conversation(ConversationCommand::ConversationCancel { turn_id: None }),
+            RingingCommand::Conversation(ConversationCommand::ConversationCancel { turn_id }),
             CommandOptions::default(),
         )
         .await

@@ -19,6 +19,7 @@ import IconX from "~icons/lucide/x";
 import { MessageSidebar } from "./MessageSidebar";
 import { GlobalNav, type GlobalSection } from "./GlobalNav";
 import { ToolsPage } from "./ToolsPage";
+import { OAuthPage } from "../oauth/OAuthPage";
 import {
   activeId,
   activeTab,
@@ -61,6 +62,7 @@ import { STR } from "../lib/strings";
 import { isTauriRuntime, listenHostDiagnostics, openExternalUrl, transport, tauriHost } from "../lib/transport";
 import { applyTheme, storedTheme } from "../lib/theme";
 import { toast, ToastHost } from "../ui/toast";
+import { DiffReviewDrawer } from "../diff/DiffReviewDrawer";
 import "../styles/app.css";
 
 const inTauri = isTauriRuntime();
@@ -68,7 +70,8 @@ const inTauri = isTauriRuntime();
 /** D1 兼容性失败详情(conn://incompatible);null = 正常。 */
 const [hostIncompatible, setHostIncompatible] = createSignal<Record<string, unknown> | null>(null);
 const [hostActionNote, setHostActionNote] = createSignal<string | null>(null);
-const [section, setSection] = createSignal<"messages" | "tools">("messages");
+/** 「设置」刻意不在这个信号里：它是浮层页（见 `settings/store`）。 */
+const [section, setSection] = createSignal<Exclude<GlobalSection, "settings">>("messages");
 const [emptyDraft, setEmptyDraft] = createSignal("");
 
 /** 一键停止旧 daemon(不静默杀:Busy 时给动作文案)→ 重启标签引导。 */
@@ -237,12 +240,26 @@ const App: Component = () => {
         }
       }
     };
+    // 全局右键菜单受控拦截（桌面端设计契约）：
+    // 彻底干掉浏览器原生的「重新加载 / 后退 / 前进 / 检查」网页右键菜单，防止用户误触刷新；
+    // 仅在文本输入区（input / textarea / contenteditable）放行原生剪切板编辑菜单。
+    const onContextMenu = (event: MouseEvent): void => {
+      const target = event.target as HTMLElement | null;
+      const isEditable = target?.matches?.("input, textarea, [contenteditable='true']")
+        || target?.closest?.("input, textarea, [contenteditable='true']") != null;
+      if (!isEditable) {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener("contextmenu", onContextMenu);
+
     window.addEventListener("keydown", onKey);
     // onSettled 作用域禁止 onCleanup(rc.13:CLEANUP_IN_FORBIDDEN_SCOPE)——
     // 返回清理函数,由 owner disposal 调用。
     return () => {
       clearInterval(poll);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("contextmenu", onContextMenu);
       window.removeEventListener("keydown", onKey);
       onClickCleanup?.();
       unlistenHost?.();
@@ -268,15 +285,15 @@ const App: Component = () => {
     if (tab == null) return "offline";
     if (tab.store.connection[0]() !== "connected") return "offline";
     if (tab.store.pending[0]().length > 0) return "pending";
-    // 运行态读 reducer 维护的计数:遍历 turns 会让输入区订阅每一个回合,
+    // 运行态读 reducer 维护的计数与乐观发送态:遍历 turns 会让输入区订阅每一个回合,
     // 于是每帧流式写入都重算一次发送按钮(高吞吐下的卡顿放大器)。
-    if (tab.store.state[0].runningTurns > 0 || tab.store.activity[0]() === "working") return "running";
+    if (tab.store.isSending[0]() || tab.store.state[0].runningTurns > 0 || tab.store.activity[0]() === "working") return "running";
     return null;
   };
 
   const runningNow = (tab: Tab | null = active()): boolean => {
     if (tab == null) return false;
-    return tab.store.state[0].runningTurns > 0 || tab.store.activity[0]() === "working";
+    return tab.store.isSending[0]() || tab.store.state[0].runningTurns > 0 || tab.store.activity[0]() === "working";
   };
 
   const connectionNotice = (): string | null => {
@@ -354,7 +371,7 @@ const App: Component = () => {
           </button>
         </Show>
         <Show when={!inTauri}><div class="titlebar-brand">QAQH</div></Show>
-        <div class="titlebar-session-title">{settingsOpen() ? "设置" : section() === "tools" ? "工具" : "消息"}</div>
+        <div class="titlebar-session-title">{settingsOpen() ? "设置" : section() === "tools" ? "工具" : section() === "oauth" ? "接入" : (isStartup() ? "消息" : (activeTab()?.store.title[0]() || "消息"))}</div>
       </header>
       <GlobalNav
         active={settingsOpen() ? "settings" : section()}
@@ -367,6 +384,7 @@ const App: Component = () => {
           <MessageSidebar
             sessions={sessionCatalog()}
             activeSeed={isStartup() ? null : (activeTab()?.seed ?? null)}
+            activePending={() => activeTab()?.store.pending[0]() ?? []}
             onSelect={(seed) => { setSection("messages"); void openSession(seed); }}
             onCreate={() => { setSection("messages"); openStartup(); }}
             creating={creating()}
@@ -472,6 +490,7 @@ const App: Component = () => {
             </Show>
           </Show>
           <Show when={section() === "tools"}><ToolsPage /></Show>
+          <Show when={section() === "oauth"}><OAuthPage /></Show>
         </main>
         </div>
           </>
@@ -543,6 +562,7 @@ const App: Component = () => {
           </section>
         </div>
       </Show>
+      <DiffReviewDrawer />
       <ToastHost />
     </div>
   );

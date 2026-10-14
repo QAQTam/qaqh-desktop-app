@@ -14,6 +14,7 @@ import { withViewTransition } from "../ui/viewTransition";
 import { transport } from "../lib/transport";
 import { STR } from "../lib/strings";
 import { SessionStore } from "../session/store";
+import { overlayLocalTitles } from "../session/title-override";
 import { toast } from "../ui/toast";
 import type { ContentRef } from "../api/qaqh/ContentRef";
 
@@ -57,6 +58,35 @@ export type SidebarSession = {
 export type SidebarWorkspace = { id: string; title: string; path: string; order: number; missing_dir?: boolean };
 const [sessionCatalog, setSessionCatalog] = createSignal<SidebarSession[]>([]);
 const [workspaceCatalog, setWorkspaceCatalog] = createSignal<SidebarWorkspace[]>([]);
+const DRAFT_PREFIX = "qaqh.draft.";
+const WORKSPACE_CWD_KEY = "qaqh.workspace.cwd";
+const TITLE_PREFIX = "qaqh.session.title.";
+
+function readStoredDrafts(): Record<string, string> {
+  const result: Record<string, string> = {};
+  try {
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(DRAFT_PREFIX)) {
+        const seed = key.slice(DRAFT_PREFIX.length);
+        const val = localStorage.getItem(key);
+        if (val) result[seed] = val;
+      }
+    }
+  } catch {
+    // 隐私模式或无 storage 时退回空对象
+  }
+  return result;
+}
+
+function readStoredCwd(): string | null {
+  try {
+    return localStorage.getItem(WORKSPACE_CWD_KEY);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 新建会话的目标工作区(`cwd`),null = 未指定 → daemon 默认(未分组)。
  *
@@ -64,8 +94,72 @@ const [workspaceCatalog, setWorkspaceCatalog] = createSignal<SidebarWorkspace[]>
  * `workspace.set`,是另一条路径。选择保持粘性——建完不重置,输入区一直显示
  * 当前目标,免得连开几个会话时猜「这次会落哪」。
  */
-const [newSessionCwd, setNewSessionCwd] = createSignal<string | null>(null);
-const [drafts, setDrafts] = createStore<Record<string, string>>({});
+const [newSessionCwd, setNewSessionCwdSignal] = createSignal<string | null>(readStoredCwd());
+const setNewSessionCwd = (value: string | null): void => {
+  setNewSessionCwdSignal(value);
+  try {
+    if (value != null) localStorage.setItem(WORKSPACE_CWD_KEY, value);
+    else localStorage.removeItem(WORKSPACE_CWD_KEY);
+  } catch {}
+};
+
+const [drafts, setDrafts] = createStore<Record<string, string>>(readStoredDrafts());
+
+/**
+ * 方案A:后端尚未生成标题时的本地重命名覆盖(存储 + 侧栏投影)。
+ * 优先级语义(用户拍板):后端标题恒优先,本地覆盖只在 title_changed 到达前
+ * 有效;后端持久化是方案B(Rust `session.rename`),见
+ * docs/session-rename-persistence-plan.md。
+ */
+function readStoredTitles(): Record<string, string> {
+  const result: Record<string, string> = {};
+  try {
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(TITLE_PREFIX)) {
+        const seed = key.slice(TITLE_PREFIX.length);
+        const val = localStorage.getItem(key);
+        if (val) result[seed] = val;
+      }
+    }
+  } catch {
+    // 隐私模式或无 storage 时退回空对象
+  }
+  return result;
+}
+
+const [localTitles, setLocalTitles] = createSignal<Record<string, string>>(readStoredTitles());
+const setLocalTitleOf = (seed: string, value: string): void => {
+  setLocalTitles((map) => {
+    const next = { ...map };
+    if (value.trim()) next[seed] = value;
+    else delete next[seed];
+    return next;
+  });
+  try {
+    if (value.trim()) localStorage.setItem(`${TITLE_PREFIX}${seed}`, value);
+    else localStorage.removeItem(`${TITLE_PREFIX}${seed}`);
+  } catch {}
+};
+export const localTitleOf = (seed: string): string => localTitles()[seed] ?? "";
+
+/**
+ * 本地重命名落两处:覆盖表(localStorage 持久化)+ 侧栏目录
+ * (仅当后端还没给标题;后端标题到达时 onSessionTitleChanged 会清掉覆盖)。
+ */
+export const renameLocalSession = (seed: string, title: string): void => {
+  setLocalTitleOf(seed, title);
+  setSessionCatalog((list) => list.map((item) =>
+    String(item.session_id) === seed && !String(item.title ?? "").trim() ? { ...item, title } : item,
+  ));
+};
+
+/** 侧栏目录投影:后端标题优先,后端缺标题时叠本地覆盖;顺带清理陈旧覆盖条目。 */
+function applySessionList(list: SidebarSession[]): void {
+  const { merged, staleSeeds } = overlayLocalTitles(list, localTitles());
+  setSessionCatalog(merged);
+  for (const seed of staleSeeds) setLocalTitleOf(seed, "");
+}
 /** 焦点令牌:切标签/新建时 +1,Composer 响应后聚焦。 */
 const [focusToken, setFocusToken] = createSignal(0);
 /** Serialize singleton-host attach calls; rapid tab changes must settle on the latest tab. */
@@ -100,6 +194,10 @@ export const activeTab = (): Tab | null => tabs().find((tab) => tab.id === activ
 export const draftOf = (seed: string): string => drafts[seed] ?? "";
 export const setDraftOf = (seed: string, value: string): void => {
   setDrafts((draft) => { draft[seed] = value; });
+  try {
+    if (value.trim()) localStorage.setItem(`${DRAFT_PREFIX}${seed}`, value);
+    else localStorage.removeItem(`${DRAFT_PREFIX}${seed}`);
+  } catch {}
 };
 
 export function openStartup(): void {
@@ -123,6 +221,8 @@ function addTab(seed: string): Tab {
   // 会话的即时刷新,后台会话仍靠 pollSessions 的列表重拉兜底。
   tab.store.onSessionsChanged = () => { void pollSessions(); };
   tab.store.onSessionTitleChanged = (title) => {
+    // 后端标题已生成(title_changed):本地覆盖退场(后端优先语义)。
+    if (title.trim()) setLocalTitleOf(seed, "");
     setSessionCatalog((list) => list.map((item) =>
       String(item.session_id) === seed ? { ...item, title } : item,
     ));
@@ -201,7 +301,7 @@ export async function createSessionWithCwd(cwd?: string | null): Promise<string>
   for (let attempt = 0; attempt < 20; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 300));
     const list = await transport.sessions();
-    setSessionCatalog(list as SidebarSession[]);
+    applySessionList(list as SidebarSession[]);
     const fresh = list.map((item) => String(item.session_id)).find((id) => !before.has(id));
     if (fresh != null) {
       return fresh;
@@ -366,7 +466,7 @@ async function pullSessions(): Promise<void> {
       transport.sessions() as Promise<SidebarSession[]>,
       transport.rpc<SidebarWorkspace[]>("workspace.list").catch(() => []),
     ]);
-    setSessionCatalog(list);
+    applySessionList(list);
     setWorkspaceCatalog(workspaces);
     for (const item of list) {
       const tab = tabs().find((candidate) => candidate.seed === String(item.session_id));
@@ -397,7 +497,7 @@ export async function boot(): Promise<void> {
     transport.sessions() as Promise<SidebarSession[]>,
     transport.rpc<SidebarWorkspace[]>("workspace.list").catch(() => []),
   ]);
-  setSessionCatalog(list);
+  applySessionList(list);
   setWorkspaceCatalog(workspaces);
   const live = list.find((item) => !item.archived && item.busy) ?? list.find((item) => !item.archived) ?? list[0];
   if (live?.session_id == null) {

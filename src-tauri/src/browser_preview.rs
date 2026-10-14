@@ -111,7 +111,8 @@ async fn invoke(
             }
             "cancel_turn" => {
                 let seed = required_string(&args, "seed")?;
-                commands::cancel_turn(app.clone(), seed).await
+                let turn_id = args.get("turnId").and_then(Value::as_str).map(str::to_owned);
+                commands::cancel_turn(app.clone(), seed, turn_id).await
             }
             "create_session" => {
                 let cwd = args.get("cwd").and_then(Value::as_str).map(str::to_owned);

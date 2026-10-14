@@ -542,3 +542,44 @@ describe("参数流式行数估算 tool_estimated", () => {
     expect(firstTool(state).streamEstimate).toBeNull();
   });
 });
+
+describe("思考类别:套餐摘要 vs 模型原文", () => {
+  test("block_opened 的 reasoning_kind 落到 ThinkingStep", () => {
+    const state = emptySession();
+    applyEntry(state, entry(1, "t1", { type: "turn_opened", user_text: "hi" }));
+    applyEntry(state, entry(2, "t1", { type: "block_opened", block: { block_id: "r1", kind: "reasoning", state: "open", reasoning_kind: "summary" } }));
+    applyEntry(state, entry(3, "t1", { type: "text_delta", block_id: "r1", delta: "先查资料。" }));
+    const step = state.turns["t1"]!.steps[0]!;
+    expect(step).toMatchObject({ kind: "thinking", reasoningKind: "summary", text: "先查资料。" });
+  });
+
+  test("快照先落地、实时事件后到:类别补写进既有块,首个类别不被覆盖", () => {
+    const state = emptySession();
+    // 本字段引入前的后端:同一个块没有类别槽。
+    applySnapshot(state, { snapshot: { turns: [rawTurn("t1", 0, "q", "running", [
+      { block_id: "r1", kind: "reasoning", state: "open", text: "思考" },
+    ])] } });
+    const step = state.turns["#0"]!.steps[0]!;
+    if (step.kind !== "thinking") throw new Error("expect thinking");
+    expect(step.reasoningKind).toBeUndefined();
+
+    // 同一个块随后的实时 block_opened 带类别 → 补写。
+    applyEntry(state, entry(2, "t1", { type: "block_opened", block: { block_id: "r1", kind: "reasoning", reasoning_kind: "summary" } }));
+    expect(step.reasoningKind).toBe("summary");
+
+    // 再发一次别的类别:不覆盖(gate 层的规则是「首个可展示类别胜出」)。
+    applyEntry(state, entry(3, "t1", { type: "block_opened", block: { block_id: "r1", kind: "reasoning", reasoning_kind: "text" } }));
+    expect(step.reasoningKind).toBe("summary");
+  });
+
+  test("快照重建保留类别(timeline 丢失后从 messages.jsonl 重建的路径)", () => {
+    const state = emptySession();
+    applySnapshot(state, { snapshot: { turns: [rawTurn("t1", 0, "q", "completed", [
+      { block_id: "r1", kind: "reasoning", state: "sealed", text: "先查资料。", reasoning_kind: "summary" },
+    ])] } });
+    const step = state.turns["#0"]!.steps[0]!;
+    if (step.kind !== "thinking") throw new Error("expect thinking");
+    expect(step.reasoningKind).toBe("summary");
+    expect(step.text).toBe("先查资料。");
+  });
+});

@@ -14,7 +14,7 @@
 import { createSignal, createStore } from "solid-js";
 import { transport, tauriHost, type ApprovalView, type StreamHandlers, type TimelineStatusWire, type TodoItemWire } from "../lib/transport";
 import { now } from "../lib/time";
-import { applyEntry, applySnapshot, emptySession, prependPage } from "./reducer";
+import { applyEntry, applySnapshot, emptySession, forceSealTurn, prependPage } from "./reducer";
 import { evictForWindow, fillGapHeights } from "./pagination";
 import type { SessionState, TimelineEntryWire, Wait } from "./types";
 import { normalizeActivity, projectionActions, readProjection, type SessionActivity } from "./projection";
@@ -54,10 +54,28 @@ function attachmentName(path: string): string {
 export interface ComposerMetrics {
   /** Last-turn completion throughput; tokens come from provider usage when available. */
   tokensPerSecond: number | null;
+  /** 是否当前正处于模型增量流式生成中。 */
+  isStreaming?: boolean;
   contextPercent: number | null;
   cacheHitPercent: number | null;
   /** 上一轮端点回的原生 usage 整数项(`credit` 等未建模字段);没有就是空对象。 */
   extras: Record<string, number>;
+}
+
+/** 吞吐滑动窗口长度:窗口内的模型增量决定瞬时 tok/s。 */
+const STREAM_WINDOW_MS = 1200;
+/** 超过这个间隔没有新的模型增量,就不算「正在吐字」(工具执行、子进程、网络停顿)。 */
+const STREAM_IDLE_MS = 1200;
+
+/** 轻量、快速、零外部依赖的 token 粗估器 (按 CJK / 拉丁字符特性平滑加权)。 */
+export function estimateTokens(text: string): number {
+  if (!text) return 0;
+  const cjkMatches = text.match(/[\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af]/g);
+  const cjkCount = cjkMatches ? cjkMatches.length : 0;
+  const nonCjkLen = text.length - cjkCount;
+  const cjkTokens = cjkCount * 0.75;
+  const nonCjkTokens = nonCjkLen / 3.8;
+  return Math.max(1, Math.round(cjkTokens + nonCjkTokens));
 }
 
 /**
@@ -117,13 +135,15 @@ export class SessionStore {
 
   connection = createSignal<ConnectionKind>("reconnecting");
   activity = createSignal<SessionActivity | null>(null);
-  composerMetrics = createSignal<ComposerMetrics>({ tokensPerSecond: null, contextPercent: null, cacheHitPercent: null, extras: {} });
+  composerMetrics = createSignal<ComposerMetrics>({ tokensPerSecond: null, isStreaming: false, contextPercent: null, cacheHitPercent: null, extras: {} });
   composerProfile = createSignal<SessionProfileView>({ selected: null, activeProfile: null, effective: null, model: null, catalog: [] });
   title = createSignal<string | null>(null);
   pending = createSignal<ApprovalView[]>([]);
   todos = createSignal<TodoItemWire[]>([]);
   loadError = createSignal(false);
   hasNewReply = createSignal(false);
+  /** 乐观发送中状态：点击发送即刻置 true 消除时差空窗，首个事件到达或结束时置 false。 */
+  isSending = createSignal(false);
   /** 「此前已压缩」分隔锚点回合 key;null = 渲染在顶部。 */
   compactedAfter = createSignal<string | null>(null);
   /** 压缩进行态与流式摘要(见 `CompactState`);idle 时 HUD 只显示百分比。 */
@@ -163,15 +183,28 @@ export class SessionStore {
   private rafHandle: number | null = null;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private lastResnapshotAt = 0;
+  private resnapshotTimer: number | null = null;
   private waitFrom: { kind: Wait["kind"]; at: number } | null = null;
   private lastTurnCount: number | null = null;
   private disposed = false;
   private todoRefresh: Promise<void> | null = null;
   private todoRefreshPending = false;
   private activeTurnStartedAt: number | null = null;
-  private activeAnswerBlockIds = new Set<string>();
+  /**
+   * 本回合**正在产出模型 token** 的块 id:text(答案)与 reasoning(思考)都算。
+   * 工具块不在里面——它吃的是宿主/子进程的钟,不是模型的吐字速率。
+   */
+  private activeModelBlockIds = new Set<string>();
   private activeOutputStartedAt: number | null = null;
   private activeOutputEndedAt: number | null = null;
+  /** 最后一次模型增量到达时刻;超过 `STREAM_IDLE_MS` 没动静即视为没在吐字。 */
+  private lastModelDeltaAt: number | null = null;
+  /**
+   * 本回合「模型确实在产出」的累计毫秒。相邻增量间隔在 `STREAM_IDLE_MS` 内才累加,
+   * 工具执行与网络停顿的那段被跳过——`updateComposerUsage` 的速率分母用它,
+   * 否则「已完成检查 30 秒再写两行」会被算成模型很慢。
+   */
+  private activeOutputActiveMs = 0;
   private contextRefreshId = 0;
   /** 分母:最近一次 `config.load` 读到的窗口。 */
   private contextLength: number | null = null;
@@ -182,6 +215,10 @@ export class SessionStore {
   private profileRefreshId = 0;
   /** 分子:上一轮服务端 usage 的 `prompt_tokens`,即真正发出去的上下文。 */
   private measuredContextTokens: number | null = null;
+  /** 流式吐字滑动窗口(最近 1200ms 内到达的 delta token 采样)。 */
+  private activeStreamWindow: Array<{ at: number; tokens: number }> = [];
+  /** 当前轮次当前流式输出的累积估算 token 数。 */
+  private activeStreamTokens = 0;
 
   constructor(seed: string) {
     this.seed = seed;
@@ -239,6 +276,10 @@ export class SessionStore {
     this.pendingFragments.clear();
     if (this.flushTimer != null) clearTimeout(this.flushTimer);
     this.flushTimer = null;
+    if (this.resnapshotTimer != null) {
+      clearTimeout(this.resnapshotTimer);
+      this.resnapshotTimer = null;
+    }
   }
 
   retry(): void {
@@ -327,6 +368,7 @@ export class SessionStore {
 
   private onTimelineEntry(entry: TimelineEntryWire): void {
     if (typeof entry?.timeline_seq !== "number" || !entry.turn_id) return;
+    if (this.isSending[0]()) this.isSending[1](false);
     // 「已经知道到哪」要同时看已提交的水位和已消费的 seq:delta 进缓冲时不写水位。
     const known = Math.max(this.stateGet.watermark, this.consumedSeq);
     if (entry.timeline_seq <= known) return; // 重复(重放)直接丢弃(幂等)
@@ -337,14 +379,33 @@ export class SessionStore {
       return;
     }
     const event = entry.event;
-    if (event.type === "block_opened" && event.block.kind === "text") {
-      this.activeAnswerBlockIds.add(event.block.block_id);
-    } else if (event.type === "text_delta" && this.activeAnswerBlockIds.has(event.block_id)) {
+    if (event.type === "block_opened" && (event.block.kind === "text" || event.block.kind === "reasoning")) {
+      this.activeModelBlockIds.add(event.block.block_id);
+    } else if (event.type === "text_delta" && this.activeModelBlockIds.has(event.block_id)) {
       const at = now();
       this.activeOutputStartedAt ??= at;
       this.activeOutputEndedAt = at;
+      // 只累加「模型在产出」的区间;工具执行/网络停顿那段不计入速率分母。
+      if (this.lastModelDeltaAt != null && at - this.lastModelDeltaAt <= STREAM_IDLE_MS) {
+        this.activeOutputActiveMs += at - this.lastModelDeltaAt;
+      }
+      this.lastModelDeltaAt = at;
+      const tokens = estimateTokens(event.delta);
+      this.activeStreamTokens += tokens;
+      this.activeStreamWindow.push({ at, tokens });
+      const cutoff = at - STREAM_WINDOW_MS;
+      while (this.activeStreamWindow.length > 0 && this.activeStreamWindow[0]!.at < cutoff) {
+        this.activeStreamWindow.shift();
+      }
+    } else if (event.type === "block_opened" && event.block.kind === "tool") {
+      // 工具块一开就停表:模型不再产出,而 tool_progress 不是吐字。少了这一步,
+      // 无进度流的工具(read/write/grep)期间根本不会有 flush 去调 updateLiveMetrics,
+      // 脉冲点会一直亮着谎报「正在吐字」。
+      this.composerMetrics[1]((current) => (current.isStreaming ? { ...current, isStreaming: false } : current));
     } else if (event.type === "turn_sealed") {
-      this.activeAnswerBlockIds.clear();
+      this.activeModelBlockIds.clear();
+      this.activeStreamWindow = [];
+      this.composerMetrics[1]((current) => ({ ...current, isStreaming: false }));
     }
     if (event.type === "text_delta" || event.type === "tool_progress") {
       // 高频增量按「种类 + 块」归并到帧末再写一次(spec §6/§10.2):每帧至多一次
@@ -385,6 +446,7 @@ export class SessionStore {
       this.flushTimer = null;
       if (this.pendingFragments.size === 0) return;
       this.mutate((draft) => this.flushFragmentsInto(draft));
+      this.updateLiveMetrics();
     };
     this.rafHandle = requestAnimationFrame(commit);
     // 窗口被遮挡时 Chromium 可暂停 rAF;后台仍提交数据,不无限积累片段。
@@ -432,7 +494,22 @@ export class SessionStore {
 
   private scheduleResnapshot(): void {
     const at = Date.now();
-    if (at - this.lastResnapshotAt < RESNAPSHOT_DEBOUNCE_MS) return;
+    const elapsed = at - this.lastResnapshotAt;
+    if (elapsed < RESNAPSHOT_DEBOUNCE_MS) {
+      // 处于防抖期内：挂尾随定时器，确保防抖窗口一过立即补拉一次，绝不丢失被缺口跳过的事件！
+      if (this.resnapshotTimer == null) {
+        this.resnapshotTimer = window.setTimeout(() => {
+          this.resnapshotTimer = null;
+          this.lastResnapshotAt = Date.now();
+          void this.resnapshot();
+        }, RESNAPSHOT_DEBOUNCE_MS - elapsed);
+      }
+      return;
+    }
+    if (this.resnapshotTimer != null) {
+      clearTimeout(this.resnapshotTimer);
+      this.resnapshotTimer = null;
+    }
     this.lastResnapshotAt = at;
     void this.resnapshot();
   }
@@ -459,17 +536,41 @@ export class SessionStore {
     if (!delta.channel || !delta.kind) return;
     if (delta.channel === "conversation") {
       if (delta.kind === "turn_started") {
+        this.isSending[1](false);
         this.activeTurnStartedAt = now();
-        this.activeAnswerBlockIds.clear();
+        this.activeModelBlockIds.clear();
         this.activeOutputStartedAt = null;
         this.activeOutputEndedAt = null;
+        this.lastModelDeltaAt = null;
+        this.activeOutputActiveMs = 0;
+        this.activeStreamWindow = [];
+        this.activeStreamTokens = 0;
+        this.composerMetrics[1]((current) => ({ ...current, isStreaming: false }));
       }
-      if (delta.kind === "assistant_block_sealed" || delta.kind === "turn_finished") {
+      if (delta.kind === "assistant_block_sealed" || delta.kind === "turn_finished" || delta.kind === "turn_interrupted") {
         const usage = delta.body.usage as UsageInfo | null | undefined;
         if (usage != null) this.updateComposerUsage(usage);
-        if (delta.kind === "turn_finished") {
+        if (delta.kind === "turn_finished" || delta.kind === "turn_interrupted") {
+          this.isSending[1](false);
           this.activeTurnStartedAt = null;
-          this.activeAnswerBlockIds.clear();
+          this.activeModelBlockIds.clear();
+          this.activeStreamWindow = [];
+          this.activeStreamTokens = 0;
+          this.composerMetrics[1]((current) => ({ ...current, isStreaming: false }));
+
+          // 双流防御自愈：V2 投影流已确认回合终态，若 Timeline 流未推 turn_sealed 或因缺口被丢弃，
+          // 本地立刻强制收口 running 回合，杜绝假死，并补拉快照对齐权威落盘细节！
+          const body = delta.body;
+          const turnId = typeof body.turn_id === "string" ? body.turn_id : null;
+          const terminal = typeof body.terminal === "string"
+            ? body.terminal
+            : delta.kind === "turn_interrupted" ? "cancelled" : undefined;
+          const error = body.error as { message?: string } | null | undefined;
+          this.mutate((draft) => {
+            forceSealTurn(draft, turnId, terminal, error);
+          });
+          void this.resnapshot();
+
           // 换 profile 的重载就在 turn 边界生效,回合结束正好把新配置与新选择读回来。
           void this.refreshConfigView();
           void this.refreshProfile();
@@ -521,12 +622,79 @@ export class SessionStore {
     }
   }
 
+  /**
+   * 增量流式生成时的实时测算（只在模型真在产出时被调用）：
+   * 1. tok/s：取滑动窗口（最近 `STREAM_WINDOW_MS`）内的 token 增量算瞬时速率，
+   *    EMA 滤波消除分块抖动；窗口太薄就保留上一个值，不拿总时长凑一个假数；
+   * 2. 上下文：基准 prompt_tokens + 当前轮次已生成的 token，动态反映增长。
+   */
+  private updateLiveMetrics(): void {
+    if (this.activeModelBlockIds.size === 0 || this.activeOutputStartedAt == null) return;
+    const at = now();
+    // 距最后一次模型增量已超过 `STREAM_IDLE_MS` = 现在没在吐字(工具在执行、子进程在跑、
+    // 网络卡住)。这里必须**停表**并把脉冲点灭掉:继续往下走会落到旧的回退分支,
+    // 用「累计 token ÷ 从首个增量算起的总时长」出数,而那个分母含工具墙钟——
+    // 表现为工具一跑,速率就一路衰减,像模型突然变慢。
+    if (this.lastModelDeltaAt == null || at - this.lastModelDeltaAt > STREAM_IDLE_MS) {
+      this.composerMetrics[1]((current) => (current.isStreaming ? { ...current, isStreaming: false } : current));
+      return;
+    }
+    const cutoff = at - STREAM_WINDOW_MS;
+    while (this.activeStreamWindow.length > 0 && this.activeStreamWindow[0]!.at < cutoff) {
+      this.activeStreamWindow.shift();
+    }
+
+    let liveTps: number | null = null;
+    if (this.activeStreamWindow.length >= 2) {
+      const first = this.activeStreamWindow[0]!;
+      const last = this.activeStreamWindow[this.activeStreamWindow.length - 1]!;
+      const windowDuration = (last.at - first.at) / 1000;
+      if (windowDuration >= 0.15) {
+        let windowTokens = 0;
+        for (let i = 1; i < this.activeStreamWindow.length; i += 1) {
+          windowTokens += this.activeStreamWindow[i]!.tokens;
+        }
+        liveTps = windowTokens / windowDuration;
+      }
+    }
+
+    if (liveTps != null && Number.isFinite(liveTps)) {
+      this.composerMetrics[1]((current) => ({
+        ...current,
+        tokensPerSecond: current.tokensPerSecond == null
+          ? liveTps!
+          : current.tokensPerSecond * 0.35 + liveTps! * 0.65,
+        isStreaming: true,
+      }));
+    } else {
+      this.composerMetrics[1]((current) => ({
+        ...current,
+        isStreaming: true,
+      }));
+    }
+
+    if (this.contextLength != null && this.contextLength > 0) {
+      const baseTokens = this.measuredContextTokens ?? 0;
+      const currentTotal = baseTokens + this.activeStreamTokens;
+      this.composerMetrics[1]((current) => ({
+        ...current,
+        contextPercent: Math.min(100, (currentTotal / this.contextLength!) * 100),
+      }));
+    }
+  }
+
   private updateComposerUsage(usage: UsageInfo): void {
-    // Measure from the first to last streamed answer fragment, excluding tool and
-    // user-wait time. Fall back to the turn interval for replay/history-only paths.
-    const durationMs = this.activeOutputStartedAt != null && this.activeOutputEndedAt != null
-      ? this.activeOutputEndedAt - this.activeOutputStartedAt
-      : this.activeTurnStartedAt == null ? null : now() - this.activeTurnStartedAt;
+    this.activeStreamWindow = [];
+    this.activeStreamTokens = 0;
+    // 速率分母只算「模型确实在产出」的累计区间（见 activeOutputActiveMs 的累加规则）。
+    // 下面那条首末差一直自称 "excluding tool and user-wait time"，其实没排除：
+    // 中间跑一个 30 秒的 exec，40 tok/s 能被压成 2 tok/s。首末差只留给
+    // 没观测到任何增量的回放/纯历史路径当兜底。
+    const durationMs = this.activeOutputActiveMs > 0
+      ? this.activeOutputActiveMs
+      : this.activeOutputStartedAt != null && this.activeOutputEndedAt != null
+        ? this.activeOutputEndedAt - this.activeOutputStartedAt
+        : this.activeTurnStartedAt == null ? null : now() - this.activeTurnStartedAt;
     const elapsedSeconds = durationMs == null ? null : Math.max(0.001, durationMs / 1_000);
     // 服务端 usage 的 prompt_tokens 就是这一轮真正发出去的上下文(系统提示 + 工具
     // schema + 历史),直接当占用真值;它只统计到本轮 prompt,答案那部分要等下一轮
@@ -540,17 +708,18 @@ export class SessionStore {
         : cacheHitPercent(usage) ?? current.cacheHitPercent,
       // 反映上一轮为准:端点这轮没报 extras 就清空,不留陈旧的芯片。
       extras: usage.extras ?? {},
+      isStreaming: false,
     }));
     this.publishContextPercent();
   }
 
-  /** 百分比只有一个出口:分子是真值,没有真值(首轮之前)就不显示。 */
+  /** 百分比常驻:只要配置窗口长度有效,首轮之前也显示 0% 基础占位,杜绝跳动。 */
   private publishContextPercent(): void {
-    const tokens = this.measuredContextTokens;
+    const tokens = this.measuredContextTokens ?? 0;
     const length = this.contextLength;
     this.composerMetrics[1]((current) => ({
       ...current,
-      contextPercent: tokens == null || length == null || !Number.isFinite(length) || length <= 0
+      contextPercent: length == null || !Number.isFinite(length) || length <= 0
         ? null
         : Math.min(100, (tokens / length) * 100),
     }));
@@ -708,14 +877,20 @@ export class SessionStore {
   async sendMessageWithAttachments(text: string, attachments: ContentRef[] = []): Promise<void> {
     // 发送即收掉滞留的压缩终态卡(failed 保留);退场定时器随后空转,无需专撤。
     this.compact[1]((current) => current.phase === "done" || current.phase === "skipped" ? { phase: "idle" } : current);
-    await transport.command("conversation", {
-      channel: "conversation",
-      type: "conversation_send_message",
-      text,
-      images: [],
-      as_system: false,
-      attachments,
-    }, this.seed);
+    this.isSending[1](true);
+    try {
+      await transport.command("conversation", {
+        channel: "conversation",
+        type: "conversation_send_message",
+        text,
+        images: [],
+        as_system: false,
+        attachments,
+      }, this.seed);
+    } catch (error) {
+      this.isSending[1](false);
+      throw error;
+    }
   }
 
   async sendMessage(text: string): Promise<void> {
@@ -784,7 +959,10 @@ export class SessionStore {
   }
 
   async cancelTurn(): Promise<void> {
-    await transport.command("conversation", { channel: "conversation", type: "conversation_cancel" }, this.seed);
+    const activeKey = this.stateGet.activeTurnKey;
+    const turn = activeKey != null ? this.stateGet.turns[activeKey] : null;
+    const turnId = turn?.id ?? null;
+    await transport.command("conversation", { channel: "conversation", type: "conversation_cancel", turn_id: turnId }, this.seed);
   }
 
   /**

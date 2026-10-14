@@ -12,6 +12,7 @@
  */
 import { emptySession, type SessionState, type Slot, type Step, type TimelineEntryWire, type ToolDisplay, type ToolOutput, type ToolPermission, type ToolStatus, type Turn } from "./types";
 import type { TimelineSnapshot } from "../api/qaqh/TimelineSnapshot";
+import type { ReasoningKind } from "../api/qaqh/ReasoningKind";
 import type { TimelineTool } from "../api/qaqh/TimelineTool";
 import type { TimelineTurn } from "../api/qaqh/TimelineTurn";
 import { deepEqual } from "../lib/equal";
@@ -73,10 +74,19 @@ function findStep(turn: Turn, blockId: string): Step | undefined {
   return turn.steps.find((step) => step.id === blockId);
 }
 
-function ensureReasoning(turn: Turn, blockId: string, seq: number): Step {
+function ensureReasoning(turn: Turn, blockId: string, seq: number, reasoningKind?: ReasoningKind): Step {
   const existing = findStep(turn, blockId);
-  if (existing) return existing;
-  const step = { kind: "thinking" as const, id: blockId, seq, startedAt: now(), text: "" };
+  if (existing) {
+    // 类别可能晚于首帧 delta 到达(text_delta 先建了块,block_opened 才带类别),
+    // 也可能一块内重复下发。只在**当前未知**时补写,绝不覆盖已有值:
+    // 首个类别胜出,和 gate 层的合并规则(StreamState::push_reasoning)一致。
+    if (existing.kind === "thinking" && reasoningKind != null && existing.reasoningKind == null) {
+      existing.reasoningKind = reasoningKind;
+    }
+    return existing;
+  }
+  const step: Extract<Step, { kind: "thinking" }> = { kind: "thinking", id: blockId, seq, startedAt: now(), text: "" };
+  if (reasoningKind != null) step.reasoningKind = reasoningKind;
   insertBySeq(turn, step);
   return step;
 }
@@ -251,7 +261,7 @@ export function applyEntry(draft: SessionState, entry: TimelineEntryWire): Sessi
       const block = event.block;
       if (!block.block_id) break;
       if (block.kind === "reasoning") {
-        ensureReasoning(turn, block.block_id, seq);
+        ensureReasoning(turn, block.block_id, seq, block.reasoning_kind ?? undefined);
         demoteAnswerIfStale(turn);
       } else if (block.kind === "tool") {
         const step = ensureTool(turn, block.block_id, seq, block.tool ?? undefined);
@@ -464,6 +474,8 @@ export function buildTurn(raw: TimelineTurn, ts: number): Turn {
       const text = block.text ?? "";
       if (kind === "reasoning") {
         const step: Extract<Step, { kind: "thinking" }> = { kind: "thinking", id: blockId, seq: 0, text };
+        // 快照重建也要带上类别:重建路径(后端 timeline 丢失)保住它,前端就不能丢。
+        if (block.reasoning_kind != null) step.reasoningKind = block.reasoning_kind;
         // 快照里已 sealed 的思考块标为已结束;运行中的保持 open(供思考链恢复)。
         if (state === "sealed") step.endedAt = ts;
         turn.steps.push(step);
@@ -736,6 +748,45 @@ function findOpenReasoning(draft: SessionState): { id: string; turnKey: string }
     }
   }
   return null;
+}
+
+/**
+ * 双流兜底收口（防御性自愈）：
+ * 当 V2 投影流已收到 TurnFinished / TurnInterrupted 权威事实，但 Timeline 流的
+ * turn_sealed 漏推或因网络/缺口丢弃时，就地收口处于 running 态的未密封回合，
+ * 避免界面卡在“运行中”假死，免去用户按 F5 强制刷新的痛苦。
+ */
+export function forceSealTurn(
+  draft: SessionState,
+  turnId?: string | null,
+  terminal?: string | null,
+  error?: { message?: string } | null,
+): boolean {
+  let changed = false;
+  for (const slot of draft.slots) {
+    if (slot.kind !== "turn") continue;
+    const turn = draft.turns[slot.key];
+    if (turn == null || turn.status !== "running") continue;
+    if (turnId != null && turn.id !== turnId) continue;
+    turn.status = terminal === "failed" ? "failed" : terminal === "cancelled" ? "aborted" : "done";
+    if (turn.status === "failed" && error?.message) {
+      turn.error = { message: error.message };
+    }
+    // 提升最后一个文本块为 answer（如果尚未提升）
+    if (turn.answer == null) {
+      for (let i = turn.steps.length - 1; i >= 0; i -= 1) {
+        const step = turn.steps[i]!;
+        if (step.kind === "text") {
+          turn.answerStepId = step.id;
+          turn.answer = { text: step.text, startedAt: turn.workStartedAt };
+          break;
+        }
+      }
+    }
+    changed = true;
+  }
+  if (changed) recomputeDerived(draft);
+  return changed;
 }
 
 export { emptySession };

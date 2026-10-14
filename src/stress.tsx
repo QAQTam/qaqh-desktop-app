@@ -19,6 +19,7 @@ import { GlobalNav } from "./app/GlobalNav";
 import { MessageSidebar } from "./app/MessageSidebar";
 import IconArrowLeft from "~icons/lucide/arrow-left";
 import { ToolsPage } from "./app/ToolsPage";
+import { OAuthPage } from "./oauth/OAuthPage";
 import { SettingsView } from "./settings/SettingsView";
 import { simMemorySnapshot } from "./lib/memwatch-sim";
 import { openDevConsole } from "./lib/devmode";
@@ -37,11 +38,11 @@ import "./styles/app.css";
 /** 会话总回合数(权威 total_turns)。 */
 const previewParams = new URLSearchParams(window.location.search);
 const previewView = previewParams.get("view");
-const isVisualPreview = previewView === "messages" || previewView === "settings" || previewView === "approval" || previewView === "tools";
+const isVisualPreview = previewView === "messages" || previewView === "settings" || previewView === "approval" || previewView === "tools" || previewView === "oauth";
 /** 侧栏待响应卡的预览开关(§6.2):见 `previewSessions` 的注释。 */
 const pendingPreview = previewParams.get("pending") === "1";
-const [currentView, setCurrentView] = createSignal<"messages" | "tools" | "settings">(
-  previewView === "settings" || previewView === "tools" ? previewView : "messages",
+const [currentView, setCurrentView] = createSignal<"messages" | "tools" | "oauth" | "settings">(
+  previewView === "settings" || previewView === "tools" || previewView === "oauth" ? previewView : "messages",
 );
 const TOTAL = isVisualPreview ? 4 : 200;
 /** 假页水位;实时条目序号从 liveSeq 往后走。 */
@@ -162,7 +163,8 @@ function rawTurnAt(index: number): Record<string, unknown> {
   const rand = mulberry32(9_000 + index);
   const withHeader = index % 2 === 0;
   const blocks: Array<Record<string, unknown>> = [
-    { block_id: `r${index}`, kind: "reasoning", state: "sealed", text: prose(rand, 1_400 + Math.floor(rand() * 900)) },
+    // 思考两档都在预览里出现:偶数回合 = 套餐路径(服务端**摘要**),奇数回合 = 完整思考。
+    { block_id: `r${index}`, kind: "reasoning", state: "sealed", text: prose(rand, 1_400 + Math.floor(rand() * 900)), reasoning_kind: index % 2 === 0 ? "summary" : "text" },
     {
       block_id: `e${index}`,
       kind: "tool",
@@ -299,6 +301,7 @@ if (isVisualPreview) {
     model: "qaqh-visual-preview",
     baseUrl: "https://api.example.test/v1",
     wire: "responses",
+    credential: "api_key",
     maxTokens: 8192,
     contextLength: 128000,
     reasoningEffort: "medium",
@@ -1463,7 +1466,7 @@ declare global {
 }
 
 const bootStart = performance.now();
-const navigatePreview = (next: "messages" | "tools" | "settings"): void => {
+const navigatePreview = (next: "messages" | "tools" | "oauth" | "settings"): void => {
   setCurrentView(next);
   if (next === "settings") void reloadSettings();
   if (next === "messages" && previewView === "settings") void store.resnapshot();
@@ -1479,7 +1482,7 @@ render(
           </button>
         </Show>
         <span class="titlebar-brand">QAQH</span>
-        <span class="titlebar-session-title">{currentView() === "settings" ? "设置" : currentView() === "tools" ? "工具" : "消息"}</span>
+        <span class="titlebar-session-title">{currentView() === "settings" ? "设置" : currentView() === "tools" ? "工具" : currentView() === "oauth" ? "接入" : "消息"}</span>
       </header>
       <GlobalNav active={currentView()} onNavigate={navigatePreview} />
       <div class={currentView() === "settings" ? "workspace workspace-settings" : currentView() === "messages" ? "workspace workspace-messages" : "workspace"}>
@@ -1500,7 +1503,8 @@ render(
             {/* Keep the shared stress metrics target available in this shell-only fixture. */}
             <div id="messages" hidden />
           </Show>
-          <Show when={currentView() !== "tools"}>
+          <Show when={currentView() === "oauth"}><OAuthPage /></Show>
+          <Show when={currentView() === "messages"}>
             <div class="session-column" id={`panel-${previewActiveTab().id}`} role="region" aria-label="当前会话">
               <SessionView tab={previewActiveTab()} />
               <Show when={previewActiveTab().store.pending[0]().length > 0}>

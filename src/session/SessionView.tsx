@@ -13,6 +13,7 @@ import IconArrowDown from "~icons/lucide/arrow-down";
 import { TurnView } from "../turn/TurnView";
 import { anchorScrollTop, clampPlaceholderHeight, EVICT_SCREENS, shouldLoadOlder, TURN_WINDOW } from "../session/pagination";
 import { STR } from "../lib/strings";
+import { SessionHeader } from "./SessionHeader";
 import type { SessionStore, CompactState } from "../session/store";
 import { gapHeight, type Slot, type Wait } from "../session/types";
 import type { Tab } from "../tabs/store";
@@ -300,6 +301,7 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
 
   return (
     <div id="session">
+      <SessionHeader tab={props.tab} />
       <div
         id="messages"
         ref={scroller}

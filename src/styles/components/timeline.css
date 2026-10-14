@@ -25,16 +25,93 @@
     position: relative; min-height: 0;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr);
+    grid-template-rows: 40px minmax(0, 1fr) auto;
   }
   #messages {
-    grid-column: 1; grid-row: 1;
+    grid-column: 1; grid-row: 2;
     overflow-y: auto; overflow-x: hidden;
     overflow-anchor: auto;
     /* Both 10px scrollbar gutters are part of the shared content inset. */
     padding: var(--space-4) calc(var(--content-gutter) - 10px) var(--space-6);
     scrollbar-gutter: stable both-edges;
   }
+
+  /* ── 吸顶会话标题栏 (SessionHeader) ─────────────────────────────────── */
+  .session-header {
+    grid-column: 1; grid-row: 1;
+    display: flex; align-items: center; justify-content: space-between;
+    min-height: 40px; height: 40px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    user-select: none;
+    z-index: 5;
+    flex-shrink: 0;
+  }
+  .session-header-lead {
+    display: flex; align-items: center; gap: 8px;
+    min-width: 0; flex: 1;
+    position: relative;
+  }
+  .session-header-folder-icon {
+    display: grid; place-items: center; flex: none;
+    width: 20px; height: 20px;
+    color: var(--muted);
+  }
+  .session-header-folder-icon svg { width: 16px; height: 16px; }
+  .session-header-title {
+    font-size: var(--fs-sm); font-weight: 600;
+    color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    cursor: default;
+    border-radius: var(--r-sm);
+    padding: 2px 4px;
+    transition: background var(--dur-fast) var(--ease);
+  }
+  .session-header-title:hover {
+    background: var(--surface-2);
+  }
+  .session-header-rename-input {
+    font-size: var(--fs-sm); font-weight: 600; font-family: inherit;
+    color: var(--text); background: var(--bg);
+    border: 1px solid var(--focus-ring); border-radius: var(--r-sm);
+    padding: 2px 6px; height: 26px;
+    min-width: 160px; max-width: 480px;
+    outline: none;
+  }
+  .session-header-menu-wrap {
+    position: relative; display: flex; align-items: center;
+  }
+  .session-header-more-btn {
+    display: grid; place-items: center; flex: none;
+    width: 24px; height: 24px; border-radius: var(--r-sm);
+    color: var(--muted); background: transparent;
+    cursor: pointer;
+    transition: all var(--dur-fast) var(--ease);
+  }
+  .session-header-more-btn:hover, .session-header-more-btn.active {
+    color: var(--text); background: var(--surface-2);
+  }
+  .session-header-more-btn svg { width: 15px; height: 15px; }
+  .session-header-dropdown-menu {
+    position: absolute; left: 0; top: calc(100% + 4px);
+    z-index: 50; display: grid; gap: 2px;
+    min-width: 160px; padding: 6px;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-panel);
+    background: var(--surface); box-shadow: var(--shadow-panel);
+  }
+  .session-header-menu-item {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; padding: 6px 8px;
+    border-radius: var(--r-sm);
+    color: var(--text); font-size: var(--fs-xs);
+    cursor: pointer; text-align: left;
+    transition: background var(--dur-fast) var(--ease);
+  }
+  .session-header-menu-item:hover {
+    background: var(--surface-2);
+  }
+  .session-header-menu-item svg { width: 14px; height: 14px; color: var(--muted); }
   .turn-navigator {
     position: absolute; z-index: 4; left: 8px; top: 50%; transform: translateY(-50%);
     display: flex; flex-direction: column; align-items: center; gap: 2px;

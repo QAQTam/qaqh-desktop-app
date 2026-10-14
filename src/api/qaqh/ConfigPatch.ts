@@ -17,7 +17,14 @@ export type ConfigPatch = {
 /**
  * 主密钥：仅用户显式输入新值时 Some；掩码 `"****"`/空串 = 保持现值。
  */
-apiKey: string | null, model: string | null, baseUrl: string | null, wire: string | null, maxTokens: number | null, contextLength: number | null, reasoningEffort: string | null, 
+apiKey: string | null, model: string | null, baseUrl: string | null, wire: string | null, 
+/**
+ * 凭据来源：`api_key` | `chatgpt_plan`。缺失 = 不动（K3）。
+ *
+ * 值域在 [`ConfigPatch::validate`] 收口；这里刻意**不**给「未知值退化成
+ * api_key」的兜底——静默改变额度来源比报错难查得多。
+ */
+credential: string | null, maxTokens: number | null, contextLength: number | null, reasoningEffort: string | null, 
 /**
  * 值域 `[0,1]`；`0` = 关闭自动压缩。
  */

@@ -14,6 +14,7 @@ import IconClipboardList from "~icons/lucide/clipboard-list";
 import IconCircleHelp from "~icons/lucide/circle-help";
 import IconShieldAlert from "~icons/lucide/shield-alert";
 import type { SidebarSession } from "../tabs/store";
+import type { ApprovalView } from "../lib/transport";
 import { pendingPresentation, type PendingKind } from "./session-pending";
 
 /** 跑马灯线速度(px/s)。匀速而不是固定时长:文案长短只改变一圈用时,不改变速度。 */
@@ -31,7 +32,7 @@ const KIND_ICON = {
   plan: IconClipboardList,
 } as const;
 
-export const SessionPendingCard: Component<{ session: SidebarSession }> = (props) => {
+export const SessionPendingCard: Component<{ session: SidebarSession; fastApproval?: ApprovalView | null }> = (props) => {
   const [kind, setKind] = createSignal<PendingKind | null>(null);
   const [label, setLabel] = createSignal("");
   const [phase, setPhase] = createSignal<Phase>("in");
@@ -75,7 +76,7 @@ export const SessionPendingCard: Component<{ session: SidebarSession }> = (props
 
   // 状态驱动:进入待人 → 播入场;离开待人 → 播离场(离场播完才卸载)。
   createEffect(
-    () => pendingPresentation(props.session),
+    () => pendingPresentation(props.session, props.fastApproval),
     (next) => {
       if (next != null) {
         setKind(next.kind);

@@ -1,10 +1,11 @@
-import { createSignal, For, Show, type Component } from "solid-js";
+import { createMemo, createSignal, For, Show, type Component } from "solid-js";
 import IconChevronDown from "~icons/lucide/chevron-down";
 import IconFolder from "~icons/lucide/folder";
 import IconMessageSquare from "~icons/lucide/message-square";
 import IconMoreHorizontal from "~icons/lucide/more-horizontal";
 import IconPlus from "~icons/lucide/plus";
 import { STR } from "../lib/strings";
+import type { ApprovalView } from "../lib/transport";
 import { sessionCatalog, workspaceCatalog, type SidebarSession, type SidebarWorkspace } from "../tabs/store";
 import { SessionPendingCard } from "./SessionPendingCard";
 import { pendingPresentation, workingOnly } from "./session-pending";
@@ -14,6 +15,16 @@ const pathName = (path: string | null | undefined): string => {
   return value.split(/[\\/]/).filter(Boolean).at(-1) ?? "未命名工作区";
 };
 
+const WORKSPACE_COLLAPSED_KEY = "qaqh.sidebar.collapsed";
+
+function readStoredCollapsed(): Set<string> {
+  try {
+    const raw = localStorage.getItem(WORKSPACE_COLLAPSED_KEY);
+    if (raw) return new Set(JSON.parse(raw));
+  } catch {}
+  return new Set();
+}
+
 const sessionName = (session: SidebarSession): string =>
   session.title?.trim() || `会话 ${session.session_id.slice(0, 8)}`;
 
@@ -22,6 +33,8 @@ export const MessageSidebar: Component<{
   sessions?: SidebarSession[];
   workspaces?: SidebarWorkspace[];
   activeSeed?: string | null;
+  /** 活动会话当前的即时待办列表(fast path,无需等待 15s 轮询)。 */
+  activePending?: () => ApprovalView[];
   onCreate?: () => void;
   creating?: boolean;
   canCreate?: boolean;
@@ -30,24 +43,54 @@ export const MessageSidebar: Component<{
   /** 移出到未分组(`workspace.detach`)。 */
   onDetach?: (seed: string) => void;
 }> = (props) => {
-  const [collapsed, setCollapsed] = createSignal<Set<string>>(new Set());
+  const [collapsed, setCollapsedSignal] = createSignal<Set<string>>(readStoredCollapsed());
+  const setCollapsed = (next: Set<string>): void => {
+    setCollapsedSignal(next);
+    try {
+      localStorage.setItem(WORKSPACE_COLLAPSED_KEY, JSON.stringify([...next]));
+    } catch {}
+  };
   /** 展开行菜单的会话 seed(null = 全部收起);同时只开一个。 */
   const [menuSeed, setMenuSeed] = createSignal<string | null>(null);
   const allSessions = () => props.sessions ?? sessionCatalog();
   const allWorkspaces = () => props.workspaces ?? workspaceCatalog();
-  const groups = () => {
-    const workspaces = allWorkspaces();
+
+  const groups = createMemo(() => {
+    // 稳定排序工作区：order 升序，次级按 title 字典序
+    const workspaces = [...allWorkspaces()].sort((a, b) => {
+      const ord = (a.order ?? 0) - (b.order ?? 0);
+      if (ord !== 0) return ord;
+      return (a.title || "").localeCompare(b.title || "");
+    });
     const sessions = allSessions().filter((item) => !item.archived);
+
+    // 同一分组内会话的绝对确定性排序：主键 updated_at 降序，决胜键 session_id 字典序
+    // 杜绝相等时间戳在 15s 轮询时由于后端返回数组随机顺序造成的抽搐跳动。
+    const sortSessions = (list: SidebarSession[]): SidebarSession[] =>
+      [...list].sort((a, b) => {
+        const timeDiff = (b.updated_at ?? 0) - (a.updated_at ?? 0);
+        if (timeDiff !== 0) return timeDiff;
+        return a.session_id.localeCompare(b.session_id);
+      });
+
     const grouped = workspaces.map((workspace) => ({
       id: workspace.id,
       title: workspace.title || pathName(workspace.path),
       path: workspace.path,
-      sessions: sessions.filter((session) => session.workspace_id === workspace.id),
+      sessions: sortSessions(sessions.filter((session) => session.workspace_id === workspace.id)),
     }));
     const ungrouped = sessions.filter((session) => !session.workspace_id || !workspaces.some((workspace) => workspace.id === session.workspace_id));
-    if (ungrouped.length > 0) grouped.push({ id: "__ungrouped", title: "未分组", path: "", sessions: ungrouped });
+    if (ungrouped.length > 0) {
+      grouped.push({
+        id: "__ungrouped",
+        title: "未分组",
+        path: "",
+        sessions: sortSessions(ungrouped),
+      });
+    }
     return grouped.filter((group) => group.sessions.length > 0);
-  };
+  });
+
   const toggle = (id: string): void => {
     const next = new Set(collapsed());
     if (next.has(id)) next.delete(id);
@@ -85,20 +128,31 @@ export const MessageSidebar: Component<{
               </button>
               <Show when={!collapsed().has(group().id)}>
                 <div class="message-workspace-sessions">
-                  <For each={[...group().sessions].sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0))} keyed={(session) => session.session_id}>{(session) => {
+                  <For each={group().sessions} keyed={(session) => session.session_id}>{(session) => {
                     const active = () => props.activeSeed === session().session_id;
                     const menuOpen = () => menuSeed() === session().session_id;
                     // 归属看「名录里真有这个工作区」,而不是 workspace_id 非空:
                     // 工作区被删后 id 仍留在卡片上,那种会话显示在未分组里,
                     // 再给它「移出」就成了无意义动作。
                     const grouped = () => allWorkspaces().some((workspace) => workspace.id === session().workspace_id);
+                    // 活动会话的待审批快轨 (Fast path):若是当前会话且内存已有待审批挑战，优先取第一项
+                    const fastApproval = () => (active() ? props.activePending?.()[0] ?? null : null);
                     // 待人响应:整行让位给弹出卡(卡体 pointer-events:none,点击仍落到会话按钮)。
-                    const pending = () => pendingPresentation(session());
+                    const pending = () => pendingPresentation(session(), fastApproval());
+                    const isWorking = () => workingOnly(session(), pending() != null);
                     return (
                       <>
-                        <div class={{ "message-session-row": true, active: active() }}>
+                        <div
+                          class={{ "message-session-row": true, active: active() }}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            if (props.onMove != null && allWorkspaces().length > 0) {
+                              setMenuSeed(session().session_id);
+                            }
+                          }}
+                        >
                           <button
-                            class={{ "message-session-item": true, active: active(), running: workingOnly(session()) }}
+                            class={{ "message-session-item": true, active: active(), running: isWorking() }}
                             type="button"
                             aria-current={active() ? "page" : undefined}
                             // 待响应时把状态挂到按钮的可访问名上:卡体是
@@ -109,11 +163,11 @@ export const MessageSidebar: Component<{
                           >
                             <IconMessageSquare />
                             <span class="message-session-title">{sessionName(session())}</span>
-                            <Show when={workingOnly(session())}><i class="message-session-running" aria-label={STR.running} /></Show>
+                            <Show when={isWorking()}><i class="message-session-running" aria-label={STR.running} /></Show>
                             {/* 常驻挂载,不用 <Show> 包:状态一离开待人,父级若把组件
                                 从树上摘掉,slide-out 就永远没机会播(卡片会瞬间消失,
                                 而不是「原路滑回去」)。进出场由卡内相位机自己管。 */}
-                            <SessionPendingCard session={session()} />
+                            <SessionPendingCard session={session()} fastApproval={fastApproval()} />
                           </button>
                           <Show when={props.onMove != null && allWorkspaces().length > 0}>
                             <button

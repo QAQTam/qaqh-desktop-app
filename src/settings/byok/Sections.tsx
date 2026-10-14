@@ -1,10 +1,17 @@
 /**
- * BYOK 档案管理器:六字段(端点/协议/密钥/模型/单回复上限/上下文窗口)+
- * 预设模板 + 命名档案切换。后端语义(config-api 契约):
- *  - `config.save` 的 Merge Patch 写的是**当前激活档案**,落盘即广播热载,
- *    切模型无需重启 daemon——所以「填字段 → 保存」就是完整的切换流程;
- *  - `profile.apply` 整段换激活档案(有未保存草稿时 store 会拒绝);
- *  - 密钥读回永远是掩码 `"****"`:留空 = 保持现值,填新值 = 覆盖。
+ * BYOK 设置的两个分区：**模型与端点(BYOK)** 与 **档案预设**。
+ *
+ * 拆成两个组件而不是一个（原 `ProfileManager`）：导航里的分区顺序是
+ * `模型与端点 → OAuth → 档案预设`，而 `OAuth` 分区要插在两者之间。若两者由
+ * 同一个组件渲染，DOM 顺序就是 `模型与端点 → 档案预设 → OAuth`——与导航顺序
+ * 不一致，于是点击「OAuth」会滚过「档案预设」，滚动同步还会把高亮算到错的分区上。
+ * 「DOM 顺序 == NAV 顺序」是那套滚动跟随逻辑的隐含前提，这里把它补上。
+ *
+ * 后端语义（config-api 契约）：
+ *  - `config.save` 的 Merge Patch 写的是**当前激活档案**，落盘即广播热载，
+ *    切模型无需重启 daemon——所以「填字段 → 保存」就是完整的切换流程；
+ *  - `profile.apply` 整段换激活档案（有未保存草稿时 store 会拒绝）；
+ *  - 密钥读回永远是掩码 `"****"`：留空 = 保持现值，填新值 = 覆盖。
  */
 import { createMemo, createSignal, For, Show, type Component } from "solid-js";
 import IconEye from "~icons/lucide/eye";
@@ -14,6 +21,7 @@ import { toast } from "../../ui/toast";
 import { MASK, WIRE_PROTOCOLS, toInt } from "../patch";
 import { applyProfile, busy, deleteProfile, draft, saveProfileAs, setField } from "../store";
 import { Field, Section, TextInput } from "../controls";
+import { isOauthMode } from "../../oauth/mode";
 
 /** 预设模板:预填 endpoint + wire(与后端 FIRST_RUN_CONFIG 的 DeepSeek 示例一致);
  *  model 各家变动频繁,留空让用户填,不硬编码会过期的 id。 */
@@ -29,14 +37,17 @@ const PRESET_TEMPLATES = [
   { id: "custom", label: "自定义", baseUrl: "", wire: "openai" },
 ] as const;
 
-export const ProfileManager: Component = () => {
+const secretPlaceholder = (masked: string): string =>
+  masked === MASK ? "已配置(留空保持不变)" : "未配置";
+
+/** OAuth（套餐）模式下 wire/endpoint 由那个模式接管，所以本分区的输入置灰。 */
+const oauthOn = (): boolean => isOauthMode(draft());
+
+export const ByokSection: Component = () => {
   const [showKey, setShowKey] = createSignal(false);
   const [newKey, setNewKey] = createSignal("");
-  const [profileName, setProfileName] = createSignal("");
 
   const config = () => draft()!;
-  const secretPlaceholder = (masked: string): string =>
-    masked === MASK ? "已配置(留空保持不变)" : "未配置";
 
   /** 当前值可能不在后端允许词表里(旧配置留下的),补进选项免得下拉替用户改了值。 */
   const effortOptions = createMemo(() => {
@@ -55,11 +66,16 @@ export const ProfileManager: Component = () => {
   };
 
   return (
-    <>
+    /* `fieldset[disabled]` 原生禁用全部后代控件（含 select 与按钮），比逐个传
+       disabled 少一圈维护。它包住整个 Section，所以是个普通块级盒、不参与
+       `.settings-fields` 的两列网格（**不要**改成 `display:contents`：那会让
+       fieldset 在布局树里消失，而 Chromium 的置灰传播依赖布局祖先）。 */
+    <fieldset class="settings-fieldset" disabled={oauthOn()}>
       <Section
         id="section-byok"
         title="模型与端点(BYOK)"
         desc={STR.settingsByokDesc}
+        aside={oauthOn() ? "当前处于 OAuth 状态，请到「接入」页关闭 OAuth 开关" : undefined}
       >
         <Field label={STR.settingsTemplate} wide hint={STR.settingsTemplateHint}>
           <select
@@ -152,54 +168,69 @@ export const ProfileManager: Component = () => {
           />
         </Field>
       </Section>
+    </fieldset>
+  );
+};
 
-      <Section
-        id="section-profiles"
-        title="档案预设"
-        desc="把当前的六字段配置存成命名档案,随时一键切换(切换会整段覆盖草稿,有未保存改动时先保存)。"
-      >
-        <div class="profile-list">
-          <For each={config().profiles}>
-            {(name) => (
-              <div class={`profile-row${name === config().activeProfile ? " active" : ""}`}>
-                <span class="profile-name">{name}</span>
-                <Show when={name === config().activeProfile}>
-                  <span class="profile-active-tag">使用中</span>
-                </Show>
-                <button type="button" class="ghost-mini" disabled={busy()} onClick={() => void applyProfile(name)}>
-                  切换
-                </button>
-                <button
-                  type="button"
-                  class="ghost-mini is-danger button-danger"
-                  disabled={busy() || name === config().activeProfile}
-                  onClick={() => void deleteProfile(name)}
-                >
-                  删除
-                </button>
-              </div>
-            )}
-          </For>
+export const ProfilesSection: Component = () => {
+  const [profileName, setProfileName] = createSignal("");
+  const config = () => draft()!;
+
+  return (
+    <Section
+      id="section-profiles"
+      title="档案预设"
+      desc="把当前的六字段配置存成命名档案,随时一键切换(切换会整段覆盖草稿,有未保存改动时先保存)。"
+      /* 切档案会整段重写激活配置、**包含 credential**——OAuth 模式下点它等于
+         把刚打开的模式静默切回 BYOK，所以在那种状态下把三个动作都禁掉。 */
+      aside={oauthOn() ? "OAuth 模式下请先到「接入」页关闭开关" : undefined}
+    >
+      <div class="profile-list">
+        <For each={config().profiles}>
+          {(name) => (
+            <div class={`profile-row${name === config().activeProfile ? " active" : ""}`}>
+              <span class="profile-name">{name}</span>
+              <Show when={name === config().activeProfile}>
+                <span class="profile-active-tag">使用中</span>
+              </Show>
+              <button
+                type="button"
+                class="ghost-mini"
+                disabled={busy() || oauthOn()}
+                onClick={() => void applyProfile(name)}
+              >
+                切换
+              </button>
+              <button
+                type="button"
+                class="ghost-mini is-danger button-danger"
+                disabled={busy() || oauthOn() || name === config().activeProfile}
+                onClick={() => void deleteProfile(name)}
+              >
+                删除
+              </button>
+            </div>
+          )}
+        </For>
+      </div>
+      <Field label="把当前配置存为" wide>
+        <div class="profile-create">
+          <TextInput value={profileName()} onInput={setProfileName} placeholder="档案名" />
+          <button
+            type="button"
+            class="ghost-mini"
+            disabled={busy() || oauthOn() || profileName().trim() === ""}
+            onClick={() => {
+              const name = profileName().trim();
+              if (name === "") return;
+              setProfileName("");
+              void saveProfileAs(name);
+            }}
+          >
+            保存
+          </button>
         </div>
-        <Field label="把当前配置存为" wide>
-          <div class="profile-create">
-            <TextInput value={profileName()} onInput={setProfileName} placeholder="档案名" />
-            <button
-              type="button"
-              class="ghost-mini"
-              disabled={busy() || profileName().trim() === ""}
-              onClick={() => {
-                const name = profileName().trim();
-                if (name === "") return;
-                setProfileName("");
-                void saveProfileAs(name);
-              }}
-            >
-              保存
-            </button>
-          </div>
-        </Field>
-      </Section>
-    </>
+      </Field>
+    </Section>
   );
 };

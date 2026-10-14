@@ -31,6 +31,9 @@
 @import "./components/dev-console.css";
 @import "./components/feedback.css";
 @import "./components/deliverables.css";
+@import "./components/siwc.css";
+@import "./components/oauth.css";
+@import "./components/effort.css";
 
 /* 6. 主题预设 */
 @import "./themes/macos-liquid-glass.css";

@@ -24,6 +24,7 @@ const baseConfig = (): ConfigDto => ({
   model: "ox-alpha-free",
   baseUrl: "https://opencode.ai/zen/go/v1",
   wire: "openai",
+  credential: "api_key",
   maxTokens: 96000,
   contextLength: 1000000,
   reasoningEffort: "max",

@@ -24,6 +24,9 @@ export const STR = {
   prepare: "准备中",
   done: "完成",
   thinking: "思考",
+  /** 思考标签第二档:套餐路径拿到的是服务端**摘要**,不能与模型原文同名。 */
+  thinkingSummary: "思考摘要",
+  thinkingSummaryTitle: "订阅套餐只回传服务端的思考摘要:完整思考由服务端加密保存,客户端拿不到原文",
   toolCallsAndThinking: (tools: number, thinkings: number) => {
     const seg: string[] = [];
     if (tools > 0) seg.push(`${tools} 次工具调用`);

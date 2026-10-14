@@ -69,7 +69,8 @@ export class TauriTransport implements TransportBackend {
       return ack;
     }
     if (channel === "conversation" && type === "conversation_cancel") {
-      const ack = await invoke<Ack>("cancel_turn", { seed: sessionId ?? this.requireSeed("cancel_turn") });
+      const turnId = typeof command.turn_id === "string" ? command.turn_id : null;
+      const ack = await invoke<Ack>("cancel_turn", { seed: sessionId ?? this.requireSeed("cancel_turn"), turnId });
       if (ack.status === "rejected") throw rejectAck(ack);
       return ack;
     }

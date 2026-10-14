@@ -72,12 +72,12 @@ export function projectionActions(delta: ProjectionDelta): ProjectionAction[] {
       // ControlDelta 词表。ToolFinished 的 fact 走 control 频道(replay.rs:158-161
       // 只把 ToolIntent 特判到 tool),工具终态要在这里接。
       if (kind === "activity") return ["activity"];
-      if (kind === "interaction_requested" || kind === "interaction_resolved" || kind === "interaction_expired") return ["approvals"];
+      if (kind === "interaction_requested" || kind === "interaction_resolved" || kind === "interaction_expired") return ["approvals", "sessions"];
       // Todo writes still emit legacy DashboardUpdated, which actor.rs no longer
       // broadcasts. Until the producer persists WorkspaceResourceChanged(todo),
       // use the durable tool terminal fact to invalidate the RPC read model.
       // ToolFinished has no tool name, so do not infer one from output text.
-      if (kind === "tool_finished") return ["approvals", "todos"];
+      if (kind === "tool_finished") return ["approvals", "todos", "sessions"];
       // MetaDelta 也在 control 频道上:`projection_stream_key` 把
       // `ProjectionSlot::Meta|Mailbox|Team` 全映射成 `RingingChannel::Control`
       // (replay.rs:166-168),所以按 `case "meta"` 分支是死代码。标题更新经
@@ -92,7 +92,7 @@ export function projectionActions(delta: ProjectionDelta): ProjectionAction[] {
       if (kind === "workspace_resource_changed") return resourceKind === "todo" ? ["todos"] : [];
       return [];
     case "conversation":
-      if (kind === "turn_finished" || kind === "turn_interrupted") return ["approvals", "todos"];
+      if (kind === "turn_finished" || kind === "turn_interrupted") return ["approvals", "todos", "sessions"];
       if (kind === "compaction_applied") return ["compacted"];
       // 压缩三态(过程事件)。后端 `ringing/compact_mirror.rs` 把 v1 Ringing
       // 的 CompactStarted/Progress/Finished 镜像进 conversation 频道,这是过程
