@@ -13,7 +13,7 @@
  * 状态里**永远不含凭据**：这里存的是模型名/端点/协议/档位，密钥在 daemon。
  */
 import type { ConfigDto } from "../api/qaqh/ConfigDto";
-import { OAUTH_CONTEXT_LENGTH } from "./mode";
+import { DSACCOUNT_CONTEXT_LENGTH, OAUTH_CONTEXT_LENGTH } from "./mode";
 import {
   BYOK_PROVIDER_ID,
   DSACCOUNT_PROVIDER_ID,
@@ -107,6 +107,8 @@ export function switchFields(
       // `apply_deepseek_account` 钉死，这里只在**已知**时写（`apiBase` 取自
       // `dsaccount.status.inferenceOrigin`，前端不拼 URL）。
       wire: "openai",
+      // 分母跟着这一家走（实测 1M）：不写就沿用上一家的值，压缩时机就错了。
+      contextLength: saved.contextLength ?? DSACCOUNT_CONTEXT_LENGTH,
       ...(apiBase == null ? {} : { baseUrl: apiBase }),
       ...(given(saved.model) ? { model: saved.model } : {}),
     };

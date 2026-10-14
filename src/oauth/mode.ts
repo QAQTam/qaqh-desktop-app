@@ -58,3 +58,13 @@ export const isOauthMode = isPlanMode;
  * 同一份数字也在 `../models/specs.ts` 的 plan 条目里（那边是按模型给）。
  */
 export const OAUTH_CONTEXT_LENGTH = 565_000;
+
+/**
+ * DeepSeek 账号那一家的上下文窗口：**实测** 1M
+ * （`GET https://api.deepseek.com/models` 带账号凭据，2026-10-14）。
+ *
+ * 与套餐那个 565K 不同，这个数字是**端点自己声明的**，所以按它写；它同样是
+ * 本地压缩的分母，切到这一家时必须跟着换，否则会沿用上一家的值——从套餐过来
+ * 就是 565K，1M 的窗口用到一半就显示满、自动压缩提前触发。
+ */
+export const DSACCOUNT_CONTEXT_LENGTH = 1_000_000;
