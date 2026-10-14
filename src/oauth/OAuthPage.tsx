@@ -58,10 +58,9 @@ import {
   type ProviderStateMap,
 } from "./provider-state";
 import {
+  ACCOUNT_PROVIDERS,
   BYOK_PROVIDER_ID,
-  DSACCOUNT_PROVIDER_ID,
   PLAN_PROVIDER_ID,
-  PROVIDERS,
   providerById,
   type ProviderEntry,
 } from "./providers";
@@ -106,6 +105,14 @@ const ProviderCard: Component<{
   onCancel: () => void;
   onSignOut: () => void;
   onOpenUsage: (url: string) => void;
+  /** DeepSeek 账号那一家的状态与动作（`kind === "account"` 时才用）。 */
+  dsStatus: DsAccountStatus | null;
+  dsBalance: DsBalance | null;
+  dsBusy: boolean;
+  onDsSignIn: () => void;
+  onDsCancel: () => void;
+  onDsSignOut: () => void;
+  onDsOpenLink: (url: string) => void;
 }> = (props) => {
   const [flipped, setFlipped] = createSignal(false);
   const connected = (): boolean => props.status?.status === "connected";
@@ -164,7 +171,11 @@ const ProviderCard: Component<{
           <span class="oauth-card__state">{stateLabel()}</span>
           <span class="oauth-card__blurb">{props.entry.blurb}</span>
           <span class="oauth-card__hint">
-            {props.entry.kind === "plan" ? "点击卡片：使用 ChatGPT 登录" : "点击卡片：查看怎么切回来"}
+            {props.entry.kind === "plan"
+              ? "点击卡片：使用 ChatGPT 登录"
+              : props.entry.kind === "account"
+                ? "点击卡片：使用 DeepSeek 账号登录"
+                : "点击卡片：查看怎么切回来"}
           </span>
         </button>
 
@@ -208,11 +219,16 @@ const ProviderCard: Component<{
               </Show>
             </Match>
             <Match when={props.entry.kind === "account"}>
-              <p class="oauth-card__blurb">
-                DeepSeek 账号的登录、余额与赠金在页面下方的「DeepSeek 账号」区。切到这一家时，
-                只写它需要的三个字段（凭据 / openai 协议 / 官方端点）——端点换成别的地址会被
-                后端在保存期直接拒绝。
-              </p>
+              {/* 与 OpenAI 那张完全对称：背面就是这一家的账号卡。 */}
+              <DsAccountCard
+                status={props.dsStatus}
+                balance={props.dsBalance}
+                busy={props.dsBusy}
+                onSignIn={() => props.onDsSignIn()}
+                onCancel={() => props.onDsCancel()}
+                onSignOut={() => props.onDsSignOut()}
+                onOpenLink={(url) => props.onDsOpenLink(url)}
+              />
             </Match>
             <Match when={props.entry.kind === "byok"}>
               <p class="oauth-card__blurb">
@@ -489,7 +505,7 @@ export const OAuthPage: Component = () => {
                 <span class="oauth-pill__hint">
                   {oauthOn()
                     ? "已开启：模型与端点(BYOK) 由本模式接管（那几个字段在设置页置灰）"
-                    : "关闭时按下面的自带 key 那家走"}
+                    : "关闭时回到设置页里那套自带 key 的配置"}
                 </span>
               </span>
             </label>
@@ -501,7 +517,7 @@ export const OAuthPage: Component = () => {
 
         <section class="oauth-section">
           <h2 class="oauth-section-title">服务商</h2>
-          <For each={PROVIDERS}>
+          <For each={ACCOUNT_PROVIDERS}>
             {(entry) => (
               <ProviderCard
                 entry={entry}
@@ -514,35 +530,16 @@ export const OAuthPage: Component = () => {
                 onCancel={() => void cancel()}
                 onSignOut={() => void signOut()}
                 onOpenUsage={(url) => void openExternal(url)}
+                dsStatus={dsStatus()}
+                dsBalance={dsBalance()}
+                dsBusy={dsBusy()}
+                onDsSignIn={() => void dsSignIn()}
+                onDsCancel={() => void dsCancel()}
+                onDsSignOut={() => void dsSignOut()}
+                onDsOpenLink={(url) => void openExternal(url)}
               />
             )}
           </For>
-        </section>
-
-        <section class="oauth-section">
-          <h2 class="oauth-section-title">DeepSeek 账号</h2>
-          <DsAccountCard
-            status={dsStatus()}
-            balance={dsBalance()}
-            busy={dsBusy()}
-            onSignIn={() => void dsSignIn()}
-            onCancel={() => void dsCancel()}
-            onSignOut={() => void dsSignOut()}
-            onOpenLink={(url) => void openExternal(url)}
-          />
-          <Show when={activeId() !== DSACCOUNT_PROVIDER_ID}>
-            <button
-              type="button"
-              class="ghost-mini"
-              disabled={busy()}
-              onClick={() => {
-                const entry = providerById(DSACCOUNT_PROVIDER_ID);
-                if (entry != null) void switchTo(entry);
-              }}
-            >
-              用本机 DeepSeek 账号余额
-            </button>
-          </Show>
         </section>
 
         <Show when={error()}>

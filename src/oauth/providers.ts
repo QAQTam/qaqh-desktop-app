@@ -49,12 +49,29 @@ export const PROVIDERS: readonly ProviderEntry[] = [
     kind: "plan",
   },
   {
+    id: DSACCOUNT_PROVIDER_ID,
+    name: "DeepSeek 账号",
+    blurb: "用本机 DeepSeek 账号余额完成推理，无需配置 API key。",
+    kind: "account",
+  },
+  {
     id: BYOK_PROVIDER_ID,
     name: "自带 API key（BYOK）",
     blurb: "填你自己的端点与密钥，模型名由你决定。",
     kind: "byok",
   },
 ];
+
+/**
+ * 「接入」页的**服务商**只列账号额度那几家（`plan` / `account`）。
+ *
+ * BYOK 不是"接入某家服务商"——它的模型与密钥在设置页维护，关掉账号额度就回到它；
+ * 把它摆进服务商列表会让人以为那也是要"接入"的一路。名录里仍留着它：切换逻辑
+ * （`switchFields` / `toggleOauth`）要用，`providerRegistryProblems()` 也要求恰好一家。
+ */
+export const ACCOUNT_PROVIDERS: readonly ProviderEntry[] = PROVIDERS.filter(
+  (entry) => entry.kind !== "byok",
+);
 
 export function providerById(id: string): ProviderEntry | null {
   return PROVIDERS.find((entry) => entry.id === id) ?? null;
