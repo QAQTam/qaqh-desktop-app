@@ -3,7 +3,7 @@ name = "qaqh-webui-app"
 version.workspace = true
 edition = "2024"
 description = "QAQ-Harness 桌面壳:Tauri 2 宿主,承载 webui 渲染层并以 sidecar 托管 daemon"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

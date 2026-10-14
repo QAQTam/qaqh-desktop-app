@@ -19,14 +19,14 @@
 
 | 事实 | 依据 |
 |---|---|
-| 两个仓库都是 MIT | `qaqh-backend/LICENSE`、`qaqh-desktop-app/LICENSE` |
+| 两个仓库都是 **MIT OR Apache-2.0**（2026-10-14 起） | `qaqh-backend/LICENSE-MIT` + `LICENSE-APACHE`、`qaqh-desktop-app/LICENSE-MIT` + `LICENSE-APACHE` |
 | DevKit 是 Noncommercial 许可 | 上游 `LICENSE`（副本见 `public/siwc/LICENSE-SIWC-DEVKIT.txt`） |
 | 「非商业」排除公司/雇主/客户场景 | 该许可 §1 对 Noncommercial Purpose 的定义（"whether or not a fee is currently charged"） |
-| 不授予商标权 | 该许可 §5；商标另受 OpenAI brand guidelines 约束 |
+| 不授予商标权 | 该许可 §5；商标另受 OpenAI brand guidelines 约束。**本仓自己的** MIT / Apache-2.0 同样不授予商标权（Apache-2.0 §6 明文排除），故「换许可」与「商标」是两件事 |
 | 再分发义务 | §4(a) 随附许可副本、§4(b) 标注改动、§4(c) 保留声明、§4(d) 同许可 |
 
-**这不是「MIT 风险」**：MIT 不设条件，问题在**引入方向**——把更严的许可放进对外承诺 MIT
-的分发物，会让「整包 MIT」这句话不再成立，且**用户商用这条闸门我们无权替他们打开**。
+**这不是「许可风险」**：MIT / Apache-2.0 都不设这类条件，问题在**引入方向**——把更严的许可放进对外承诺 MIT OR Apache-2.0
+的分发物，会让「整包双许可」这句话不再成立，且**用户商用这条闸门我们无权替他们打开**。
 商标/背书风险独立于版权，且无法通过任何仓库内声明消解。
 
 ## UI 规则（后端字段 → 展示）
@@ -50,7 +50,7 @@
 - 把 ChatGPT 标识用于暗示与 OpenAI 的合作、赞助或背书。
 - 在登录/授权之外的场景做装饰性使用。
 - `sharing=false` 时展示套餐标识或用量入口。
-- 在 MIT 口径下再分发 `public/siwc/` 的内容。
+- 在本仓许可口径下（MIT OR Apache-2.0）再分发 `public/siwc/` 的内容。
 - 把资产放进任何**会发布到包管理器**的产物（crates.io 要求整包 OSI 认可许可）。
   资产只允许待在桌面壳的静态资源里。
 
@@ -70,13 +70,16 @@
 
 ## 待办
 
-1. **`LICENSE` 年份**：本仓库 `LICENSE` 写的是 `Copyright (c) 2027`（backend 是 2026），
-   疑似笔误，待确认后修正。
-2. **真机联调**：目前后端全部结论只在 mock OIDC 上验证过；需用真实 Plus/Pro 账户
+1. ~~**`LICENSE` 年份**：本仓库 `LICENSE` 写的是 `Copyright (c) 2027`（backend 是 2026），
+   疑似笔误，待确认后修正。~~ **已修（2026-10-14）**：年份改 `2026`；并随双授权改名为
+   `LICENSE-MIT`，另加 `LICENSE-APACHE`。
+2. **安装包内附第三方许可清单**：打包产物含大量 MIT / Apache-2.0 依赖，按 Apache-2.0 §4
+   应随附其许可与 NOTICE（`NOTICE` 已就位，随包清单待做）。
+3. **真机联调**：目前后端全部结论只在 mock OIDC 上验证过；需用真实 Plus/Pro 账户
    跑通一次 `response.completed`。
-3. **资产引入前的核对**：放入任何 SVG 前，用上游原文替换 `LICENSE-SIWC-DEVKIT.txt`
+4. **资产引入前的核对**：放入任何 SVG 前，用上游原文替换 `LICENSE-SIWC-DEVKIT.txt`
    并在 NOTICE 表格登记 commit + SHA-256 + 取用日期。
-4. 后端 M1（`qaqh-gate` 的 Responses 兼容位）与 `siwc.*` 的类型化 DTO（当前 FE 用
+5. 后端 M1（`qaqh-gate` 的 Responses 兼容位）与 `siwc.*` 的类型化 DTO（当前 FE 用
    结构对齐的本地类型，见 `src/siwc/brand.ts::SiwcSessionStatus`）。
 
 ---

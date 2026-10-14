@@ -21,6 +21,25 @@ TypeScript strict,运行在 **Tauri 2 桌面壳**(`src-tauri/`,crate
 daemon 的**权威构建在后端仓**；本仓只搬运它的产物为 Tauri sidecar。
 
 
+## 许可与商标
+
+本仓以 **MIT OR Apache-2.0** 双许可发布，下游可任选其一：
+
+- `LICENSE-MIT` —— MIT
+- `LICENSE-APACHE` —— Apache License 2.0（含显式专利授权 §3）
+- `NOTICE` —— 版权与**商标**声明（同时满足 Apache-2.0 §4(d)）
+
+`Cargo.toml`（workspace 与 `src-tauri`）与 `package.json` 的 `license` 字段与此一致。
+后端仓 `qaqh-backend` 采用同一口径。
+
+**关于「用 ChatGPT 登录」是否需要额外授权**：开源许可（MIT / Apache-2.0）**不授予任何
+商标权**——Apache-2.0 §6 明文排除商标、服务标记与商品名；MIT 全文未涉及商标。
+所以「换/加许可」既不会带来商标授权，也不解决商标问题，两者互不相干。项目中出现
+「ChatGPT」「OpenAI」等名称，仅用于如实描述用户可登录的对象；本项目与 OpenAI
+**无隶属、无赞助、无背书**。官方图形资产默认**不随仓分发**（`public/siwc/` 只有说明
+文件），相关口径与禁止清单见 `docs/siwc-brand-posture.md`。
+
+
 ## 构建
 
 ```bash

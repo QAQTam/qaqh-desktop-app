@@ -8,7 +8,7 @@ members = ["src-tauri"]
 [workspace.package]
 version = "2.0.0-RC1"
 edition = "2024"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 
 # 与后端仓同款质量闸：生产代码禁 unwrap、禁字符串切片。
 [workspace.lints.clippy]

@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "description": "QAQ-Harness WebUI(Tauri 桌面壳渲染层,Solid 2 rc + Vite + TS strict)",
+  "license": "MIT OR Apache-2.0",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
