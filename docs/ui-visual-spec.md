@@ -24,7 +24,7 @@
 
 - 顶部胶囊为未来 Goal 保留，现阶段 JSX 注释、不渲染、不预留空白轨道。会话只从左侧 session list 切换；窄窗口也保留紧凑会话列表；创建入口移到侧栏，原有快捷键保留。
 - 工作区集合面板占会话列右侧的真实列宽（不再是浮在正文上的覆盖层）：展开 320px，收起缩到胶囊本身宽度，正文与输入区始终同宽对齐；面板由通用工作区标题和可组合的信息分区构成，待办是首个分区，后续可加入当前工作区 Git 变更摘要。收起保留可键盘操作的胶囊入口，面板最多占可视区高度的 70%，内容超出时在面板内滚动。工作区区域过窄时自动收起为胶囊条（仍占位、不覆盖消息），点胶囊仍可强制展开。
-- Markdown 以 [GitHub Primer 官方源码](https://github.com/primer/css/tree/main/src/markdown) 为单一排版来源，矩阵和来源映射见 [markdown-typography.md](markdown-typography.md)。中途与最终回答统一为 16px/24px，覆盖早期 14px/22.4px 和 16px/28px 方案。
+- Markdown 的元素比例以 [GitHub Primer 官方源码](https://github.com/primer/css/tree/main/src/markdown) 为基准，矩阵和来源映射见 [markdown-typography.md](markdown-typography.md)；正文绝对字号已偏离 Primer，取 **14px 配 24px 行距**。中途与最终回答统一为该值，覆盖早期 14px/22.4px、16px/28px 与 16px/24px 方案（2026-10-14 对 Codex／Qoder 桌面端截图实测后改定）。
 
 ### 1.2 设计语言修订（优先于下文首版材质和尺度描述）
 
@@ -155,7 +155,7 @@ WinUI/XAML 的窗口和 sidebar/session list 集成由宿主团队协调，本�
 | --- | --- |
 | 字体 | 沿用系统字体栈与现有等宽字体；首版不加载网络字体 |
 | 界面基础文字（`--fs-body`） | 16px / 1.75 |
-| Markdown 正文（`--md-body-size`） | 16px / 1.5，详见 [官方来源与完整矩阵](markdown-typography.md) |
+| Markdown 正文（`--md-body-size`） | 100% 档 14px，行距按比例钉在 24px（`--md-body-leading: calc(24 / 14)`）；随 `--font-scale` 等比缩放，详见 [来源与完整矩阵](markdown-typography.md) |
 | UI 标签（`--fs-sm`） | 15px / 1.5；辅助文字（`--fs-xs`）14px / 1.5 |
 | 用户文字／输入（`--fs-md`） | 16px / 1.65（composer 实测 22px） |
 | 回答标题 | Primer H1–H6 比例 2 / 1.5 / 1.25 / 1 / .875 / .85em，行高 1.25 |

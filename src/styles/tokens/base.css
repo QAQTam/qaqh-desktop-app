@@ -48,9 +48,14 @@
     --content-gutter: var(--space-6);
     --workspace-panel-width: 320px;
     --workspace-panel-collapsed-width: 126px;
-    /* GitHub Primer markdown scale; see docs/markdown-typography.md. */
-    --md-body-size: 16px;
-    --md-body-leading: 1.5;
+    /* 正文 14px 对齐 Codex 桌面端(实测全角步进 14px);行距写成 24/14 这个无单位
+       比例而不是 1.5,是为了把字号与行距解耦 —— 沿用 1.5 会让 14px 掉到 21px 行距,
+       字和行一起缩,密度不变。
+       比例同时也让 --font-scale 能整体接管:正文乘系数后,行距、标题(em)、代码(85%)
+       全部按比例跟着走,设置页「等比缩放所有字阶」对阅读区同样成立。
+       来源已不再是 Primer 的 16px 基准,见 docs/markdown-typography.md。 */
+    --md-body-size: calc(14px * var(--font-scale));
+    --md-body-leading: calc(24 / 14);
     --md-heading-leading: 1.25;
     --md-h1-size: 2em;
     --md-h2-size: 1.5em;

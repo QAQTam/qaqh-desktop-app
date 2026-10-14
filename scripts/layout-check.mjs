@@ -121,8 +121,25 @@ try {
       await document.fonts.ready;
     })()`);
     const typography = await evaluate("(() => { const s = getComputedStyle(document.querySelector('.md-host')); return { size: s.fontSize, height: s.lineHeight }; })()");
-    assert.equal(typography.size, "16px", "Markdown body must use the Primer 16px baseline");
-    assert.equal(typography.height, "24px", "Markdown body must use the Primer 1.5 line spacing");
+    assert.equal(typography.size, "14px", "Markdown body must sit at the 14px Codex-parity baseline");
+    assert.equal(typography.height, "24px", "Markdown body must keep the 24px line pitch decoupled from the glyph size");
+    // 设置页把「全局字号缩放」写成"等比缩放界面中所有字阶",阅读区必须一起走。
+    // 正文吃 --font-scale,行距靠无单位比例、标题/代码靠 em 与 85% 自己跟上;
+    // 这里同时钉住"测完必须还原",否则后面的 tools/settings 步骤会带着 1.2 跑。
+    const scaled = await evaluate(`(async () => {
+      const root = document.documentElement, host = document.querySelector('.md-host');
+      const settle = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      root.style.setProperty('--font-scale', '1.2');
+      await settle();
+      const style = getComputedStyle(host);
+      const atScale = { size: style.fontSize, leading: style.lineHeight };
+      root.style.removeProperty('--font-scale');
+      await settle();
+      return { atScale, restored: getComputedStyle(host).fontSize };
+    })()`);
+    assert.equal(scaled.atScale.size, "16.8px", `Reading text must follow --font-scale, got ${JSON.stringify(scaled)}`);
+    assert.equal(scaled.atScale.leading, "28.8px", `Line pitch must scale with the glyph, got ${JSON.stringify(scaled)}`);
+    assert.equal(scaled.restored, typography.size, `Probe must leave no --font-scale residue: ${JSON.stringify(scaled)}`);
     const matrix = await evaluate(`(async () => {
       const { renderMarkdownHtml } = await import('/src/markdown/render.ts');
       const tick = String.fromCharCode(96);
@@ -143,14 +160,41 @@ try {
       return results;
     })()`);
     assert.deepEqual(matrix[0], matrix[1], "Intermediate and final Markdown must have identical typography");
-    const expected = { h1: [32, 40], h2: [24, 30], h3: [20, 25], h4: [16, 20], h5: [14, 17.5], h6: [13.6, 17],
-      p: [16, 24], 'p code': [13.6, 20.4], pre: [13.6, 19.72], 'pre code': [13.6, 19.72], table: [16, 24] };
+    // 矩阵按「相对正文的比例」核，正文 px 与行距由上面两条 assert.equal 单独钉住。
+    // 之前 11 个数全是 16px 基准的手算展开值，改一次字号就得重算一遍。
+    const body = parseFloat(typography.size), pitch = parseFloat(typography.height);
+    const heading = (ratio) => [body * ratio, body * ratio * 1.25];
+    const expected = {
+      h1: heading(2), h2: heading(1.5), h3: heading(1.25), h4: heading(1), h5: heading(.875), h6: heading(.85),
+      p: [body, pitch], table: [body, pitch],
+      // 行内代码 85% 只缩字号；line-height 是无单位数值，继承下来按自己的字号算。
+      'p code': [body * .85, pitch * .85],
+      pre: [body * .85, body * .85 * 1.45], 'pre code': [body * .85, body * .85 * 1.45],
+    };
     for (const [selector, [size, leading]] of Object.entries(expected)) {
-      assert.ok(Math.abs(matrix[0][selector].size - size) < .05, `${selector} must match Primer font size`);
-      assert.ok(Math.abs(matrix[0][selector].leading - leading) < .05, `${selector} must match Primer line height`);
+      assert.ok(Math.abs(matrix[0][selector].size - size) < .05, `${selector} must sit at its documented ratio of the ${body}px body: ${JSON.stringify(matrix[0][selector])}`);
+      assert.ok(Math.abs(matrix[0][selector].leading - leading) < .05, `${selector} line box must be ${leading}px: ${JSON.stringify(matrix[0][selector])}`);
     }
     assert.equal(matrix[0].strong.weight, '600', "Emphasis must not alter the font size");
     assert.equal(await evaluate("document.querySelector('.session-tabs-region')"), null, "Goal capsule must remain unrendered");
+    // 内容列对齐(§4):「此前已压缩」分隔线与截断提示必须和回合共用同一条居中列。
+    // composer.css 里 `.compact-divider { margin: 8px 0 }` 的简写会清掉 timeline.css
+    // 组规则给的 `margin-inline: auto`,只在 #messages 内容宽 > --content-width 的
+    // 宽窗下才暴露(1920 下实测偏 394px),窄屏三档全都看不出差别。
+    const column = await evaluate(`(() => {
+      const messages = document.querySelector('#messages');
+      const note = document.createElement('div'); note.className = 'history-note'; note.textContent = '对照';
+      const divider = document.createElement('div'); divider.className = 'compact-divider'; divider.setAttribute('role', 'separator');
+      divider.innerHTML = '<span>此前已压缩</span>';
+      messages.append(note, divider);
+      const edges = [...messages.querySelectorAll(':scope > .turn, :scope > .history-note, :scope > .compact-divider')]
+        .map((el) => { const r = el.getBoundingClientRect(); return { cls: el.className, left: +r.left.toFixed(1), right: +r.right.toFixed(1) }; });
+      note.remove(); divider.remove();
+      return edges;
+    })()`);
+    assert.ok(column.length >= 3, `Content-column alignment needs a turn, note and divider to compare: ${JSON.stringify(column)}`);
+    assert.equal(new Set(column.map((edge) => `${edge.left}/${edge.right}`)).size, 1,
+      `Content-column rows must share one centered box: ${JSON.stringify(column)}`);
     const markers = await evaluate(`(() => {
       const canvas = document.createElement('canvas');
       const context = canvas.getContext('2d');
