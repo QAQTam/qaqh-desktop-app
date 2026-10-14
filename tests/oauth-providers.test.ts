@@ -9,7 +9,7 @@ import {
   modelEfforts,
   modelSpec,
 } from "../src/models/specs";
-import { isOauthMode, OAUTH_CONTEXT_LENGTH } from "../src/oauth/mode";
+import { DSACCOUNT_CONTEXT_LENGTH, isOauthMode, OAUTH_CONTEXT_LENGTH } from "../src/oauth/mode";
 import {
   activeProviderId,
   captureProviderState,
@@ -22,6 +22,7 @@ import {
 } from "../src/oauth/provider-state";
 import {
   BYOK_PROVIDER_ID,
+  DSACCOUNT_PROVIDER_ID,
   PLAN_PROVIDER_ID,
   PROVIDERS,
   providerById,
@@ -111,9 +112,39 @@ describe("模型特判合集", () => {
     // byok 桶空是有意的：说不出差异就别写。
     expect(MODEL_SPECS.byok).toEqual({});
   });
+
+  it("档位按桶分开：套餐不含 max，DeepSeek 账号原样收平台的 max", () => {
+    // 后端阶梯是六档（含 max）；Codex 那套只有五档，所以套餐桶显式排除它。
+    expect(EFFORT_LADDER).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
+    for (const spec of Object.values(MODEL_SPECS.plan)) {
+      expect(modelEfforts(spec)).not.toContain("max");
+    }
+    // 平台自报 `effort.supported_levels: ["low","high","max"]`——原样收，不用 ultra 顶替。
+    for (const spec of Object.values(MODEL_SPECS.account)) {
+      expect(modelEfforts(spec)).toEqual(["low", "high", "max"]);
+    }
+    // 未收录模型仍走全阶梯（BYOK 端点由用户自己声明，后端 allowlist 兜底钳制）。
+    expect(modelEfforts({})).toEqual(EFFORT_LADDER);
+  });
 });
 
 describe("每 provider 状态：切换与还原", () => {
+  it("DeepSeek 账号的切换字段：openai wire + 端点自报的 1M 分母", () => {
+    const entry = providerById(DSACCOUNT_PROVIDER_ID);
+    expect(entry?.kind).toBe("account");
+    if (entry == null) return;
+    expect(switchFields(entry, {}, "https://api.deepseek.com")).toMatchObject({
+      credential: "deepseek_account",
+      wire: "openai",
+      baseUrl: "https://api.deepseek.com",
+      contextLength: DSACCOUNT_CONTEXT_LENGTH,
+    });
+    // 分母是"本地压缩何时发生"，用户自己调过就尊重他的值（每 provider 状态要还原回来）。
+    expect(
+      switchFields(entry, { [DSACCOUNT_PROVIDER_ID]: { contextLength: 128_000 } }, null),
+    ).toMatchObject({ contextLength: 128_000 });
+  });
+
   it("当前生效的是哪家：读配置里的 credential", () => {
     expect(activeProviderId({ credential: "chatgpt_plan" })).toBe(PLAN_PROVIDER_ID);
     expect(activeProviderId({ credential: "api_key" })).toBe(BYOK_PROVIDER_ID);

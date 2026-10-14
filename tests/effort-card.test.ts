@@ -51,7 +51,9 @@ describe("键盘步进", () => {
   it("两端停住，不循环（循环会让最强档多按一下掉到最弱）", () => {
     expect(stepTier(EFFORT_LADDER, "low", -1)).toBe("low");
     expect(stepTier(EFFORT_LADDER, "ultra", 1)).toBe("ultra");
-    expect(stepTier(EFFORT_LADDER, "xhigh", 1)).toBe("ultra");
+    // 阶梯六档（后端同序）：xhigh → **max** → ultra。
+    expect(stepTier(EFFORT_LADDER, "xhigh", 1)).toBe("max");
+    expect(stepTier(EFFORT_LADDER, "max", 1)).toBe("ultra");
     expect(stepTier(EFFORT_LADDER, "medium", -1)).toBe("low");
   });
 
@@ -69,7 +71,7 @@ describe("键盘步进", () => {
 describe("配色分级", () => {
   it("只有 ultra 走特殊配色，其余同一档色", () => {
     expect(tierTone("ultra")).toBe("ultra");
-    for (const tier of ["low", "medium", "high", "xhigh"] as const) {
+    for (const tier of ["low", "medium", "high", "xhigh", "max"] as const) {
       expect(tierTone(tier)).toBe("normal");
     }
   });

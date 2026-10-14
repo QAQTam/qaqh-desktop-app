@@ -18,7 +18,7 @@ import IconEye from "~icons/lucide/eye";
 import IconEyeOff from "~icons/lucide/eye-off";
 import { STR } from "../../lib/strings";
 import { toast } from "../../ui/toast";
-import { MASK, WIRE_PROTOCOLS, toInt } from "../patch";
+import { MASK, REASONING_EFFORTS, WIRE_PROTOCOLS, toInt } from "../patch";
 import { applyProfile, busy, deleteProfile, draft, saveProfileAs, setField } from "../store";
 import { Field, Section, TextInput } from "../controls";
 import { isAccountCredential } from "../../oauth/mode";
@@ -59,7 +59,9 @@ export const ByokSection: Component = () => {
   /** 当前值可能不在后端允许词表里(旧配置留下的),补进选项免得下拉替用户改了值。 */
   const effortOptions = createMemo(() => {
     const current = config().reasoningEffort ?? "";
-    const list = ["low", "medium", "high", "xhigh", "max"];
+    // 后端词表就是这份;以前这里硬抄了一份**旧五档(含 max、缺 ultra)**,
+    // 结果"选得到的存不下去、存得下去的最高档选不到"。
+    const list: string[] = [...REASONING_EFFORTS];
     if (current !== "" && !list.includes(current)) list.unshift(current);
     return list;
   });

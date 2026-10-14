@@ -236,12 +236,12 @@ describe("登录流程驱动", () => {
 });
 
 describe("DeepSeek 账号的模型特判", () => {
-  it("两个实测模型都收录，档位只给平台认的 low/high", () => {
+  it("两个实测模型都收录，档位原样收平台声明的 low/high/max", () => {
     const flash = modelSpec("account", "deepseek-flash");
     expect(flash.known).toBe(true);
-    // 平台声明的是 low|high|max，而我们的阶梯里没有 max：宁可少一档，
-    // 也不发一个它不认的档（那会以 400 打在推理端点上）。
-    expect(modelEfforts(flash.spec)).toEqual(["low", "high"]);
+    // 平台声明的是 low|high|max，我们阶梯里本来就有同名的 `max`（后端第五档），
+    // 所以原样放它；**不**用我们的 `ultra` 顶替（那是 Codex 的说法，平台不认）。
+    expect(modelEfforts(flash.spec)).toEqual(["low", "high", "max"]);
     expect(modelContextWindow(flash.spec)).toBe(1_000_000);
     expect(modelSpec("account", "deepseek-v4-pro").known).toBe(true);
   });

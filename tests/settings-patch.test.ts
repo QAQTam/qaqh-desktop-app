@@ -160,8 +160,11 @@ describe("validatePatch", () => {
     expect(validatePatch({ wire: "" })).toContain("wire");
   });
 
-  test("reasoningEffort 只认后端词表;旧四档时代的 off 会被拒", () => {
-    expect(validatePatch({ reasoningEffort: "xhigh" })).toBeNull();
+  test("reasoningEffort 逐档对齐后端词表(含 max);旧四档时代的 off 会被拒", () => {
+    // 后端 `ConfigPatch::validate` 收的就是这六档——前端镜像少一档曾把合法的 `max` 拒掉。
+    for (const effort of ["low", "medium", "high", "xhigh", "max", "ultra"]) {
+      expect(validatePatch({ reasoningEffort: effort }), effort).toBeNull();
+    }
     expect(validatePatch({ reasoningEffort: "off" })).toContain("reasoningEffort");
   });
 

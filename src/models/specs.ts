@@ -18,19 +18,36 @@
  * | `sliderSettings[{modelSlug, thinkingEffort}]` | `efforts`（该模型允许的档位） |
  * | 模型目录里的 `modelContextWindow` | `contextWindow` |
  *
- * 档位阶梯与 Codex 一致（low → medium → high → xhigh → ultra）；后端在同一阶梯上
- * 按端点 compat 钳制（`qaqh-gate/src/types.rs::EFFORT_LADDER`）。
+ * 档位阶梯与后端**逐字同序**（`qaqh-gate/src/types.rs::EFFORT_LADDER` 六档：
+ * low → medium → high → xhigh → max → ultra），可用性由后端按端点 compat 钳制。
+ * Codex 自己那套只有五档（没有 `max`），所以"哪几家能选 `max`"必须靠各桶的
+ * `efforts` 明写，不能指望"缺省即全阶梯"。
  */
 
-/** 推理强度档位。顺序即阶梯，由弱到强。 */
-export type ReasoningTier = "low" | "medium" | "high" | "xhigh" | "ultra";
+/** 推理强度档位。顺序即阶梯，由弱到强；与后端 `EFFORT_LADDER` 逐字同序。 */
+export type ReasoningTier = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
-/** 全阶梯。缺 `efforts` 的模型按它展示（真实可用性由后端钳制兜底）。 */
-export const EFFORT_LADDER: readonly ReasoningTier[] = ["low", "medium", "high", "xhigh", "ultra"];
+/**
+ * 全阶梯。缺 `efforts` 的模型按它展示（真实可用性由后端钳制兜底）。
+ *
+ * `max` 不是新档：后端一直有它（`EFFORT_LADDER` 六档、`ConfigPatch::validate`
+ * 也收 `low|medium|high|xhigh|max|ultra`），是前端此前只镜像了 Codex 那五档。
+ * 于是 DeepSeek 平台自报的 `low|high|max` 里最高那档在前端选不出来——两边对齐。
+ */
+export const EFFORT_LADDER: readonly ReasoningTier[] = ["low", "medium", "high", "xhigh", "max", "ultra"];
 
 /** 未收录模型的保守缺省。**不要**在这里给"更强"的值：猜大了会撞上游上限。 */
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
 export const DEFAULT_EFFORT: ReasoningTier = "medium";
+
+/**
+ * 套餐（Codex 直连）那套阶梯：与 Codex 的中文词条/档位数一致，**不含 `max`**。
+ *
+ * 套餐路由的 `effort_max` 是 `ultra`（不会把 `max` 钳走），但"我们没见 Codex
+ * 发过 `max`"就等于"不知道它认不认"——多放一档的代价是 400 打在这次请求上，
+ * 所以套餐桶显式声明这五档，保持既有行为不变。
+ */
+const PLAN_EFFORTS: readonly ReasoningTier[] = ["low", "medium", "high", "xhigh", "ultra"];
 
 export type ModelSpec = {
   /** 展示名；上游 `displayName` 缺失时用它兜底。 */
@@ -58,13 +75,13 @@ export const MODEL_SPECS: {
   plan: {
     // 套餐模式统一 565K（产品口径）：上游目录不给窗口，按同一个数字收口，
     // 免得每个模型各写一个没人验证过的值。
-    "gpt-6.1-sol": { displayName: "GPT-6.1 Sol", contextWindow: 565_000 },
-    "gpt-6-astra": { displayName: "GPT-6-Astra", contextWindow: 565_000 },
-    "gpt-6-sol": { displayName: "GPT-6-Sol", contextWindow: 565_000 },
-    "gpt-6-luna": { displayName: "GPT-6-Luna", contextWindow: 565_000 },
-    "gpt-5.6-sol": { displayName: "GPT-5.6-Sol", contextWindow: 565_000 },
-    "gpt-5.6-terra": { displayName: "GPT-5.6-Terra", contextWindow: 565_000 },
-    "gpt-5.6-luna": { displayName: "GPT-5.6-Luna", contextWindow: 565_000 },
+    "gpt-6.1-sol": { displayName: "GPT-6.1 Sol", contextWindow: 565_000, efforts: PLAN_EFFORTS },
+    "gpt-6-astra": { displayName: "GPT-6-Astra", contextWindow: 565_000, efforts: PLAN_EFFORTS },
+    "gpt-6-sol": { displayName: "GPT-6-Sol", contextWindow: 565_000, efforts: PLAN_EFFORTS },
+    "gpt-6-luna": { displayName: "GPT-6-Luna", contextWindow: 565_000, efforts: PLAN_EFFORTS },
+    "gpt-5.6-sol": { displayName: "GPT-5.6-Sol", contextWindow: 565_000, efforts: PLAN_EFFORTS },
+    "gpt-5.6-terra": { displayName: "GPT-5.6-Terra", contextWindow: 565_000, efforts: PLAN_EFFORTS },
+    "gpt-5.6-luna": { displayName: "GPT-5.6-Luna", contextWindow: 565_000, efforts: PLAN_EFFORTS },
   },
   // BYOK：空是有意的。收录一条就必须能说出它的差异；说不出就别写。
   byok: {},
@@ -73,24 +90,25 @@ export const MODEL_SPECS: {
    * `GET https://api.deepseek.com/models` 带账号凭据）拿到 1M 窗口 / 393216 输出。
    *
    * 档位只收**平台自己声明的**：它给的是 `effort.supported_levels: ["low","high","max"]`。
-   * 我们的阶梯里没有 `max`（见 `ReasoningTier`），所以这里只放 `low` / `high`——
-   * 放一个平台不认的档，请求会以 400 打在推理端点上（比"少一档"糟得多）。
-   * 平台真有 `max` 而我们没暴露，是**已知缺口**，等阶梯对齐后再补。
+   * 多放一个它不认的档，请求会以 400 打在推理端点上（比"少一档"糟得多）。
+   *
+   * 平台的最高档就叫 `max`，而后端阶梯里本来就有同名的 `max`（第五档），所以
+   * 原样放它；**不**用 `ultra` 顶替——`ultra` 是 Codex 那套的说法，平台不认。
    */
   account: {
     "deepseek-flash": {
       displayName: "DeepSeek Flash",
       contextWindow: 1_000_000,
-      efforts: ["low", "high"],
+      efforts: ["low", "high", "max"],
       defaultEffort: "high",
-      notes: "实测：1M 窗口 / 393216 输出 / 多模态；平台档位 low|high|max",
+      notes: "实测：1M 窗口 / 393216 输出 / 多模态；平台档位 low|high|max（原样收，含 max）",
     },
     "deepseek-v4-pro": {
       displayName: "DeepSeek V4 Pro",
       contextWindow: 1_000_000,
-      efforts: ["low", "high"],
+      efforts: ["low", "high", "max"],
       defaultEffort: "high",
-      notes: "实测：1M 窗口 / 393216 输出 / 纯文本；平台档位同 flash",
+      notes: "实测：1M 窗口 / 393216 输出 / 纯文本；平台档位同 flash（low|high|max）",
     },
   },
 };
