@@ -60,11 +60,12 @@ export const isOauthMode = isPlanMode;
 export const OAUTH_CONTEXT_LENGTH = 565_000;
 
 /**
- * DeepSeek 账号那一家的上下文窗口：**实测** 1M
- * （`GET https://api.deepseek.com/models` 带账号凭据，2026-10-14）。
+ * DeepSeek 账号那一家的上下文窗口：**实测**（`GET https://api.deepseek.com/models`
+ * 带账号凭据，2026-10-14 与 `examples/probe_models.rs` 复核）平台自报的
+ * `context_window: 1048576`（= 1 MiB，不是四舍五入的 1,000,000）。
  *
  * 与套餐那个 565K 不同，这个数字是**端点自己声明的**，所以按它写；它同样是
  * 本地压缩的分母，切到这一家时必须跟着换，否则会沿用上一家的值——从套餐过来
  * 就是 565K，1M 的窗口用到一半就显示满、自动压缩提前触发。
  */
-export const DSACCOUNT_CONTEXT_LENGTH = 1_000_000;
+export const DSACCOUNT_CONTEXT_LENGTH = 1_048_576;

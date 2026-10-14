@@ -259,7 +259,8 @@ describe("DeepSeek 账号的模型特判", () => {
     // 平台声明的是 low|high|max，我们阶梯里本来就有同名的 `max`（后端第五档），
     // 所以原样放它；**不**用我们的 `ultra` 顶替（那是 Codex 的说法，平台不认）。
     expect(modelEfforts(flash.spec)).toEqual(["low", "high", "max"]);
-    expect(modelContextWindow(flash.spec)).toBe(1_000_000);
+    // 平台自报的是 1048576（1 MiB），不是四舍五入的 1,000,000。
+    expect(modelContextWindow(flash.spec)).toBe(1_048_576);
     expect(modelSpec("account", "deepseek-v4-pro").known).toBe(true);
   });
 

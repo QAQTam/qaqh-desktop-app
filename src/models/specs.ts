@@ -87,7 +87,11 @@ export const MODEL_SPECS: {
   byok: {},
   /*
    * DeepSeek 账号（`deepseek_account`）：**实测**（2026-10-14，
-   * `GET https://api.deepseek.com/models` 带账号凭据）拿到 1M 窗口 / 393216 输出。
+   * `GET https://api.deepseek.com/models` 带账号凭据；`examples/probe_models.rs`
+   * 复核）。平台每条给的是：`context_window: 1048576`、`max_output_tokens: 393216`、
+   * `effort.default_level: "high"`、`input_modalities` 见下、以及
+   * `api_capabilities.anthropic_messages.system_prompt_update`（flash = `in-history`，
+   * pro = `leading-only`——和参照实现声明的模型能力对得上）。
    *
    * 档位只收**平台自己声明的**：它给的是 `effort.supported_levels: ["low","high","max"]`。
    * 多放一个它不认的档，请求会以 400 打在推理端点上（比"少一档"糟得多）。
@@ -97,18 +101,20 @@ export const MODEL_SPECS: {
    */
   account: {
     "deepseek-flash": {
-      displayName: "DeepSeek Flash",
-      contextWindow: 1_000_000,
+      displayName: "DeepSeek-V4.1-Flash",
+      contextWindow: 1_048_576,
       efforts: ["low", "high", "max"],
       defaultEffort: "high",
-      notes: "实测：1M 窗口 / 393216 输出 / 多模态；平台档位 low|high|max（原样收，含 max）",
+      notes:
+        "实测：context_window 1048576 / max_output_tokens 393216 / input_modalities 含 image（多模态）；平台档位 low|high|max（原样收，含 max）",
     },
     "deepseek-v4-pro": {
-      displayName: "DeepSeek V4 Pro",
-      contextWindow: 1_000_000,
+      displayName: "DeepSeek-V4-Pro",
+      contextWindow: 1_048_576,
       efforts: ["low", "high", "max"],
       defaultEffort: "high",
-      notes: "实测：1M 窗口 / 393216 输出 / 纯文本；平台档位同 flash（low|high|max）",
+      notes:
+        "实测：context_window 1048576 / max_output_tokens 393216 / 纯文本（input_modalities 只有 text）；档位同 flash",
     },
   },
 };
