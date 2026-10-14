@@ -1508,7 +1508,7 @@ render(
             <div class="session-column" id={`panel-${previewActiveTab().id}`} role="region" aria-label="当前会话">
               <SessionView tab={previewActiveTab()} />
               <Show when={previewActiveTab().store.pending[0]().length > 0}>
-                <ApprovalStack pending={previewActiveTab().store.pending[0]()} respond={async () => { previewActiveTab().store.pending[1]([]); }} />
+                <ApprovalStack pending={previewActiveTab().store.pending[0]()} respond={async () => { previewActiveTab().store.pending[1]([]); }} refresh={async () => { previewActiveTab().store.pending[1]([]); }} />
               </Show>
               {/* 与 App 同位:抽屉是全局单例,不挂在消息列里,否则测不到它的物理卸载。 */}
               <DiffReviewDrawer />

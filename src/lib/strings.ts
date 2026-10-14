@@ -42,7 +42,7 @@ export const STR = {
   reject: "拒绝",
   submit: "提交",
   skip: "跳过并结束本轮",
-  askAnswerRequired: "请为每个问题选择或填写答案。",
+  askAnswerRequired: "每个问题都要答,已跳到未答的那一问。",
   stop: "停止",
   send: "发送",
   sendFailed: "发送失败，草稿已保留",
@@ -73,6 +73,20 @@ export const STR = {
   planPlaceholder: "审批意见(可选)",
   autonomous: "自主执行",
   customAnswer: "自定义回答",
+  // AskUser 卡(一次一问 + 问题轨)。
+  askStepOf: (current: number, total: number) => `第 ${current} / ${total} 问`,
+  askOther: "其它",
+  askPrev: "上一问",
+  askNext: "下一问",
+  askUnanswered: "未答",
+  askAnswered: "已答",
+  /** 倒计时只显数字,完整语义走 title/aria。 */
+  askTimeLeft: (time: string) => `剩余 ${time} 后失效`,
+  askExpired: "这张卡已失效",
+  askExpiredHint: "超时或已在别处应答,表单不再可提交。",
+  askRefresh: "重新获取",
+  /** 应答失败:challenge 一次性,失败即失效,原因只能走 toast。 */
+  approvalRespondFailed: (reason: string) => `应答未生效：${reason}`,
   /** 侧栏待响应卡文案(§6.2):与后端 `SessionRunStatus` 三态一一对应。 */
   pendingPermission: "请求授权",
   pendingAsk: "请求回答",

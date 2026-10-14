@@ -459,6 +459,7 @@ const App: Component = () => {
                         <ApprovalStack
                           pending={tab.store.pending[0]()}
                           respond={(challengeId, decision, payload) => tab.store.respondApproval(challengeId, decision, payload)}
+                          refresh={() => tab.store.refreshApprovals()}
                         />
                       </Show>
                       <Composer
