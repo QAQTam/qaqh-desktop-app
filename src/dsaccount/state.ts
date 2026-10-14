@@ -54,6 +54,22 @@ export interface DsAccountStatus {
   /** 充值深链。 */
   topUpUrl: string;
   flow: DsFlowProjection;
+  /** 远端撤销的结局（daemon 内存态；daemon 重启即回到 `idle`）。 */
+  revoke?: DsRevoke;
+}
+
+/**
+ * 断开连接时那次**向上声明注销**的结果。
+ *
+ * 本地断开是即时的、也是权威的；远端那次 POST 只是告诉平台"这个应用的授权不要了"。
+ * 它可能失败，而失败时官网仍会列着这个应用——所以这条状态必须能透到界面。
+ */
+export interface DsRevoke {
+  state: "idle" | "running" | "done" | "failed";
+  /** 已经发出的尝试次数。 */
+  attempts: number;
+  /** 最近一次失败的可展示文案。 */
+  message: string | null;
 }
 
 export type DsAccountViewKind =
@@ -79,6 +95,21 @@ export interface DsAccountView {
 /** 进行中（UI 显示等待态并允许取消）。 */
 export function dsFlowRunning(state: DsFlowState): boolean {
   return state === "authorizing" || state === "exchanging";
+}
+
+/**
+ * 「远端撤销」这一列的字：**只在最终没成功时**说话。
+ *
+ * 成功无话可说；进行中也不该刷屏（用户刚点了断开，界面先说"已断开"才对）。只有
+ * "重试到头还是没成功"必须说清——因为那时官网上仍会看到本应用的授权，而界面
+ * 不能显得比事实更干净。
+ */
+export function dsRevokeNotice(revoke: DsRevoke | null | undefined): string | null {
+  if (revoke == null || revoke.state !== "failed") return null;
+  const tried = revoke.attempts > 0 ? `（已重试 ${revoke.attempts} 次）` : "";
+  const reason =
+    revoke.message == null || revoke.message === "" ? "" : `：${revoke.message}`;
+  return `远端授权撤销未完成${tried}${reason}——官网上可能仍显示本应用的授权。`;
 }
 
 /**

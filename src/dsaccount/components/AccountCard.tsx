@@ -12,7 +12,13 @@ import { For, Show, type Component } from "solid-js";
 import IconExternalLink from "~icons/lucide/external-link";
 
 import type { DsBalance } from "../../lib/dsaccount";
-import { dsAccountView, formatAmount, isPositive, type DsAccountStatus } from "../state";
+import {
+  dsAccountView,
+  dsRevokeNotice,
+  formatAmount,
+  isPositive,
+  type DsAccountStatus,
+} from "../state";
 
 type Props = {
   status: DsAccountStatus | null;
@@ -97,6 +103,9 @@ export const DsAccountCard: Component<Props> = (props) => {
         </Show>
       </Show>
 
+      <Show when={dsRevokeNotice(props.status?.revoke ?? null)}>
+        {(notice) => <p class="field-hint">{notice()}</p>}
+      </Show>
       <div class="siwc-card__actions">
         <Show when={view().canSignIn}>
           <button

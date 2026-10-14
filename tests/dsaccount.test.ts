@@ -9,12 +9,29 @@ import { describe, expect, it, vi } from "vitest";
 import {
   dsAccountView,
   dsFlowRunning,
+  dsRevokeNotice,
   formatAmount,
   isPositive,
   type DsAccountStatus,
 } from "../src/dsaccount/state";
 import { runDeepSeekSignIn, type DsSignInDeps } from "../src/dsaccount/flow";
 import { modelContextWindow, modelEfforts, modelSpec } from "../src/models/specs";
+
+describe("远端撤销的提示", () => {
+  it("只有最终没成功才说话：成功 / 进行中 / 从未登出都不出字", () => {
+    expect(dsRevokeNotice(null)).toBeNull();
+    expect(dsRevokeNotice({ state: "idle", attempts: 0, message: null })).toBeNull();
+    expect(dsRevokeNotice({ state: "running", attempts: 2, message: "平台开小差" })).toBeNull();
+    expect(dsRevokeNotice({ state: "done", attempts: 1, message: null })).toBeNull();
+  });
+
+  it("失败要说清重试次数与原因，并点出官网可能仍有授权", () => {
+    const text = dsRevokeNotice({ state: "failed", attempts: 6, message: "平台开小差" });
+    expect(text).toContain("已重试 6 次");
+    expect(text).toContain("平台开小差");
+    expect(text).toContain("官网");
+  });
+});
 
 const status = (over: Partial<DsAccountStatus> = {}): DsAccountStatus => ({
   signedIn: false,
