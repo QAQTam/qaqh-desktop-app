@@ -311,7 +311,12 @@ export function applyEntry(draft: SessionState, entry: TimelineEntryWire): Sessi
       step.elapsedMs = rawTool.display?.metrics?.elapsed_ms ?? step.elapsedMs;
       step.permission = normalizePermission(rawTool.permission) ?? step.permission;
       if (rawTool.progress != null) {
-        step.progressTail = rawTool.progress.slice(-PROGRESS_WINDOW);
+        // 终态 progress 快照同样带流标识;stderr 单独落窗。
+        if (rawTool.progress_stream === "stderr") {
+          step.progressStderrTail = rawTool.progress.slice(-PROGRESS_WINDOW);
+        } else {
+          step.progressTail = rawTool.progress.slice(-PROGRESS_WINDOW);
+        }
         step.progressTruncated = rawTool.progress_truncated === true || rawTool.progress.length > PROGRESS_WINDOW;
       }
       const nextState = normalizeToolStatus(rawTool.state);
@@ -342,9 +347,17 @@ export function applyEntry(draft: SessionState, entry: TimelineEntryWire): Sessi
       if (step?.kind !== "tool") break;
       const chunk = event.chunk;
       if (!chunk) break;
-      const next = (step.progressTail ?? "") + chunk;
-      step.progressTail = next.length > PROGRESS_WINDOW ? next.slice(-PROGRESS_WINDOW) : next;
-      step.progressTruncated = step.progressTruncated || event.truncated === true || next.length > PROGRESS_WINDOW;
+      // 按进度流分流(stdout | stderr | 未知):未知流并入 stdout 尾窗,
+      // 与历史数据兼容;stderr 独立成窗,运行中也不再伪造交织。
+      if (event.stream === "stderr") {
+        const next = (step.progressStderrTail ?? "") + chunk;
+        step.progressStderrTail = next.length > PROGRESS_WINDOW ? next.slice(-PROGRESS_WINDOW) : next;
+        step.progressTruncated = step.progressTruncated || event.truncated === true || next.length > PROGRESS_WINDOW;
+      } else {
+        const next = (step.progressTail ?? "") + chunk;
+        step.progressTail = next.length > PROGRESS_WINDOW ? next.slice(-PROGRESS_WINDOW) : next;
+        step.progressTruncated = step.progressTruncated || event.truncated === true || next.length > PROGRESS_WINDOW;
+      }
       break;
     }
     case "tool_estimated": {

@@ -68,12 +68,13 @@ export function toolPaths(step: Pick<ToolStep, "argsJson" | "display" | "output"
   return [...new Set([...(typeof path === "string" ? [path] : []), ...files].filter((p) => p !== "/dev/null").map((p) => absoluteToolPath(p, base)))];
 }
 
-export function shellContent(step: Pick<ToolStep, "status" | "output" | "progressTail" | "progressTruncated">) {
+export function shellContent(step: Pick<ToolStep, "status" | "output" | "progressTail" | "progressStderrTail" | "progressTruncated">) {
   const terminal = ["success", "error", "denied", "aborted", "backgrounded"].includes(step.status);
   const final = terminal && step.output != null;
   return {
     text: final ? step.output?.text ?? "" : step.progressTail ?? "",
-    stderr: final ? step.output?.stderr ?? "" : "",
+    // 运行中 stderr 有独立尾窗(reducer 按 tool_progress.stream 分流);历史数据缺该窗时为空。
+    stderr: final ? step.output?.stderr ?? "" : step.progressStderrTail ?? "",
     truncated: final ? step.output?.truncated === true : step.progressTruncated === true,
   };
 }

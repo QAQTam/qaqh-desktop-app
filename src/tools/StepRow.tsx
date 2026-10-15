@@ -12,7 +12,8 @@ import IconX from "~icons/lucide/x";
 import { Collapse } from "../ui/Collapse";
 import { TextShimmer } from "../ui/TextShimmer";
 import { TodoCard, todoCardData } from "./TodoCard";
-import { hasAnsi, parseAnsi } from "../lib/ansi";
+import { parseAnsi } from "../lib/ansi";
+import { parseShellSections } from "../lib/sections";
 import { STR, formatWorkDuration } from "../lib/strings";
 import { now } from "../lib/time";
 import { DiffList } from "../diff/DiffView";
@@ -36,11 +37,19 @@ const LiveElapsed: Component<{ startedAt: number | undefined }> = (props) => {
   return <span class="tool-elapsed">{formatWorkDuration(props.startedAt == null ? 0 : Math.max(0, tick() - props.startedAt))}</span>;
 };
 
-const AnsiBlock: Component<{ text: string }> = (props) => (
-  <Show when={hasAnsi(props.text)} fallback={<pre class="tool-text">{props.text}</pre>}>
-    <pre class="tool-text"><For each={parseAnsi(props.text)} keyed={false}>{(chunk) => <span style={{ color: chunk().color, background: chunk().background, "font-weight": chunk().bold ? "600" : "", "font-style": chunk().italic ? "italic" : "", "text-decoration": chunk().underline ? "underline" : "" }}>{chunk().text}</span>}</For></pre>
-  </Show>
+const AnsiInline: Component<{ text: string }> = (props) => (
+  <For each={parseAnsi(props.text)} keyed={false}>{(chunk) => <span style={{ color: chunk().color, background: chunk().background, "font-weight": chunk().bold ? "600" : "", "font-style": chunk().italic ? "italic" : "", "text-decoration": chunk().underline ? "underline" : "" }}>{chunk().text}</span>}</For>
 );
+
+/** 普通行走 ANSI 解析;`=== 标题 ===` 分隔行识别成分节样式(原文留在 title)。 */
+const ShellText: Component<{ text: string }> = (props) => {
+  const segments = createMemo(() => parseShellSections(props.text));
+  return (
+    <pre class="tool-text"><For each={segments()}>{(seg) => seg.kind === "section"
+      ? <span class="tool-section-line" title={seg.raw}>{seg.title}</span>
+      : <AnsiInline text={seg.text} />}</For></pre>
+  );
+};
 
 const ExecResult: Component<{ step: ToolStep }> = (props) => {
   const content = createMemo(() => shellContent(props.step));
@@ -61,7 +70,7 @@ const ExecResult: Component<{ step: ToolStep }> = (props) => {
         onPointerDown={() => { following = false; }} onTouchStart={() => { following = false; }}
         onKeyDown={(event) => { if (["ArrowUp", "PageUp", "Home"].includes(event.key)) following = false; }}
         onScroll={(event) => { const el = event.currentTarget; if (el.scrollHeight - el.scrollTop - el.clientHeight <= 2) following = true; }}>
-        <Show when={content().text}><AnsiBlock text={content().text} /></Show>
+        <Show when={content().text}><ShellText text={content().text} /></Show>
         <Show when={content().stderr}><div class="tool-detail-label">stderr</div><pre class="tool-text tool-stderr">{content().stderr}</pre></Show>
       </div>
     </Show>

@@ -251,6 +251,7 @@
   .tool-shell-output.tool-progress { max-height: 160px; }
   .tool-shell-output .tool-text { max-height: none; overflow: visible; }
   .tool-stderr { color: var(--err); }
+  .tool-text .tool-section-line { display: block; margin: 2px 0 1px; color: var(--muted); font-weight: 600; letter-spacing: 0.02em; }
   .tool-error { color: var(--err); }
   .tool-exit { color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
   .tool-exit.err { color: var(--err); }

@@ -109,7 +109,7 @@ function cacheHitPercent(usage: UsageInfo): number | null {
   return total > 0 ? (usage.prompt_cache_hit_tokens / total) * 100 : null;
 }
 
-/** 一帧之内攒下来的同一种增量(按「种类 + 回合 + 块」归并)。 */
+/** 一帧之内攒下来的同一种增量(按「种类 + 回合 + 块 + 流」归并)。 */
 interface PendingFragment {
   turnId: string;
   blockId: string;
@@ -119,6 +119,8 @@ interface PendingFragment {
   /** 已消费到的 seq(取批次里最大的那个)。 */
   seq: number;
   progress: boolean;
+  /** `tool_progress` 的进度流标识("stdout" | "stderr" | null);text_delta 恒为 null。 */
+  stream: string | null;
 }
 
 /** timeline 快照窗口页大小;向上翻页页大小(spec §14.2 limit=30)。 */
@@ -415,14 +417,17 @@ export class SessionStore {
       const piece = event.type === "tool_progress" ? event.chunk : event.delta;
       // `truncated` 只有 tool_progress 带(text_delta 无此槽)。
       const truncated = event.type === "tool_progress" && event.truncated === true;
-      const key = `${progress ? "p" : "t"}\u0000${entry.turn_id}\u0000${blockId}`;
+      // 进度流是归并桶的一部分:stdout 与 stderr 不能在帧内被并成一段伪交织,
+      // 否则 reducer 就再也分不开(09-18 契约 §5.1)。
+      const stream = progress ? event.stream ?? null : null;
+      const key = `${progress ? "p" : "t"}\u0000${entry.turn_id}\u0000${blockId}\u0000${stream ?? ""}`;
       const buffered = this.pendingFragments.get(key);
       if (buffered) {
         buffered.fragments.push({ seq: entry.timeline_seq, text: piece });
         buffered.truncated = buffered.truncated || truncated;
         buffered.seq = Math.max(buffered.seq, entry.timeline_seq);
       } else {
-        this.pendingFragments.set(key, { turnId: entry.turn_id, blockId, fragments: [{ seq: entry.timeline_seq, text: piece }], truncated, seq: entry.timeline_seq, progress });
+        this.pendingFragments.set(key, { turnId: entry.turn_id, blockId, fragments: [{ seq: entry.timeline_seq, text: piece }], truncated, seq: entry.timeline_seq, progress, stream });
       }
       this.consumedSeq = Math.max(this.consumedSeq, entry.timeline_seq);
       this.scheduleFlush();
@@ -463,7 +468,7 @@ export class SessionStore {
         timeline_seq: item.seq,
         turn_id: item.turnId,
         event: item.progress
-          ? { type: "tool_progress", block_id: item.blockId, chunk: text, truncated: item.truncated }
+          ? { type: "tool_progress", block_id: item.blockId, chunk: text, truncated: item.truncated, stream: item.stream }
           // 合并后块内片段号不再有意义;顺序真相是 timeline_seq。
           : { type: "text_delta", block_id: item.blockId, fragment_seq: 0, delta: text },
       });
@@ -907,7 +912,17 @@ export class SessionStore {
    * 这里只维护 chip 状态。单个失败不影响其余:该 chip 转 failed 并留在列表里。
    */
   async addAttachments(): Promise<void> {
-    const paths = await transport.pickAttachments();
+    await this.attachPaths(await transport.pickAttachments());
+  }
+
+  /**
+   * 按**已知路径**挂附件（截图走这条：宿主已把图写进临时目录，没有对话框可开）。
+   *
+   * 与 `addAttachments` 共用一份实现是有意的：截图与手选文件在"chip 状态机"上
+   * 必须完全同形（同样去重、同样先 uploading、同样单个失败不拖垮其余），
+   * 两条路径各写一套迟早让截图的 chip 少一个错误态。
+   */
+  async attachPaths(paths: readonly string[]): Promise<void> {
     if (paths.length === 0) return;
     const known = new Set(this.pendingAttachments[0]().map((item) => item.id));
     const added: PendingAttachment[] = [];

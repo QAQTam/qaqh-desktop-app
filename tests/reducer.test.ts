@@ -49,6 +49,32 @@ test("exec 接受终态 progress 尾窗和同状态输出重刷新", () => {
   expect(step.output?.text).toBe("refreshed");
 });
 
+test("tool_progress 按 stream 分流:stderr 独立尾窗,未知流并入 stdout 尾窗", () => {
+  const state = emptySession();
+  applyEntry(state, entry(1, "t1", { type: "block_opened", block: { block_id: "e1", kind: "tool", tool: { name: "exec", state: "running" } } }));
+  applyEntry(state, entry(2, "t1", { type: "tool_progress", block_id: "e1", chunk: "out1\n", stream: "stdout" }));
+  applyEntry(state, entry(3, "t1", { type: "tool_progress", block_id: "e1", chunk: "err1\n", stream: "stderr" }));
+  applyEntry(state, entry(4, "t1", { type: "tool_progress", block_id: "e1", chunk: "out2\n" }));
+  const step = state.turns.t1!.steps[0]!;
+  if (step.kind !== "tool") throw new Error("expect tool");
+  expect(step.progressTail).toBe("out1\nout2\n");
+  expect(step.progressStderrTail).toBe("err1\n");
+  // stderr 尾窗同样受 16KB 有界约束。
+  applyEntry(state, entry(5, "t1", { type: "tool_progress", block_id: "e1", chunk: "e".repeat(20_000), stream: "stderr" }));
+  expect(step.progressStderrTail?.length).toBe(16 * 1024);
+  expect(step.progressTruncated).toBe(true);
+});
+
+test("tool_updated 的 progress 快照按 progress_stream 落窗", () => {
+  const state = emptySession();
+  applyEntry(state, entry(1, "t1", { type: "block_opened", block: { block_id: "e1", kind: "tool", tool: { name: "exec", state: "running" } } }));
+  applyEntry(state, entry(2, "t1", { type: "tool_updated", block_id: "e1", tool: { name: "exec", state: "running", progress: "diag tail", progress_stream: "stderr" } }));
+  const step = state.turns.t1!.steps[0]!;
+  if (step.kind !== "tool") throw new Error("expect tool");
+  expect(step.progressStderrTail).toBe("diag tail");
+  expect(step.progressTail).toBeUndefined();
+});
+
 describe("applyEntry:回合生命周期", () => {
   test("turn_opened/block_opened/text_delta 推进 Turn 并提升作答", () => {
     const state = emptySession();

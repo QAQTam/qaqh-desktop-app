@@ -104,8 +104,10 @@ export interface ToolStep {
   status: ToolStatus;
   output?: ToolOutput;
   error?: string;
-  /** 运行中输出尾窗(16KB 有界)。 */
+  /** 运行中输出尾窗(16KB 有界);stdout 与未知流(`stream` 缺失的历史数据)。 */
   progressTail?: string;
+  /** 运行中 stderr 尾窗(16KB 有界);`tool_progress.stream === "stderr"` 才落这里。 */
+  progressStderrTail?: string;
   progressTruncated?: boolean;
   /** 后端展示投影(权威,缺省时回退旧字段)。 */
   display?: ToolDisplay;

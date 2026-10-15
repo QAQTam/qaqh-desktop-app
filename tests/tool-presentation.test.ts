@@ -29,3 +29,9 @@ test("exec 运行只展示 progress；终态替换而不叠加；无终态输出
   expect(shellContent({ ...input, status: "error", output: undefined }).text).toBe("live order");
   expect(shellContent({ ...input, status: "success", output: { text: "", stderr: "", exitCode: 0 } }).text).toBe("");
 });
+
+test("exec 运行中 stderr 独立尾窗直接展示,不与 stdout 尾窗混排", () => {
+  const input = { progressTail: "building…", progressStderrTail: "warning: deprecated", progressTruncated: false };
+  expect(shellContent({ ...input, status: "running" })).toEqual({ text: "building…", stderr: "warning: deprecated", truncated: false });
+  expect(shellContent({ ...input, status: "success", output: { text: "done", truncated: false } })).toEqual({ text: "done", stderr: "", truncated: false });
+});
