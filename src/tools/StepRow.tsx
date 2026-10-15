@@ -124,9 +124,19 @@ export const StepRow: Component<{ step: ToolStep; turn: Turn; expandable?: boole
   // exec 默认直接展示流与终态输出；用户折叠意图优先且不会被终态重置。
   const open = () => hasDetails() && (override() ?? (kind() === "shell" || step().status === "error"));
   const stats = createMemo(() => {
-    if (kind() !== "edit" || step().status !== "success") return null;
-    const add = step().display?.lines_added ?? 0, del = step().display?.lines_removed ?? 0;
-    return add || del ? { add, del } : null;
+    if (kind() !== "edit") return null;
+    if (step().status === "success") {
+      // 成功终态用后端权威行差(display 是唯一真相)。
+      const add = step().display?.lines_added ?? 0, del = step().display?.lines_removed ?? 0;
+      return add || del ? { add, del, estimating: false } : null;
+    }
+    // 失败/拒绝/中止没有"正在发生"的行数;只有真正在跑时才用估算垫显示。
+    if (["error", "denied", "aborted", "backgrounded"].includes(step().status)) return null;
+    // streamEstimate 是"参数流里数出来的行数"(tool_estimated),口径与终态同源但
+    // 语义是"模型想改多少"而非实际改动(replace_all 成倍/命中失败归零)——
+    // 必须带「估算」角标,不能被读成结果(tool-render-audit-2026-10-09 §结果真实性)。
+    const est = step().streamEstimate;
+    return est != null && (est.add || est.del) ? { add: est.add, del: est.del, estimating: true } : null;
   });
   return (
     <Show when={todoCardData(step())} fallback={<div class={{ "step-row": true, tool: true, [`st-${step().status}`]: true, "is-latest": isLatest() }}>
@@ -144,7 +154,7 @@ export const StepRow: Component<{ step: ToolStep; turn: Turn; expandable?: boole
         <Show when={commandIcon()}>{(icon) => <img class="tool-command-icon" src={icon().src} alt="" aria-hidden="true" title={icon().label} draggable={false} />}</Show>
         <span class="tool-summary-text"><TextShimmer text={summary()} active={isShimmer()} /></span>
       </span>
-      <Show when={stats()}><span class="tool-diffstat"><b class="diff-stat-add">+{stats()!.add}</b><b class="diff-stat-del">−{stats()!.del}</b></span></Show>
+      <Show when={stats()}><span class={{ "tool-diffstat": true, "is-estimate": stats()!.estimating }}><b class="diff-stat-add">+{stats()!.add}</b><b class="diff-stat-del">−{stats()!.del}</b><Show when={stats()!.estimating}><span class="diff-stat-flag">估算</span></Show></span></Show>
       <Switch>
         <Match when={step().status === "running"}><LiveElapsed startedAt={step().startedAt} /></Match>
         <Match when={step().status === "error"}><span class="tool-state err">{STR.failed}</span></Match>
