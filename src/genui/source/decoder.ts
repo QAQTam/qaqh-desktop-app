@@ -16,10 +16,13 @@
  */
 
 export type UiFormat = "tsx" | "jsonl";
+/** 围栏协议版本:0.1 = v0.1 IR 渲染器;0.2 = A2UI 消息流渲染器(SurfaceView2)。 */
+export type UiVersion = "0.1" | "0.2";
 
 export type MarkdownPart = { kind: "markdown"; text: string };
 export type UiSourcePart = {
   kind: "ui";
+  version: UiVersion;
   format: UiFormat;
   /** 围栏体内源码(不含围栏行本身)。 */
   source: string;
@@ -30,7 +33,12 @@ export type UiSourcePart = {
 };
 export type ContentPart = MarkdownPart | UiSourcePart;
 
-const UI_INFOS = ["qaqh-ui v=0.1 format=tsx", "qaqh-ui v=0.1 format=jsonl"] as const;
+const UI_INFOS = [
+  "qaqh-ui v=0.1 format=tsx",
+  "qaqh-ui v=0.1 format=jsonl",
+  "qaqh-ui v=0.2 format=tsx",
+  "qaqh-ui v=0.2 format=jsonl",
+] as const;
 const FENCE_OPEN = /^ {0,3}(`{3,})(.*)$/;
 const FENCE_CLOSE = /^ {0,3}(`{3,})\s*$/;
 /** holdback 只吞一行;合法 info 最长 26 字符,64 已是宽裕上限。 */
@@ -38,21 +46,21 @@ const HOLDBACK_MAX_LINE = 64;
 /** jsonl 探测 surface.open 时最多看的行数。 */
 const JSONL_PROBE_LINES = 50;
 
-function uiFormatOf(info: string): UiFormat | null {
+function uiFormatOf(info: string): { version: UiVersion; format: UiFormat } | null {
   const tokens = info.trim().split(/\s+/);
   if (tokens[0] !== "qaqh-ui" || tokens.length > 3) return null;
-  let version: string | null = null;
+  let version: UiVersion | null = null;
   let format: UiFormat | null = null;
   for (const token of tokens.slice(1)) {
     const eq = token.indexOf("=");
     if (eq <= 0) return null;
     const key = token.slice(0, eq);
     const value = token.slice(eq + 1);
-    if (key === "v") version = value;
+    if (key === "v" && (value === "0.1" || value === "0.2")) version = value;
     else if (key === "format" && (value === "tsx" || value === "jsonl")) format = value;
     else return null;
   }
-  return version === "0.1" && format != null ? format : null;
+  return version != null && format != null ? { version, format } : null;
 }
 
 /**
@@ -113,7 +121,7 @@ interface ScanResult {
 function scan(lines: string[]): ScanResult {
   const parts: ContentPart[] = [];
   let md: string[] = [];
-  let ui: { format: UiFormat; source: string[]; openLength: number } | null = null;
+  let ui: { version: UiVersion; format: UiFormat; source: string[]; openLength: number } | null = null;
   let fenceLength = 0; // 普通(非 UI)围栏的开门长度;0 = 不在围栏内
   const flushMd = (into: ContentPart[]): void => {
     // 空行(如仅 "\n")拼出来是空串:不产 part,与增量视图/渲染层(Match 跳过空文本)同约。
@@ -126,7 +134,7 @@ function scan(lines: string[]): ScanResult {
       const close = FENCE_CLOSE.exec(line);
       if (close != null && close[1]!.length >= ui.openLength) {
         const source = ui.source.join("\n");
-        parts.push({ kind: "ui", format: ui.format, source, sealed: true, ...describe(ui.format, source) });
+        parts.push({ kind: "ui", version: ui.version, format: ui.format, source, sealed: true, ...describe(ui.format, source) });
         ui = null;
       } else {
         ui.source.push(line);
@@ -141,10 +149,10 @@ function scan(lines: string[]): ScanResult {
     }
     const open = FENCE_OPEN.exec(line);
     if (open != null && !(open[2] ?? "").includes("`")) {
-      const format = uiFormatOf(open[2]!);
-      if (format != null) {
+      const parsed = uiFormatOf(open[2]!);
+      if (parsed != null) {
         flushMd(parts);
-        ui = { format, source: [], openLength: open[1]!.length };
+        ui = { version: parsed.version, format: parsed.format, source: [], openLength: open[1]!.length };
         continue;
       }
       md.push(line);
@@ -163,7 +171,7 @@ function scan(lines: string[]): ScanResult {
         const sealed = close != null && close[1]!.length >= ui.openLength;
         if (!sealed && pendingLine != null) ui.source.push(pendingLine);
         const source = ui.source.join("\n");
-        result.push({ kind: "ui", format: ui.format, source, sealed, ...describe(ui.format, source) });
+        result.push({ kind: "ui", version: ui.version, format: ui.format, source, sealed, ...describe(ui.format, source) });
       } else {
         if (pendingLine != null) md.push(pendingLine);
         flushMd(result);
@@ -210,7 +218,7 @@ export type ContentDecoderStats = { pushes: number; rescans: number; scannedChar
 
 type Machine = {
   fenceLength: number;
-  ui: { format: UiFormat; source: string[]; openLength: number } | null;
+  ui: { version: UiVersion; format: UiFormat; source: string[]; openLength: number } | null;
   md: string[];
 };
 
@@ -237,7 +245,7 @@ export function createContentDecoder(): {
       const close = FENCE_CLOSE.exec(line);
       if (close != null && close[1]!.length >= machine.ui.openLength) {
         const source = machine.ui.source.join("\n");
-        emitted.push({ kind: "ui", format: machine.ui.format, source, sealed: true, ...describe(machine.ui.format, source) });
+        emitted.push({ kind: "ui", version: machine.ui.version, format: machine.ui.format, source, sealed: true, ...describe(machine.ui.format, source) });
         machine.ui = null;
       } else {
         machine.ui.source.push(line);
@@ -252,10 +260,10 @@ export function createContentDecoder(): {
     }
     const open = FENCE_OPEN.exec(line);
     if (open != null && !(open[2] ?? "").includes("`")) {
-      const format = uiFormatOf(open[2]!);
-      if (format != null) {
+      const parsed = uiFormatOf(open[2]!);
+      if (parsed != null) {
         flushMd(emitted);
-        machine.ui = { format, source: [], openLength: open[1]!.length };
+        machine.ui = { version: parsed.version, format: parsed.format, source: [], openLength: open[1]!.length };
         return;
       }
       machine.md.push(line);
@@ -296,7 +304,7 @@ export function createContentDecoder(): {
       // 集(final 之后不会再有增量),重复 push 幂等。
       if (machine.ui != null) {
         const source = machine.ui.source.join("\n");
-        emitted.push({ kind: "ui", format: machine.ui.format, source, sealed: false, ...describe(machine.ui.format, source) });
+        emitted.push({ kind: "ui", version: machine.ui.version, format: machine.ui.format, source, sealed: false, ...describe(machine.ui.format, source) });
         machine.ui = null;
       } else {
         flushMd(emitted);
@@ -314,7 +322,7 @@ export function createContentDecoder(): {
       const hasSource = machine.ui.source.length > 0;
       let source = machine.ui.source.join("\n");
       if (live != null && !sealed) source = hasSource ? `${source}\n${live}` : live;
-      result.push({ kind: "ui", format: machine.ui.format, source, sealed, ...describe(machine.ui.format, source) });
+      result.push({ kind: "ui", version: machine.ui.version, format: machine.ui.format, source, sealed, ...describe(machine.ui.format, source) });
       return result;
     }
     const mdTail = live == null || machine.fenceLength > 0 || !isHoldbackCandidate(live);

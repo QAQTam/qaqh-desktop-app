@@ -12,6 +12,7 @@ import { For, Match, Show, Switch, createMemo, createSignal, type Accessor, type
 import { Collapse } from "../ui/Collapse";
 import { Markdown } from "../markdown/Markdown";
 import SurfaceView from "./render/SurfaceView";
+import SurfaceView2 from "./v2/render/SurfaceView2";
 import { compileSurface } from "./compiler";
 import { createContentDecoder, type ContentPart, type UiSourcePart } from "./source/decoder";
 
@@ -19,6 +20,7 @@ import { createContentDecoder, type ContentPart, type UiSourcePart } from "./sou
 const UiSurfaceBlock: Component<{ part: Accessor<UiSourcePart>; onFollowUp?: (text: string) => void }> = (props) => {
   const [open, setOpen] = createSignal(false);
   const compiled = createMemo(() => {
+    if (props.part().version === "0.2") return { state: "v2" as const };
     const part = props.part();
     if (part.sealed) {
       try {
@@ -44,7 +46,9 @@ const UiSurfaceBlock: Component<{ part: Accessor<UiSourcePart>; onFollowUp?: (te
     return current.state === "error" ? current.message : null;
   };
   const status = () => (props.part().sealed ? "已生成" : "生成中");
-  return (
+  // v0.2(A2UI 消息流):编译/patch/流式占位/具名失败全部由 SurfaceView2 自管,
+  // 这里按围栏协议版本整体分流;v0.1 路径(v1View)保持原样不动。
+  const v1View = (
     /* keyed 按 surfaceId 而非对象身份:流式期间每一帧部分编译都产出新 IR,
      * 按对象 key 会让 SurfaceView 整棵重挂(输入到一半的 TextInput 被清空、
      * 已渲染的节点闪烁);按 id key 则同一 surface 就地更新,节点到达即出现。 */
@@ -63,6 +67,14 @@ const UiSurfaceBlock: Component<{ part: Accessor<UiSourcePart>; onFollowUp?: (te
     }>
       {(value) => <SurfaceView ir={value.ir} onFollowUp={props.onFollowUp} streaming={compiled().state === "partial"} />}
     </Show>
+  );
+  return (
+    <Switch>
+      <Match when={props.part().version === "0.2"}>
+        <SurfaceView2 part={props.part} onFollowUp={props.onFollowUp} />
+      </Match>
+      <Match when={true}>{v1View}</Match>
+    </Switch>
   );
 };
 

@@ -94,6 +94,6 @@ describe("decoder 不变量 fuzz", () => {
     // 流式:开门行 + 空行都已确认,live 行 "u" 追加时不得吃掉空行。
     decoder.push("```qaqh-ui v=0.1 format=tsx\n\n");
     const live = decoder.push("```qaqh-ui v=0.1 format=tsx\n\nu");
-    expect(live).toEqual([{ kind: "ui", format: "tsx", source: "\nu", sealed: false }]);
+    expect(live).toEqual([{ kind: "ui", version: "0.1", format: "tsx", source: "\nu", sealed: false }]);
   });
 });
