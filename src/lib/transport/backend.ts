@@ -63,6 +63,23 @@ export type TodoItemWire = {
 export type AttachmentUploadWire = ContentRef & { name: string; size: number };
 
 /**
+ * `capture_screenshot` 的返回体(宿主侧的临时文件信息)。
+ *
+ * 刻意与 `AttachmentUploadWire` 分开:那是**上传后**的引用,这条只是"本机有这么个
+ * 文件"。前端只把它当 `uploadAttachment` 的入参,不解析、不展示路径细节。
+ */
+export type ScreenshotWire = { path: string; name: string; size: number };
+
+/**
+ * 截图范围。`selection` = 系统十字准星拉一块(快捷键走这条,"就指这里");
+ * `fullscreen` = 整屏一张,适合抓一闪即逝的状态。
+ *
+ * 没有 `window` 档是有意的:Tauri 侧拿窗口号要下 Objective-C 消息,而"截错窗口"
+ * 与"截错范围"一样难查——先给两个确定能截对的范围。
+ */
+export type ShotMode = "selection" | "fullscreen";
+
+/**
  * 从命令里取出待发附件引用。空数组等同携带——会被序列化成 `attachments: []`,
  * 所以这里直接收敛成 null,让命令与「本来就没有附件」逐字同形。
  */
@@ -106,6 +123,14 @@ export interface TransportBackend {
 
   /** 原生多选附件对话框;空数组 = 用户取消或该形态无对话框。 */
   pickAttachments(): Promise<string[]>;
+
+  /**
+   * 应用内截图(macOS 走系统 `screencapture`)。`null` = 用户取消(交互态按 Esc);
+   * 拒绝 = 平台不支持或系统工具报错,调用方必须把原因说出来。
+   *
+   * 回的是**本机临时文件**信息:路径只用来接着调 `uploadAttachment`,字节不进 webview。
+   */
+  captureScreenshot(mode: ShotMode): Promise<ScreenshotWire | null>;
 
   /**
    * 上传单个本地附件。字节读取与上传都在宿主侧完成(命令里不允许出现本地路径),

@@ -13,6 +13,7 @@ import IconArrowUp from "~icons/lucide/arrow-up";
 import IconSquare from "~icons/lucide/square";
 import IconPlus from "~icons/lucide/plus";
 import IconPaperclip from "~icons/lucide/paperclip";
+import IconCamera from "~icons/lucide/camera";
 import IconChevronDown from "~icons/lucide/chevron-down";
 import IconArchive from "~icons/lucide/archive";
 import IconFolder from "~icons/lucide/folder";
@@ -86,6 +87,11 @@ export const Composer: Component<{
   /** 待发附件 chip 列表(上传态由 store 维护)。 */
   attachments?: () => PendingAttachment[];
   onRemoveAttachment?: (id: string) => void;
+  /**
+   * 应用内截图(macOS ⌘⇧S 那条的按钮入口)。不传则不渲染——浏览器预览与
+   * 非 mac 平台都拿不到系统截图,摆出来只会变成一个坏控件。
+   */
+  onScreenshot?: () => void;
 }> = (props) => {
   let textarea: HTMLTextAreaElement | undefined;
   const [openMenu, setOpenMenu] = createSignal<"profile" | "workspace" | "context" | "effort" | null>(null);
@@ -113,6 +119,8 @@ export const Composer: Component<{
   const uploading = (): boolean => attachments().some((item) => item.state === "uploading");
   /** 未新建会话时没有可上传的目标(上传按 seed 归属),此时不摆出附件入口。 */
   const canAttach = (): boolean => props.onPickAttachments != null && props.blocked() !== "no-session";
+  /** 截图与附件同一道闸:都要先有会话 seed 才上传得了,入口不该在没会话时出现。 */
+  const canShot = (): boolean => props.onScreenshot != null && canAttach();
 
   const workspaceLabel = (): string => {
     const path = props.workspacePath?.() ?? "";
@@ -219,6 +227,18 @@ export const Composer: Component<{
                 onClick={() => props.onPickAttachments?.()}
               >
                 <IconPlus />
+              </button>
+            </Show>
+            {/* 应用内截图：走同一份 chip 状态机，只是来源换成系统截图（选区）。 */}
+            <Show when={canShot()}>
+              <button
+                type="button"
+                class="composer-tool-button composer-shot"
+                aria-label={STR.shotAdd}
+                title={STR.shotAddTitle}
+                onClick={() => props.onScreenshot?.()}
+              >
+                <IconCamera />
               </button>
             </Show>
             <Show when={props.onProfile == null ? null : profile()}>

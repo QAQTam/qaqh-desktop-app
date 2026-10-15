@@ -138,6 +138,46 @@ attach(宿主切 active + 重建 timeline/v2 流)+ 快照重建。重连/退避/
 - **D-1** 后端 diff 无结构化 `stats` → 由后端 diff 文本行数统计;后端补
   stats 后前端统计退役。
 
+## 推理强度档位（词表权威在哪）
+
+档位阶梯在前后端各有一份镜像，**改动前先看清哪份是权威**：
+
+- 后端权威 = `origin/main`：`qaqh-gate/src/types.rs::EFFORT_LADDER` 六档
+  `low|medium|high|xhigh|max|ultra`，`ConfigPatch::validate` 同词表。加 `ultra`
+  的那次提交是 `aa7f2b3`（2026-10-14 11:17）。
+- 前端镜像 = `src/models/specs.ts::EFFORT_LADDER`（强度轨道）与
+  `src/settings/patch.ts::REASONING_EFFORTS`（设置页下拉）。两处必须同序，
+  `tests/settings-patch.test.ts` 有一条不变量测试钉住它。
+- **别拿本地那份 `../qaqh-backend` checkout 当权威**：它可能停在冻结基线
+  （`6a0e282`，10-10，无 `ultra`）且已与 origin 分叉。按它改档位会把合法档砍掉。
+- `[契约缺口] S-1` 随仓 sidecar `src-tauri/binaries/qaqh-daemon-*` 目前是
+  `2.0.0-beta.3`（10-11 构建，早于 `aa7f2b3`），字符串里没有 `ultra`，也就是说
+  **这个二进制会拒 `ultra`**。要么把后端仓更新到 RC1 再重编 sidecar（`tauri.conf.json`
+  的 `beforeBuildCommand` 从 `../qaqh-backend` 出 `--target-dir ../target`），
+  要么在发行说明里写清当前档位上限。这也是 `Cargo.lock` 里
+  `qaqh-types` 版本漂移（`2.0.0-RC1` vs `beta.3`）的同一个根因。
+
+## 应用内截图（⌘⇧S）
+
+前端要报一个界面问题，最难的一步是"把当时那一屏给我看"。所以壳里接了一条截图：
+
+- **键位**：`⌘⇧S`（macOS）/ `Ctrl+Shift+S`。判定在 `src/lib/screenshot.ts::isScreenshotShortcut`，
+  挂在 `src/app/App.tsx` 的全局快捷键面上，位置在"设置浮层归浮层"那条规则**之前**——
+  设置页（OAuth/BYOK 那些字段）正是最需要截图的地方，浮层开着也该能截。
+- **入口**：除了键，输入区与 Startup 页各有一个相机按钮（宿主给不了截图的形态下不渲染）。
+- **实现在宿主**：`src-tauri/src/commands.rs::capture_screenshot` 调系统的
+  `/usr/sbin/screencapture`（`-x` 静音、选区态加 `-i`，同时把图丢进剪贴板 `-c`），
+  写到**应用临时目录**，只回 `{path,name,size}`。渲染层拿这个路径走既有的
+  `upload_attachment` —— 不为截图新辟上传口，字节也永远不进 webview。
+- **落点**：有活动会话 → 输入区附件 chip；还在 Startup（会话未建）→ 暂存列表，
+  随首条消息一起上传。取消（准星上按 Esc）与失败分开报，不会挂出一个空附件。
+- **平台**：目前只有 macOS 有实现，非 mac 那条命令直接返回"不支持"并说明改用系统
+  截图键 + 「添加附件」。要 Windows 的原生面需要另接 API（Windows.Graphics.Capture），
+  那是另一件事。
+- **权限（要用户动手的一次）**：macOS 11 起截屏受「屏幕录制」TCC 管控。首次会由系统
+  弹授权；**未授权时 `screencapture` 仍可能退出 0 但给出全黑图**，这条只能在
+  系统设置 → 隐私与安全性 → 屏幕录制 里放行，本应用不猜、也不代填。
+
 ## 安全边界
 
 - **token 面**:daemon bearer token / lease id 只存在于 Rust 宿主进程;

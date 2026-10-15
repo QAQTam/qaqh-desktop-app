@@ -156,6 +156,14 @@
     color: var(--muted); font-size: var(--fs-xs); line-height: 1.6;
   }
 
+  /* 套餐+GPT 家族的摘要走 markdown(特判见 src/turn/thinking-label):
+     排版交给 .md-host,white-space 不能再 pre-wrap(源码换行会变双倍空行);
+     窗口放宽——「不折叠」的意义就是读得见结构,但仍给跟随滚动的尾窗。 */
+  .thinking-full.thinking-md { max-height: 40vh; white-space: normal; }
+  .thinking-full.thinking-md .md-host { color: var(--muted); font-size: var(--fs-xs); }
+  .thinking-full.thinking-md .md-host > :first-child { margin-top: 0; }
+  .thinking-full.thinking-md .md-host > :last-child { margin-bottom: 0; }
+
   /* 工具行(§8) */
   .step-row.tool { min-width: 0; }
   /* todo v2 语义卡片:成功终态的 todo 调用原位渲染清单快照,替代纯文字语义行。 */

@@ -81,8 +81,10 @@ const given = (value: string | undefined): boolean =>
  * 保存期校验给出可读错误，而不是猜一个 URL 填进用户配置。
  *
  * **已知缺口**：合并补丁的语义是"空串 = 保持现值"，所以没有"清空某字段"的表达。
- * 于是**第一次**切回自带 key 时，若该槽位还没有抓过模型名，全局 `model` 会留着
- * 套餐的 slug——界面应提示用户确认模型名，而不是假装已经切干净了。
+ * 于是**第一次**切到某一家时，若该槽位还没抓过模型名，全局 `model` 会留着上一家
+ * 的 slug。切**到**账号额度那两家时，接入页（`./OAuthPage`）从这一家自己的目录里
+ * 取一条填上（见 `./model-catalog::preferredModel`）；切回 BYOK 没有目录可取，
+ * 只能提示用户确认模型名 —— 假装已经切干净了更糟。
  */
 export function switchFields(
   provider: ProviderEntry,
@@ -178,3 +180,37 @@ export function saveState(map: ProviderStateMap, storage: StorageLike | null = s
 export const BYOK_ID = BYOK_PROVIDER_ID;
 /** 名录里套餐那一家的 id。 */
 export const PLAN_ID = PLAN_PROVIDER_ID;
+
+/**
+ * 「上次在用的是哪一家**账号额度**」——胶囊开关拨回"开"时的落点。
+ *
+ * 单独一个键，不进 `PROVIDER_STATE_KEY` 那份表：那份是"每家的字段快照"，
+ * 混进一个字符串就把 `loadState` 的形状约定破坏了（它只认嵌套对象）。
+ * 存的是 provider id，不是凭据 —— 与那份表同样的边界。
+ */
+export const LAST_ACCOUNT_KEY = "qaqh.oauth.lastAccountProvider";
+
+export function loadLastAccountProvider(
+  storage: StorageLike | null = safeStorage(),
+): string | null {
+  if (storage == null) return null;
+  try {
+    const raw = storage.getItem(LAST_ACCOUNT_KEY);
+    return raw == null || raw.trim() === "" ? null : raw.trim();
+  } catch {
+    return null;
+  }
+}
+
+/** 写不落也就罢了：丢了只影响"下次拨开关落到哪家"，不影响推理本身。 */
+export function saveLastAccountProvider(
+  providerId: string,
+  storage: StorageLike | null = safeStorage(),
+): void {
+  if (storage == null) return;
+  try {
+    storage.setItem(LAST_ACCOUNT_KEY, providerId);
+  } catch {
+    // 忽略。
+  }
+}

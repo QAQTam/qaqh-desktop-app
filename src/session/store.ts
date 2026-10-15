@@ -130,6 +130,14 @@ const PAGE_LIMIT = 30;
 const RESNAPSHOT_DEBOUNCE_MS = 2_000;
 /** 压缩终态卡(done/skipped)自动退场的延时;failed 不退,留待用户处理。 */
 const COMPACT_CARD_TTL_MS = 8_000;
+/**
+ * 取消看门狗:`conversation_cancel` 发出后,超过此时长仍未见 `turn_finished` /
+ * `turn_interrupted`,就本地强制收口(BUG-2026-10-15:后端工具卡死时 turn 状态机
+ * 到不了终态,前端三症状——stopping 常亮/无法重发/蓝点常亮——全是它的投影)。
+ * 兜底只修界面,后端孤儿工具由 T2 的宽限期收割解决。
+ */
+const CANCEL_WATCHDOG_MS = 10_000;
+export { CANCEL_WATCHDOG_MS };
 
 export class SessionStore {
   readonly seed: string;
@@ -154,6 +162,8 @@ export class SessionStore {
   private compactedCheckpoint: string | null = null;
   /** 终态卡自动退场定时器;任何后续压缩状态都会先撤掉。 */
   private compactTimer: number | null = null;
+  /** 取消看门狗定时器;真实终态 delta / 新回合 / dispose 都会先撤掉。 */
+  private cancelWatchdog: ReturnType<typeof setTimeout> | null = null;
   /** 待发附件;上传成功前不允许发送(命令里只能出现 `ContentRef`)。 */
   pendingAttachments = createSignal<PendingAttachment[]>([]);
   loadingOlder = createSignal(false);
@@ -268,6 +278,7 @@ export class SessionStore {
 
   dispose(): void {
     this.disposed = true;
+    this.clearCancelWatchdog();
     this.closeHost();
     // 退订后还挂在队列里的 rAF 回调会带着已废弃标签的缓冲写进 store(一次性悬挂,
     // 不是泄漏级问题,但关掉它就不用解释它)。
@@ -541,6 +552,8 @@ export class SessionStore {
     if (!delta.channel || !delta.kind) return;
     if (delta.channel === "conversation") {
       if (delta.kind === "turn_started") {
+        // 新回合已开:旧取消的看门狗作废,不得误伤新一轮的乐观发送态。
+        this.clearCancelWatchdog();
         this.isSending[1](false);
         this.activeTurnStartedAt = now();
         this.activeModelBlockIds.clear();
@@ -556,6 +569,8 @@ export class SessionStore {
         const usage = delta.body.usage as UsageInfo | null | undefined;
         if (usage != null) this.updateComposerUsage(usage);
         if (delta.kind === "turn_finished" || delta.kind === "turn_interrupted") {
+          // 真实终态到达:取消看门狗撤防。
+          this.clearCancelWatchdog();
           this.isSending[1](false);
           this.activeTurnStartedAt = null;
           this.activeModelBlockIds.clear();
@@ -978,6 +993,43 @@ export class SessionStore {
     const turn = activeKey != null ? this.stateGet.turns[activeKey] : null;
     const turnId = turn?.id ?? null;
     await transport.command("conversation", { channel: "conversation", type: "conversation_cancel", turn_id: turnId }, this.seed);
+    // 命令已入队才布防:投递失败走异常,Composer 的 catch 会复位 stopping,
+    // 不需要看门狗代劳。真实终态 delta 到达时撤防(见 applyProjection)。
+    this.armCancelWatchdog(turnId);
+  }
+
+  /**
+   * 取消看门狗:超过 `CANCEL_WATCHDOG_MS` 仍无终态 delta,就地把 running 回合
+   * 收口为 aborted、复位乐观发送态、activity 归为 interrupted,并补拉快照。
+   * 这是纯前端的自愈——后端 turn 状态机卡死(工具无取消检查点)时不发终态,
+   * 本兜底保证 UI 永不假死;若后端稍后真的补出终态,事件会幂等覆盖同一收口。
+   */
+  private armCancelWatchdog(turnId: string | null): void {
+    this.clearCancelWatchdog();
+    this.cancelWatchdog = setTimeout(() => {
+      this.cancelWatchdog = null;
+      if (this.disposed) return;
+      this.isSending[1](false);
+      this.activeTurnStartedAt = null;
+      this.activeModelBlockIds.clear();
+      this.activeStreamWindow = [];
+      this.activeStreamTokens = 0;
+      this.composerMetrics[1]((current) => ({ ...current, isStreaming: false }));
+      // 蓝点:后端仍报 working(卡死的 actor),本地先按已中断呈现;
+      // 真实 activity 投影到达时会被覆盖。
+      if (this.activity[0]() === "working") this.activity[1]("interrupted");
+      this.mutate((draft) => {
+        forceSealTurn(draft, turnId, "cancelled");
+      });
+      void this.resnapshot();
+    }, CANCEL_WATCHDOG_MS);
+  }
+
+  private clearCancelWatchdog(): void {
+    if (this.cancelWatchdog != null) {
+      clearTimeout(this.cancelWatchdog);
+      this.cancelWatchdog = null;
+    }
   }
 
   /**

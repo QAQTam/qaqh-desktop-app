@@ -7,6 +7,8 @@ import type {
   Ack,
   ApprovalView,
   AttachmentUploadWire,
+  ScreenshotWire,
+  ShotMode,
   StreamHandlers,
   TimelinePageResponse,
   TimelineStatusWire,
@@ -175,6 +177,11 @@ export class BrowserPreviewTransport implements TransportBackend, TauriHostSurfa
   /** 预览桥固定回空数组(无原生窗口);上传路径因此不会被触发。 */
   pickAttachments(): Promise<string[]> {
     return invoke<string[]>("pick_attachments");
+  }
+
+  /** 预览桥固定回 `null`(=取消):浏览器里没有系统截图工具可调。 */
+  captureScreenshot(mode: ShotMode): Promise<ScreenshotWire | null> {
+    return invoke<ScreenshotWire | null>("capture_screenshot", { mode });
   }
 
   uploadAttachment(seed: string, path: string): Promise<AttachmentUploadWire> {

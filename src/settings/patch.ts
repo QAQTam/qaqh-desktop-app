@@ -36,8 +36,11 @@ export type ConfigPatchWire = Optionalize<Omit<ConfigPatch, "subagent">> & {
 /** 允许值来自 `ConfigPatch::validate()`;空串不在其中——别发。
  *
  *  与后端 `EFFORT_LADDER`(`qaqh-gate/src/types.rs`)同序,**逐档对齐**:
- *  后端一直是六档 `low|medium|high|xhigh|max|ultra`,前端此前只镜像了 Codex
- *  那五档(缺 `max`),于是后端接受的 `max` 在这里被自己人拒掉。现已同序。 */
+ *  上游六档 `low|medium|high|xhigh|max|ultra`(`origin/main` 的 aa7f2b3,10-14 11:17;
+ *  `ConfigPatch::validate` 同词表)。本地那份 `../qaqh-backend` checkout 与随仓 sidecar
+ *  都停在加 ultra 之前,看着像"五档"——别照着它们改这里,详见 `models/specs.ts` 的
+ *  `ReasoningTier` 注释。多一档 = 下拉里摆一个后端会拒的值;少一档 = 后端接受的
+ *  最高档被自己人拒掉。 */
 export const REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"] as const;
 /** BYOK 的四条 wire——没有 provider 目录可查,协议由用户直接声明。 */
 export const WIRE_PROTOCOLS = ["openai", "responses", "anthropic", "gemini"] as const;

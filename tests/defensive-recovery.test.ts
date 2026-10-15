@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { SessionStore } from "../src/session/store";
+import { SessionStore, CANCEL_WATCHDOG_MS } from "../src/session/store";
 import { forceSealTurn, emptySession } from "../src/session/reducer";
 import { transport } from "../src/lib/transport";
 import type { TimelineEntryWire } from "../src/session/types";
@@ -98,4 +98,61 @@ test("cancelTurn 携带当前活跃的 turn_id", async () => {
     }),
     "test-cancel",
   );
+});
+
+test("取消看门狗：cancel 后超过宽限期仍无终态，就地收口 running 回合并复位发送态", async () => {
+  vi.useFakeTimers();
+  const store = new SessionStore("test-cancel-watchdog");
+  vi.spyOn(transport, "command").mockResolvedValue({ status: "accepted" });
+  const resnapshotSpy = vi.spyOn(store, "resnapshot").mockResolvedValue();
+
+  (store as unknown as { onTimelineEntry(entry: TimelineEntryWire): void }).onTimelineEntry({
+    timeline_seq: 1,
+    turn_id: "t-stuck",
+    event: { type: "turn_opened", user_text: "test" },
+  } as TimelineEntryWire);
+  (store as unknown as { isSending: ReturnType<typeof store.isSending> }).isSending[1](true);
+
+  await store.cancelTurn();
+
+  // 宽限期内（<10s）：不动任何状态
+  await vi.advanceTimersByTimeAsync(CANCEL_WATCHDOG_MS - 1);
+  expect(store.isSending[0]()).toBe(true);
+  expect(store.state[0].turns["t-stuck"]?.status).toBe("running");
+
+  // 超时：本地兜底收口
+  await vi.advanceTimersByTimeAsync(1);
+  expect(store.isSending[0]()).toBe(false);
+  expect(store.state[0].turns["t-stuck"]?.status).toBe("aborted");
+  expect(store.state[0].runningTurns).toBe(0);
+  expect(resnapshotSpy).toHaveBeenCalledOnce();
+});
+
+test("取消看门狗：真实终态 delta 到达即撤防，不再重复收口", async () => {
+  vi.useFakeTimers();
+  const store = new SessionStore("test-cancel-watchdog-disarm");
+  vi.spyOn(transport, "command").mockResolvedValue({ status: "accepted" });
+  const resnapshotSpy = vi.spyOn(store, "resnapshot").mockResolvedValue();
+
+  (store as unknown as { onTimelineEntry(entry: TimelineEntryWire): void }).onTimelineEntry({
+    timeline_seq: 1,
+    turn_id: "t-fast",
+    event: { type: "turn_opened", user_text: "test" },
+  } as TimelineEntryWire);
+
+  await store.cancelTurn();
+
+  // 终态 delta 在宽限期内到达
+  (store as unknown as { applyProjection(key: unknown, payload: unknown): void }).applyProjection(
+    { kind: "channel", data: "conversation" },
+    {
+      kind: "conversation_delta",
+      data: { kind: "turn_interrupted", data: { turn_id: "t-fast", reason: "cancel_before_seal" } },
+    },
+  );
+
+  await vi.advanceTimersByTimeAsync(CANCEL_WATCHDOG_MS * 2);
+  // 终态路径收口一次即止，看门狗没有二次触发（resnapshot 也只被终态路径调一次）
+  expect(store.state[0].turns["t-fast"]?.status).toBe("aborted");
+  expect(resnapshotSpy).toHaveBeenCalledOnce();
 });

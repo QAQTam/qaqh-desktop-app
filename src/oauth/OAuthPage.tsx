@@ -10,11 +10,15 @@
  * 为什么这么切：后端短期内没有 per-provider 的结构可挂，而单一的全局 `model`
  * 装不下两份状态——**切走之前先快照**（`captureProviderState`）才谈得上切回来。
  *
- * ## 两条硬约束
+ * ## 三条硬约束
  *
  * 1. 本页只写「provider 相关的字段」（credential/wire/baseUrl/model/contextLength），
  *    绝不整包写回：设置页可能正有未保存草稿，整包会把它一起提交。
  * 2. 授权 URL 交给**系统浏览器**打开；daemon 不 spawn 进程、也不内嵌 webview。
+ * 3. 胶囊开关说的是「**有没有在用账号额度**」（套餐或 DeepSeek 账号），不是
+ *    "是不是套餐"——设置页那批 BYOK 字段的置灰判据也是这个（`isAccountCredential`），
+ *    两边必须同一个判据，否则切到 DeepSeek 时开关会自己弹回"关"。模型目录按
+ *    provider 归口（`./model-catalog`），本页与输入区共用同一份判定。
  */
 import { createSignal, For, Match, onCleanup, onSettled, Show, Switch, type Component } from "solid-js";
 import IconChevronLeft from "~icons/lucide/chevron-left";
@@ -47,17 +51,28 @@ import {
 } from "../lib/siwc";
 import { transport } from "../lib/transport";
 import { isTauriRuntime } from "../lib/transport/backend";
-import { modelSpec } from "../models/specs";
+import { modelSpec, type SpecBucket } from "../models/specs";
 import { siwcApiBase, siwcPlanBadgeVisible, type SiwcSessionStatus } from "../siwc/brand";
 import { SiwcConnectionCard } from "../siwc/components/ConnectionCard";
 import { SiwcFirstRunNotice } from "../siwc/components/FirstRunNotice";
 import { toast } from "../ui/toast";
-import { isOauthMode } from "./mode";
+import { oauthPillView } from "./mode";
+import {
+  catalogKindOf,
+  fetchModelCatalog,
+  modelOptions,
+  preferredModel,
+  specBucketOfKind,
+  type CatalogKind,
+  type ModelEntry,
+} from "./model-catalog";
 import {
   activeProviderId,
   captureProviderState,
+  loadLastAccountProvider,
   loadState,
   rememberState,
+  saveLastAccountProvider,
   saveState,
   switchFields,
   type ProviderStateMap,
@@ -65,7 +80,9 @@ import {
 import {
   ACCOUNT_PROVIDERS,
   BYOK_PROVIDER_ID,
+  DSACCOUNT_PROVIDER_ID,
   PLAN_PROVIDER_ID,
+  accountTargetId,
   providerById,
   type ProviderEntry,
 } from "./providers";
@@ -94,6 +111,88 @@ const messageOf = (cause: unknown): string =>
 
 type QuotaRow = { label: string; value: string; tone?: "ok" | "muted" };
 
+/** 一家目录的读取状态（按**来源**分槽：套餐与 DeepSeek 账号各有各的目录，互不覆盖）。 */
+type CatalogSlot = { entries: ModelEntry[] | null; error: string | null; busy: boolean };
+
+const EMPTY_SLOT: CatalogSlot = { entries: null, error: null, busy: false };
+
+/**
+ * 模型列表（接入页）：条目来自**这一家自己的**目录 —— 套餐读 ChatGPT 目录，
+ * DeepSeek 账号读平台 `/models`；BYOK 没有账户级目录，那张卡不渲染这个块。
+ *
+ * 生效中的那张卡点了就落盘（`config.save {model}`）；还没生效的那张只把选择记进
+ * 该 provider 的槽位、切换时一起写过去 —— 否则"给一家还没在用的服务商选模型"会
+ * 把它的模型名塞进当前配置，等于替用户切了半个服务商。
+ */
+const ModelList: Component<{
+  active: boolean;
+  providerName: string;
+  bucket: SpecBucket;
+  /** 当前**生效**的模型名（只有本卡生效时才等于"本卡的选中项"）。 */
+  model: string | null;
+  /** `null` = 还没拿到目录（与"拿到了但是空目录"是两回事，文案不能混）。 */
+  options: ModelEntry[] | null;
+  busy: boolean;
+  error: string | null;
+  onReload: () => void;
+  onPick: (slug: string) => void;
+}> = (props) => {
+  const selected = (slug: string): boolean => props.active && props.model === slug;
+
+  return (
+    <div class="oauth-models">
+      <div class="oauth-models__head">
+        <span class="oauth-models__title">
+          {props.active ? "模型" : `切到${props.providerName}时用的模型`}
+        </span>
+        <button type="button" class="ghost-mini" disabled={props.busy} onClick={() => props.onReload()}>
+          {props.busy ? "读取中…" : "刷新目录"}
+        </button>
+      </div>
+
+      <Show
+        when={(props.options ?? []).length > 0}
+        fallback={
+          <div class="oauth-models__empty">
+            <p class="oauth-models__note">
+              {props.options == null
+                ? (props.error ?? "正在读取这一家的模型目录…")
+                : (props.error ?? "这一家返回的模型目录是空的：先完成登录，再点「刷新目录」。")}
+            </p>
+            <p class="oauth-models__note oauth-models__note--muted">
+              目录拿不到也能推理：输入区强度卡里的模型那一行可以直接填模型 id（账号额度模式下设置页的 BYOK 字段是置灰的）。
+            </p>
+          </div>
+        }
+      >
+        <div class="oauth-models__list" role="listbox" aria-label={`${props.providerName} 模型目录`}>
+          <For each={props.options ?? []}>
+            {(entry) => {
+              const known = modelSpec(props.bucket, entry.slug).known;
+              return (
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={selected(entry.slug) ? "true" : "false"}
+                  class={selected(entry.slug) ? "selected" : undefined}
+                  disabled={props.busy}
+                  onClick={() => props.onPick(entry.slug)}
+                >
+                  <span>{entry.displayName}</span>
+                  <small>{entry.slug}</small>
+                  <Show when={!known}>
+                    <small class="oauth-models__unknown">未收录</small>
+                  </Show>
+                </button>
+              );
+            }}
+          </For>
+        </div>
+      </Show>
+    </div>
+  );
+};
+
 /**
  * 一张 provider 卡：正面是「谁」，点击翻面到「怎么连 / 连上后怎样」。
  * 卡片骨架与流程解耦——`Switch` 按 `kind` 分支，友商接入时加一个分支即可。
@@ -103,6 +202,14 @@ const ProviderCard: Component<{
   active: boolean;
   /** 当前生效的模型名（用于展示；来自 daemon 配置，不是本卡的本地状态）。 */
   model: string | null;
+  /** 这一家的模型目录条目；`null` = 还没拿到。 */
+  options: ModelEntry[] | null;
+  catalogBusy: boolean;
+  catalogError: string | null;
+  /** 翻面 / 点「刷新目录」：按这一家的来源拉一次目录。 */
+  onEnsureCatalog: () => void;
+  /** 选一条模型：生效中 → 落盘；未生效 → 只记进该 provider 的槽位。 */
+  onPickModel: (slug: string) => void;
   status: SiwcSessionStatus | null;
   busy: boolean;
   onSwitch: () => void;
@@ -134,7 +241,7 @@ const ProviderCard: Component<{
   /** 模型展示名 + 是否收录（未收录要说出来，不能让用户以为我们认得它）。 */
   const modelLabel = (): string | null => {
     if (props.model == null || props.model === "") return null;
-    const { spec, known } = modelSpec("plan", props.model);
+    const { spec, known } = modelSpec(specBucketOfKind(props.entry.kind), props.model);
     const name = spec.displayName ?? props.model;
     const base = name === props.model ? name : `${name}（${props.model}）`;
     return known ? base : `${base} · 未收录`;
@@ -174,7 +281,11 @@ const ProviderCard: Component<{
           type="button"
           class="oauth-card__face oauth-card__front"
           aria-expanded={flipped() ? "true" : "false"}
-          onClick={() => setFlipped(true)}
+          onClick={() => {
+            // 一翻面就去拉这一家的目录：不拉的话背面只能显示"目录为空"。
+            props.onEnsureCatalog();
+            setFlipped(true);
+          }}
         >
           <span class="oauth-card__brand">{props.entry.name}</span>
           <span class="oauth-card__state">{stateLabel()}</span>
@@ -254,6 +365,20 @@ const ProviderCard: Component<{
             </Match>
           </Switch>
 
+          <Show when={props.entry.kind !== "byok"}>
+            <ModelList
+              active={props.active}
+              providerName={props.entry.name}
+              bucket={specBucketOfKind(props.entry.kind)}
+              model={props.model}
+              options={props.options}
+              busy={props.catalogBusy}
+              error={props.catalogError}
+              onReload={() => props.onEnsureCatalog()}
+              onPick={(slug) => props.onPickModel(slug)}
+            />
+          </Show>
+
           <Show when={!props.active}>
             <button
               type="button"
@@ -287,17 +412,81 @@ export const OAuthPage: Component = () => {
   const [dsBusy, setDsBusy] = createSignal(false);
   const [dsAttempt, setDsAttempt] = createSignal<string | null>(null);
 
-  const oauthOn = (): boolean => isOauthMode(config());
+  /**
+   * 模型目录（按来源分槽）。`entries == null` 与 `entries == []` 是两回事：
+   * 前者是"还没拿到"（登录没完成 / 还没翻过这张卡），后者是"这家确实给了个空表"，
+   * 文案必须分开，否则用户不知道该去登录还是该来提 bug。
+   */
+  const [catalogs, setCatalogs] = createSignal<Partial<Record<CatalogKind, CatalogSlot>>>({});
+
+  const patchSlot = (kind: CatalogKind, next: Partial<CatalogSlot>): void => {
+    const previous = catalogs();
+    const merged: CatalogSlot = { ...EMPTY_SLOT, ...previous[kind], ...next };
+    // 不用 updater 形式：Solid 2 的 setter 在 `Partial<Record<...>>` 上会挑到
+    // 返回 `void` 的重载，写出来是类型噪音而不是安全。读一次再整份替换即可。
+    setCatalogs({ ...previous, [kind]: merged });
+  };
+
+  /**
+   * 按 provider 类别取一次目录。成功过就不自动重拉（`force` 给「刷新目录」按钮），
+   * 失败**不清空**已有条目：一次网络抖动不该让选择器变空。
+   */
+  const ensureCatalog = async (kind: CatalogKind, force = false): Promise<void> => {
+    if (!available) return;
+    const slot = catalogs()[kind];
+    if (slot?.busy === true) return;
+    if (!force && slot?.entries != null) return;
+    patchSlot(kind, { busy: true });
+    try {
+      patchSlot(kind, { entries: await fetchModelCatalog(kind), error: null, busy: false });
+    } catch (cause) {
+      patchSlot(kind, { entries: slot?.entries ?? null, error: messageOf(cause), busy: false });
+    }
+  };
+
+  const slotOf = (entry: ProviderEntry): CatalogSlot => {
+    const kind = catalogKindOf(entry.kind);
+    return kind == null ? EMPTY_SLOT : (catalogs()[kind] ?? EMPTY_SLOT);
+  };
+
+  /** 一张卡该列出的模型条目（`null` = 目录还没到位）。 */
+  const optionsOf = (entry: ProviderEntry): ModelEntry[] | null => {
+    const entries = slotOf(entry).entries;
+    if (entries == null) return null;
+    const current = config();
+    // 当前生效的模型与槽位里记住的那条都可能不在目录里（切过账户、上游改名），
+    // 也要列出来 —— 否则列表里没有选中项，用户以为目录是坏的。
+    const extras = [
+      current != null && activeProviderId(current) === entry.id ? current.model : null,
+      states()[entry.id]?.model,
+    ];
+    return modelOptions(entry.kind, entries, extras);
+  };
+
+  /**
+   * 胶囊开关：判据与文案都在 `./mode::oauthPillView`（那里有测试）。
+   * 本页只渲染它 —— 不在组件里另写一份"是不是套餐"的判断，那正是这次翻车的形状。
+   */
+  const pill = () => oauthPillView(config(), activeName());
   const activeId = (): string | null => {
     const current = config();
     return current == null ? null : activeProviderId(current);
+  };
+  /** 当前生效那一家（配置还没读到时 `null`）：胶囊那一行要说得出是哪家。 */
+  const activeName = (): string | null => {
+    const id = activeId();
+    return id == null ? null : (providerById(id)?.name ?? null);
   };
 
   const loadConfig = async (): Promise<void> => {
     if (!available) return;
     try {
-      setConfig(await transport.rpc<ConfigDto>("config.load"));
+      const next = await transport.rpc<ConfigDto>("config.load");
+      setConfig(next);
       setError(null);
+      // 生效那一家的模型目录：不拉的话，接入页与输入区都只能显示"空列表"。
+      const kind = catalogKindOf(providerById(activeProviderId(next))?.kind ?? "byok");
+      if (kind != null) void ensureCatalog(kind);
     } catch (cause) {
       setError(messageOf(cause));
     }
@@ -338,14 +527,25 @@ export const OAuthPage: Component = () => {
   });
 
   /**
-   * 切到某一家。三步走：
+   * 切到某一家。四步走：
    * 1. **先把当前这套抓下来**存进它自己的槽位（不做这步，切回来就还原不了）；
-   * 2. 用目标那家的状态算出要写的字段（合并补丁，只发这几个键）；
-   * 3. 落盘后把目标那家的模型名也记下来，并重新读配置（草稿不是事实）。
+   * 2. 目标那家的槽位**没有**模型名时，先从它的目录里取一条补上 —— 合并补丁没法
+   *    "清空 `model`"，不补就是把上一家的 slug 留在这一家的配置里（选择器随之
+   *    显示"没有匹配项"，看起来就像"这家没有模型可用"）；
+   * 3. 用目标那家的状态算出要写的字段（合并补丁，只发这几个键）；
+   * 4. 落盘后把模型名记回槽位、重新读配置（草稿不是事实），并记下"上次在用的是
+   *    哪一家账号额度"，供胶囊开关拨回来时落回同一家。
+   *
+   * `fromSignIn` 给登录流程用：登录本身已经占着 busy，那一路是**同一次用户意图**
+   * 的延续，不该被自己的并发保护挡下来（挡下来就变成"登录成功但没启用"）。
    */
-  const switchTo = async (target: ProviderEntry): Promise<void> => {
+  const switchTo = async (
+    target: ProviderEntry,
+    options: { fromSignIn?: boolean } = {},
+  ): Promise<void> => {
     const current = config();
-    if (current == null || busy()) return;
+    if (current == null) return;
+    if (busy() && options.fromSignIn !== true) return;
     setBusy(true);
     setError(null);
     try {
@@ -356,6 +556,22 @@ export const OAuthPage: Component = () => {
         target.kind === "account"
           ? (dsStatus()?.inferenceOrigin ?? null)
           : siwcApiBase(status());
+      const kind = catalogKindOf(target.kind);
+      if (kind != null && (next[target.id]?.model ?? "").trim() === "") {
+        try {
+          const entries = await fetchModelCatalog(kind);
+          patchSlot(kind, { entries, error: null, busy: false });
+          const model = preferredModel({
+            remembered: next[target.id]?.model,
+            current: current.model,
+            catalog: entries,
+          });
+          if (model != null) next = rememberState(next, target.id, { model });
+        } catch (cause) {
+          // 目录拉不到**不阻断切换**：端点与凭据才是这一家的主体，模型名可以后补。
+          patchSlot(kind, { error: messageOf(cause), busy: false });
+        }
+      }
       const fields = switchFields(target, next, apiBase);
       await transport.rpc("config.save", fields);
       const model = fields.model;
@@ -364,6 +580,7 @@ export const OAuthPage: Component = () => {
       }
       setStates(next);
       saveState(next);
+      if (target.kind !== "byok") saveLastAccountProvider(target.id);
       await loadConfig();
       toast(
         target.kind === "plan"
@@ -374,6 +591,11 @@ export const OAuthPage: Component = () => {
         "ok",
         { dedupeKey: "provider-switch" },
       );
+      if (kind != null && typeof model !== "string") {
+        toast("已切换服务商，但这一家的模型目录没拿到：请在接入页或输入区确认模型名", "info", {
+          dedupeKey: "provider-switch-model",
+        });
+      }
     } catch (cause) {
       setError(messageOf(cause));
       toast(`切换失败：${messageOf(cause)}`, "err", { dedupeKey: "provider-switch-error" });
@@ -399,8 +621,10 @@ export const OAuthPage: Component = () => {
       );
       if (outcome.kind === "completed") {
         await refreshStatus();
+        await loadConfig();
         if (status()?.sharing === true && !firstRunSeen()) setFirstRun(true);
         toast("ChatGPT 账户已连接", "info", { dedupeKey: "siwc-connected" });
+        await activateIfIdle(PLAN_PROVIDER_ID);
       } else if (outcome.kind === "failed") {
         setError(outcome.message);
       }
@@ -439,9 +663,56 @@ export const OAuthPage: Component = () => {
     }
   };
 
+  /**
+   * 拨开关。关掉 = 切回 BYOK（那条路径会还原切换前抓下来的那套配置）；
+   * 拨回开 = 落回**上次在用的那家账号额度**，而不是一律回套餐。
+   */
   const toggleOauth = (next: boolean): void => {
-    const target = providerById(next ? PLAN_PROVIDER_ID : BYOK_PROVIDER_ID);
+    const targetId = next ? accountTargetId(loadLastAccountProvider()) : BYOK_PROVIDER_ID;
+    const target = providerById(targetId);
     if (target != null) void switchTo(target);
+  };
+
+  /**
+   * 在接入页选一条模型。生效那一家 → `config.save {model}`；还没生效的那家 →
+   * 只记进它的槽位（切过去时由 `switchFields` 一起写），**不**碰当前配置。
+   */
+  const pickModel = async (target: ProviderEntry, slug: string): Promise<void> => {
+    const current = config();
+    if (current == null || busy()) return;
+    const remembered = rememberState(states(), target.id, { model: slug });
+    setStates(remembered);
+    saveState(remembered);
+    if (activeProviderId(current) !== target.id) {
+      toast(`已记下：切到${target.name}时用 ${slug}`, "info", { dedupeKey: "model-slot" });
+      return;
+    }
+    setBusy(true);
+    try {
+      await transport.rpc("config.save", { model: slug });
+      await loadConfig();
+      toast(`已切换模型：${slug}`, "ok", { dedupeKey: "model-switch" });
+    } catch (cause) {
+      setError(messageOf(cause));
+      toast(`模型切换失败：${messageOf(cause)}`, "err", { dedupeKey: "model-switch-error" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * 登录成功后该不该自动启用这一家。
+   *
+   * 只在**当前还停在 BYOK** 时启用：登录账号额度的目的就是用它推理，登录后还要
+   * 用户自己找「切到这一家」，等于把一次操作拆成两次（而且期间胶囊开关的样子
+   * 与事实相反）。已经在用**另一家**账号额度时不动 —— 用户可能只是顺手多登一个
+   * 账户，静默换掉正在跑的额度比少一步更糟。
+   */
+  const activateIfIdle = async (providerId: string): Promise<void> => {
+    const current = config();
+    if (current == null || activeProviderId(current) !== BYOK_PROVIDER_ID) return;
+    const target = providerById(providerId);
+    if (target != null) await switchTo(target, { fromSignIn: true });
   };
 
   const dsSignIn = async (): Promise<void> => {
@@ -454,7 +725,9 @@ export const OAuthPage: Component = () => {
       );
       if (outcome.kind === "completed") {
         await refreshDs();
+        await loadConfig();
         toast("DeepSeek 账号已连接", "info", { dedupeKey: "dsaccount-connected" });
+        await activateIfIdle(DSACCOUNT_PROVIDER_ID);
       } else if (outcome.kind === "failed") {
         setError(outcome.message);
       }
@@ -530,11 +803,11 @@ export const OAuthPage: Component = () => {
         fallback={<p class="field-hint">浏览器预览下不可用：请在桌面壳里打开本页面。</p>}
       >
         <section class="oauth-section">
-          <div class={`oauth-mode${oauthOn() ? " is-on" : ""}`}>
+          <div class={`oauth-mode${pill().on ? " is-on" : ""}`}>
             <label class="oauth-pill">
               <input
                 type="checkbox"
-                checked={oauthOn()}
+                checked={pill().on}
                 disabled={busy()}
                 onChange={(event) => toggleOauth(event.currentTarget.checked)}
               />
@@ -543,11 +816,7 @@ export const OAuthPage: Component = () => {
               </span>
               <span class="oauth-pill__text">
                 <span class="oauth-pill__title">OAuth 模式</span>
-                <span class="oauth-pill__hint">
-                  {oauthOn()
-                    ? "已开启：模型与端点(BYOK) 由本模式接管（那几个字段在设置页置灰）"
-                    : "关闭时回到设置页里那套自带 key 的配置"}
-                </span>
+                <span class="oauth-pill__hint">{pill().hint}</span>
               </span>
             </label>
             <p class="oauth-mode__note">
@@ -559,11 +828,21 @@ export const OAuthPage: Component = () => {
         <section class="oauth-section">
           <h2 class="oauth-section-title">服务商</h2>
           <For each={ACCOUNT_PROVIDERS}>
-            {(entry) => (
+            {(entry) => {
+              const slot = () => slotOf(entry);
+              return (
               <ProviderCard
                 entry={entry}
                 active={activeId() === entry.id}
                 model={config()?.model ?? null}
+                options={optionsOf(entry)}
+                catalogBusy={slot().busy}
+                catalogError={slot().error}
+                onEnsureCatalog={() => {
+                  const kind = catalogKindOf(entry.kind);
+                  if (kind != null) void ensureCatalog(kind, true);
+                }}
+                onPickModel={(slug) => void pickModel(entry, slug)}
                 status={status()}
                 busy={busy()}
                 onSwitch={() => void switchTo(entry)}
@@ -582,7 +861,8 @@ export const OAuthPage: Component = () => {
                 onDsVerify={() => void dsVerifyNow()}
                 onDsOpenLink={(url) => void openExternal(url)}
               />
-            )}
+              );
+            }}
           </For>
         </section>
 

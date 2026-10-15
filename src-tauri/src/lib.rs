@@ -125,6 +125,8 @@ pub fn run() {
             commands::create_session,
             commands::pick_directory,
             commands::pick_attachments,
+            // 应用内截图(macOS `screencapture`):回临时文件路径,渲染层再当附件用。
+            commands::capture_screenshot,
             commands::upload_attachment,
             commands::timeline_page,
             commands::session_bootstrap,

@@ -3,6 +3,8 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show, Switch, M
 import IconChevronDown from "~icons/lucide/chevron-down";
 import IconChevronRight from "~icons/lucide/chevron-right";
 import { Collapse } from "../ui/Collapse";
+import { Markdown } from "../markdown/Markdown";
+import { currentModel, planActive } from "../composer/model-config";
 import { AssistantContent } from "../genui/AssistantContent";
 import { StepRow } from "../tools/StepRow";
 import { TurnDeliverablesCard } from "../diff/TurnDeliverablesCard";
@@ -11,7 +13,7 @@ import { workDurationMs } from "../lib/time";
 import type { SessionStore } from "../session/store";
 import type { Step, Turn, Wait } from "../session/types";
 import { turnSegments, type TurnSegment, type WorkSegment } from "./segments";
-import { thinkingLabel, thinkingTitle } from "./thinking-label";
+import { thinkingLabel, thinkingRichSummary, thinkingTitle } from "./thinking-label";
 import { sessionCatalog } from "../tabs/store";
 
 const WorkStep: Component<{ step: Accessor<Step>; turn: Turn; cwd?: string | null; isLatest?: boolean }> = (props) => {
@@ -19,9 +21,12 @@ const WorkStep: Component<{ step: Accessor<Step>; turn: Turn; cwd?: string | nul
   // 套餐路径的思考是服务端摘要而非模型原文:标签必须分开(见 ./thinking-label)。
   const thinkingText = () => thinkingLabel(thinking()?.reasoningKind);
   const thinkingHint = () => thinkingTitle(thinking()?.reasoningKind);
+  // 套餐(OAuth) + GPT 家族:摘要是 markdown,默认展开直读,不再折叠(特判见 ./thinking-label)。
+  const thinkingRich = () => thinkingRichSummary(planActive(), currentModel());
+  const thinkingRunning = () => props.turn.status === "running" && thinking()?.endedAt == null;
   const tool = createMemo(() => { const step = props.step(); return step.kind === "tool" ? step : null; });
   const [thinkingOverride, setThinkingOverride] = createSignal<boolean | null>(null);
-  const thinkingOpen = () => thinkingOverride() ?? (thinking() != null && props.turn.status === "running" && thinking()?.endedAt == null);
+  const thinkingOpen = () => thinkingOverride() ?? (thinking() != null && (thinkingRich() || thinkingRunning()));
   let thinkingRow: HTMLDivElement | undefined;
   let following = true;
   let frame: number | null = null;
@@ -56,7 +61,7 @@ const WorkStep: Component<{ step: Accessor<Step>; turn: Turn; cwd?: string | nul
             setThinkingOverride(!thinkingOpen());
           }}>{thinkingText()}</button>
           <Collapse open={thinkingOpen()} instant={thinkingOverride() == null}>
-            <div class="thinking-full" tabindex={0} role="region" aria-label={thinkingText()}
+            <div class={{ "thinking-full": true, "thinking-md": thinkingRich() }} tabindex={0} role="region" aria-label={thinkingText()}
               onScroll={(event) => {
                 const el = event.currentTarget;
                 // Layout/resize can also emit scroll events; only user input
@@ -67,7 +72,15 @@ const WorkStep: Component<{ step: Accessor<Step>; turn: Turn; cwd?: string | nul
               onPointerDown={() => { following = false; }}
               onTouchStart={() => { following = false; }}
               onKeyDown={(event) => { if (["ArrowUp", "PageUp", "Home"].includes(event.key)) following = false; }}
-            >{thinking()?.text}</div>
+            >
+              <Show
+                when={thinkingRich()}
+                fallback={thinking()?.text}
+              >
+                {/* 摘要是 markdown:走流式渲染;revision 用步 id,checkpoint 整块替换时重画。 */}
+                <Markdown text={() => thinking()?.text ?? ""} revision={thinking()?.id} streaming={thinkingRunning()} />
+              </Show>
+            </div>
           </Collapse>
         </div>
       </Match>

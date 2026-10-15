@@ -9,6 +9,7 @@ import type { ConfigDto } from "../src/api/qaqh/ConfigDto";
 import type { SubagentDto } from "../src/api/qaqh/SubagentDto";
 import {
   MASK,
+  REASONING_EFFORTS,
   buildPatch,
   formatToolList,
   isPatchEmpty,
@@ -16,6 +17,7 @@ import {
   parseToolList,
   validatePatch,
 } from "../src/settings/patch";
+import { EFFORT_LADDER } from "../src/models/specs";
 
 function dto(overrides: Partial<ConfigDto> = {}): ConfigDto {
   const base: ConfigDto = {
@@ -160,12 +162,23 @@ describe("validatePatch", () => {
     expect(validatePatch({ wire: "" })).toContain("wire");
   });
 
-  test("reasoningEffort 逐档对齐后端词表(含 max);旧四档时代的 off 会被拒", () => {
-    // 后端 `ConfigPatch::validate` 收的就是这六档——前端镜像少一档曾把合法的 `max` 拒掉。
-    for (const effort of ["low", "medium", "high", "xhigh", "max", "ultra"]) {
+  test("reasoningEffort 逐档对齐后端词表(六档,ultra 收尾)", () => {
+    // 词表权威 = 上游 `origin/main`:`ConfigPatch::validate` 收
+    // `low|medium|high|xhigh|max|ultra`(qaqh-config-api/src/lib.rs,随 aa7f2b3 一起改)。
+    // 本地那份 `../qaqh-backend` checkout 停在加 ultra 之前(五档),照它改会砍掉合法档。
+    for (const effort of REASONING_EFFORTS) {
       expect(validatePatch({ reasoningEffort: effort }), effort).toBeNull();
     }
+    // 后端拒的值前端也不许放行:空串走"保持现值"语义,不进 patch;越词表的直接拒。
     expect(validatePatch({ reasoningEffort: "off" })).toContain("reasoningEffort");
+    expect(validatePatch({ reasoningEffort: "extreme" })).toContain("reasoningEffort");
+  });
+
+  test("设置页词表与强度轨道同源:两处档位不许各自漂移", () => {
+    // composer 的轨道档位来自 `models/specs::EFFORT_LADDER`,设置页下拉来自
+    // `settings/patch::REASONING_EFFORTS`。两份名单一旦不同序,就会出现
+    // "轨道能拖到的值下拉里没有 / 下拉里选得到后端却不认"。
+    expect([...REASONING_EFFORTS]).toEqual([...EFFORT_LADDER]);
   });
 
   test("permissionLevel 三档制:4(旧 Unrestricted)与 5 都拒", () => {

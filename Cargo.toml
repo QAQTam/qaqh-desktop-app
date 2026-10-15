@@ -6,7 +6,7 @@ members = ["src-tauri"]
 # `src-tauri` 用 `version.workspace` / `[lints] workspace = true` 继承本表。
 # 版本号是壳的版本，发布时与 daemon 一起 bump（见 README「打包与版本」）。
 [workspace.package]
-version = "2.0.0-RC1"
+version = "2.0.0-RC2"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 

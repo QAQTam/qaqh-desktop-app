@@ -22,17 +22,27 @@ import IconSparkles from "~icons/lucide/sparkles";
 import IconZap from "~icons/lucide/zap";
 
 import { modelSpec, type ReasoningTier } from "../models/specs";
-import { effortFillPercent, stepTier, tierIndexForPointer, tierTone } from "./effort-track";
+import { STR } from "../lib/strings";
 import {
+  effortDisplayOf,
+  effortFillPercent,
+  stepTier,
+  tierIndexForPointer,
+  tierTone,
+  type EffortDisplay,
+} from "./effort-track";
+import {
+  accountActive,
   availableTiers,
-  catalogModels,
+  catalogError,
+  catalogOptions,
   configBusy,
   configError,
+  configLoaded,
   currentEffort,
   currentModel,
   defaultTier,
   loadCatalog,
-  oauthActive,
   refreshConfig,
   setEffort,
   setModel,
@@ -60,7 +70,8 @@ export const EffortCard: Component<{
   const [pending, setPending] = createSignal<ReasoningTier | null>(null);
   let track: HTMLDivElement | undefined;
 
-  // 打开时读一次配置；套餐模式再拉一次模型目录（账户级的，BYOK 无关）。
+  // 打开时读一次配置；账号额度模式（套餐或 DeepSeek 账号）再拉一次该家的模型目录。
+  // 顺序不必操心：`loadCatalog` 自己会等配置到位（否则第一次打开永远是空列表）。
   createEffect(
     () => props.open,
     (open) => {
@@ -76,15 +87,39 @@ export const EffortCard: Component<{
 
   const tiers = (): readonly ReasoningTier[] => availableTiers();
 
-  /** 当前档：拖动中优先显示预览值；配置里的值可能不在该模型的可选集合里（换过模型/别的端改过）→ 落到首档。 */
-  const tier = (): ReasoningTier => {
+  /**
+   * 后端真值的三态判定（`effortDisplayOf`）。
+   *
+   * 关键在**没读到时不许报档名**：以前这里写的是
+   * `allowed.find((t) => t === currentEffort()) ?? allowed[0]`，配置还没 load 回来的
+   * 首帧就把 `low`（"轻度"）画成事实——而 `impl Default for Config` 的
+   * `reasoning_effort` 是 `high`。
+   */
+  const display = (): EffortDisplay => effortDisplayOf(currentEffort(), tiers(), configLoaded());
+
+  /** chip 上的字：预览值 > 后端真值 > 三态里那句老实话（不认识的值原样显示，不冒充第一档）。 */
+  const chipLabel = (): string => {
     const preview = pending();
-    if (preview != null) return preview;
-    const allowed = tiers();
-    return allowed.find((t) => t === currentEffort()) ?? allowed[0] ?? "medium";
+    if (preview != null) return TIER_LABEL[preview];
+    const state = display();
+    if (state.kind === "tier") return TIER_LABEL[state.tier];
+    if (state.kind === "offLadder") return state.raw;
+    return state.kind === "unset" ? STR.effortUnset : STR.effortPending;
   };
 
-  const index = (): number => Math.max(0, tiers().indexOf(tier()));
+  /**
+   * 轨道指向的档。轨道是**控件**，总得有个位置：没读到/越表时停到首档，
+   * 拖动或按方向键都会写出一个真实合法值。显示用 `chipLabel`，两者刻意不同。
+   */
+  const trackTier = (): ReasoningTier => {
+    const preview = pending();
+    if (preview != null) return preview;
+    const state = display();
+    if (state.kind === "tier") return state.tier;
+    return tiers()[0] ?? "medium";
+  };
+
+  const index = (): number => Math.max(0, tiers().indexOf(trackTier()));
   const fill = (): number => effortFillPercent(index(), tiers().length);
 
   const modelLabel = (): string => {
@@ -126,7 +161,7 @@ export const EffortCard: Component<{
         title="推理强度与模型"
         onClick={() => props.onToggle()}
       >
-        <span class={`effort-tone-${tierTone(tier())}`}>{TIER_LABEL[tier()]}</span>
+        <span class={`effort-tone-${tierTone(trackTier())}`}>{chipLabel()}</span>
         <IconChevronDown />
       </button>
 
@@ -135,10 +170,10 @@ export const EffortCard: Component<{
           <div class="effort-card__head">
             <span class="effort-card__tier-icon" aria-hidden="true">
               <Switch>
-                <Match when={tier() === "ultra"}>
+                <Match when={trackTier() === "ultra"}>
                   <IconSparkles />
                 </Match>
-                <Match when={tier() === "low" || tier() === "medium"}>
+                <Match when={trackTier() === "low" || trackTier() === "medium"}>
                   <IconZap />
                 </Match>
                 <Match when={true}>
@@ -146,8 +181,8 @@ export const EffortCard: Component<{
                 </Match>
               </Switch>
             </span>
-            <strong class={`effort-card__tier effort-tone-${tierTone(tier())}`}>
-              {TIER_LABEL[tier()]}
+            <strong class={`effort-card__tier effort-tone-${tierTone(trackTier())}`}>
+              {chipLabel()}
             </strong>
             <button
               type="button"
@@ -173,54 +208,60 @@ export const EffortCard: Component<{
           <Show when={pickingModel()}>
             <div class="effort-card__models" role="menu">
               <Show
-                when={oauthActive()}
+                when={accountActive() && catalogOptions().length > 0}
                 fallback={
-                  <div class="effort-card__custom">
-                    <input
-                      class="field-input"
-                      value={customModel()}
-                      placeholder="模型 id（自带 key 时自己填）"
-                      onInput={(event) => setCustomModel(event.currentTarget.value)}
-                    />
-                    <button
-                      type="button"
-                      class="ghost-mini"
-                      disabled={configBusy() || customModel().trim() === ""}
-                      onClick={() => {
-                        const next = customModel().trim();
-                        if (next !== "") void setModel(next).then(() => setPickingModel(false));
-                      }}
-                    >
-                      使用
-                    </button>
-                  </div>
-                }
-              >
-                <Show
-                  when={(catalogModels() ?? []).length > 0}
-                  fallback={
-                    <small class="effort-card__note">
-                      {configError() ?? "模型目录为空：登录后重试，或在接入页确认套餐已启用。"}
-                    </small>
-                  }
-                >
-                  <For each={catalogModels() ?? []}>
-                    {(entry) => (
+                  <>
+                    {/*
+                      账号额度（套餐 / DeepSeek 账号）下目录没到位：说**真原因**
+                      （catalogError 才是这次拉取为什么失败的权威），并且仍然留一条
+                      手填的路 —— 只能看着的空列表等于把推理堵死。BYOK 本来就没有
+                      账户级目录，直接进手填。
+                    */}
+                    <Show when={accountActive()}>
+                      <small class="effort-card__note">
+                        {catalogError() ??
+                          configError() ??
+                          "模型目录为空：完成登录或到接入页「刷新目录」后重试；也可以直接填模型 id。"}
+                      </small>
+                    </Show>
+                    <div class="effort-card__custom">
+                      <input
+                        class="field-input"
+                        value={customModel()}
+                        placeholder="模型 id（目录拿不到时自己填）"
+                        onInput={(event) => setCustomModel(event.currentTarget.value)}
+                      />
                       <button
                         type="button"
-                        role="menuitemradio"
-                        aria-checked={entry.slug === currentModel() ? "true" : "false"}
-                        class={entry.slug === currentModel() ? "selected" : undefined}
+                        class="ghost-mini"
+                        disabled={configBusy() || customModel().trim() === ""}
                         onClick={() => {
-                          void setModel(entry.slug).then(() => setPickingModel(false));
+                          const next = customModel().trim();
+                          if (next !== "") void setModel(next).then(() => setPickingModel(false));
                         }}
                       >
-                        <span>{modelSpec("plan", entry.slug).spec.displayName ?? entry.displayName}</span>
-                        <small>{entry.slug}</small>
+                        使用
                       </button>
-                    )}
-                  </For>
-                </Show>
+                    </div>
+                  </>
+                }
+              >
+                <For each={catalogOptions()}>
+                  {(entry) => (
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={entry.slug === currentModel() ? "true" : "false"}
+                      class={entry.slug === currentModel() ? "selected" : undefined}
+                      onClick={() => {
+                        void setModel(entry.slug).then(() => setPickingModel(false));
+                      }}
+                    >
+                      <span>{entry.displayName}</span>
+                      <small>{entry.slug}</small>
+                    </button>
+                  )}
+                </For>
               </Show>
             </div>
           </Show>
@@ -229,13 +270,13 @@ export const EffortCard: Component<{
             ref={(node) => {
               track = node;
             }}
-            class={`effort-track effort-tone-${tierTone(tier())}${dragging() ? " is-dragging" : ""}`}
+            class={`effort-track effort-tone-${tierTone(trackTier())}${dragging() ? " is-dragging" : ""}`}
             role="slider"
             tabindex="0"
             aria-valuemin={0}
             aria-valuemax={tiers().length - 1}
             aria-valuenow={index()}
-            aria-valuetext={TIER_LABEL[tier()]}
+            aria-valuetext={chipLabel()}
             onPointerDown={(event) => {
               setDragging(true);
               event.currentTarget.setPointerCapture(event.pointerId);
@@ -259,7 +300,7 @@ export const EffortCard: Component<{
               if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
               event.preventDefault();
               const delta = event.key === "ArrowRight" ? 1 : -1;
-              void setEffort(stepTier(tiers(), tier(), delta));
+              void setEffort(stepTier(tiers(), trackTier(), delta));
             }}
           >
             <span class="effort-track__fill" style={{ width: `${fill()}%` }} />
@@ -274,6 +315,19 @@ export const EffortCard: Component<{
             </For>
             <span class="effort-track__thumb" style={{ left: `${fill()}%` }} />
           </div>
+
+          {/*
+            三态里那两种"不是后端真值"的状态必须在卡面上交代：chip 的字已经诚实了，
+            但轨道停在首档会让人觉得"后端就是轻度"——那正是这次要修的错觉。
+          */}
+          <Show when={display().kind === "offLadder"}>
+            <p class="effort-card__note is-error">{STR.effortOffLadder(currentEffort())}</p>
+          </Show>
+          <Show when={display().kind === "pending" || display().kind === "unset"}>
+            <p class="effort-card__note">
+              {display().kind === "pending" ? STR.effortPendingHint : STR.effortUnsetHint}
+            </p>
+          </Show>
 
           <p class="effort-card__note">
             拖动或按 ←/→ 选择；拖动时预览，松手写入（只写这一个字段）。

@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from "vitest";
 import { STR } from "../src/lib/strings";
-import { thinkingLabel, thinkingTitle } from "../src/turn/thinking-label";
+import { thinkingLabel, thinkingRichSummary, thinkingTitle } from "../src/turn/thinking-label";
 
 describe("thinkingLabel", () => {
   test("summary 走「思考摘要」,并带上解释", () => {
@@ -22,5 +22,22 @@ describe("thinkingLabel", () => {
     for (const kind of ["text", "encrypted", "redacted", undefined, null] as const) {
       expect(thinkingTitle(kind)).toBeUndefined();
     }
+  });
+});
+
+describe("thinkingRichSummary", () => {
+  test("套餐(OAuth) + GPT 家族 → 富呈现(大小写与首尾空白不敏感)", () => {
+    expect(thinkingRichSummary(true, "gpt-6.1-sol")).toBe(true);
+    expect(thinkingRichSummary(true, " GPT-5.6-Luna ")).toBe(true);
+  });
+
+  test("非套餐一律不富呈现:BYOK 上的 gpt-* 也不算", () => {
+    expect(thinkingRichSummary(false, "gpt-6-sol")).toBe(false);
+  });
+
+  test("账号额度但非 GPT 家族(DeepSeek 账号目录)不富呈现", () => {
+    expect(thinkingRichSummary(true, "deepseek-v4-pro")).toBe(false);
+    expect(thinkingRichSummary(true, "deepseek-flash")).toBe(false);
+    expect(thinkingRichSummary(true, "")).toBe(false);
   });
 });

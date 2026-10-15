@@ -106,6 +106,29 @@ const setNewSessionCwd = (value: string | null): void => {
 const [drafts, setDrafts] = createStore<Record<string, string>>(readStoredDrafts());
 
 /**
+ * Startup 页暂存的附件路径(首条消息发出时才上传,见 `submitStartupSession`)。
+ *
+ * 这份列表原本是 `StartupView` 的组件局部信号,全局快捷键够不着它——于是"还没建
+ * 会话时按截图键"要么没反应、要么截了没地方放。提到模块层,和 `newSessionCwd`、
+ * 草稿同级:它们本来就是"这一次新会话的输入状态"。
+ */
+const [startupAttachments, setStartupAttachments] = createSignal<string[]>([]);
+
+/** 去重挂上:同一张截图连按两次不该出现两个 chip(路径就是键)。 */
+export const stageStartupAttachments = (paths: readonly string[]): void => {
+  if (paths.length === 0) return;
+  setStartupAttachments((current) => [...new Set([...current, ...paths])]);
+};
+
+export const removeStartupAttachment = (path: string): void => {
+  setStartupAttachments((current) => current.filter((item) => item !== path));
+};
+
+export const clearStartupAttachments = (): void => {
+  setStartupAttachments([]);
+};
+
+/**
  * 方案A:后端尚未生成标题时的本地重命名覆盖(存储 + 侧栏投影)。
  * 优先级语义(用户拍板):后端标题恒优先,本地覆盖只在 title_changed 到达前
  * 有效;后端持久化是方案B(Rust `session.rename`),见
@@ -186,6 +209,7 @@ export {
   workspaceCatalog,
   newSessionCwd,
   setNewSessionCwd,
+  startupAttachments,
 };
 export const setBootError = (value: string | null): void => {
   setBootErrorSignal(value);

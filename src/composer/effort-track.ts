@@ -45,6 +45,39 @@ export function stepTier(
 }
 
 /**
+ * chip 上那个档名的三态。
+ *
+ * 存在的理由是一个真被画错过的状态：**"还没读到后端值"不等于"后端就是第一档"**。
+ * 原来强度卡在首帧直接 `allowed.find(...) ?? allowed[0]`，于是 config 还没 load 回来
+ * 时界面把 `low`（"轻度"）当成事实显示。后端那边的真值不是 low：
+ * `impl Default for Config` 写的是 `reasoning_effort: "high"`
+ * （`qaqh-config/src/config.rs:738`，默认 profile 也是 `effort: Some("high")`），
+ * profile 没带 effort 时同样回填 `high`（`:883`、`:1413`）。
+ * 用户看到的"默认轻度"就是这么来的，点进去才发现真值：因为打开卡片那次
+ * `refreshConfig()` 才把值取回来。
+ */
+export type EffortDisplay =
+  /** 配置还没读到（首帧 / 读失败）：不能报任何档名。 */
+  | { kind: "pending" }
+  /** 读到了但后端值为空串：等价"没设过"，与"没读到"分开说。 */
+  | { kind: "unset" }
+  | { kind: "tier"; tier: ReasoningTier }
+  /** 读到了，可这个值不在当前模型的档位表里（原样显示，不冒充第一档）。 */
+  | { kind: "offLadder"; raw: string };
+
+export function effortDisplayOf(
+  saved: string,
+  allowed: readonly ReasoningTier[],
+  loaded: boolean,
+): EffortDisplay {
+  if (!loaded) return { kind: "pending" };
+  const raw = saved.trim();
+  if (raw === "") return { kind: "unset" };
+  const hit = allowed.find((tier) => tier === raw);
+  return hit != null ? { kind: "tier", tier: hit } : { kind: "offLadder", raw };
+}
+
+/**
  * 配色档：`high` 以下与 `xhigh` 都是绿，`ultra` 才换成紫金渐变 + 星点。
  *
  * 对齐 Codex 的视觉分级（截图：高 = 绿、Ultra = 紫 + 星），**不是**每档一个颜色：

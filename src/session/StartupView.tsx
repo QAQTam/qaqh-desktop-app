@@ -3,6 +3,7 @@ import IconFolder from "~icons/lucide/folder";
 import IconFolderPlus from "~icons/lucide/folder-plus";
 import IconChevronDown from "~icons/lucide/chevron-down";
 import IconPaperclip from "~icons/lucide/paperclip";
+import IconCamera from "~icons/lucide/camera";
 import IconPlus from "~icons/lucide/plus";
 import IconArrowUp from "~icons/lucide/arrow-up";
 import IconX from "~icons/lucide/x";
@@ -17,6 +18,10 @@ import {
   chooseNewSessionFolder,
   submitStartupSession,
   creating,
+  startupAttachments,
+  stageStartupAttachments,
+  removeStartupAttachment,
+  clearStartupAttachments,
 } from "../tabs/store";
 import type { ConfigDto } from "../api/qaqh/ConfigDto";
 
@@ -48,7 +53,10 @@ const SUGGESTIONS = [
   },
 ];
 
-export const StartupView: Component = () => {
+export const StartupView: Component<{
+  /** 应用内截图（⌘⇧S 同一份实现）；缺省 = 宿主不提供，按钮不出现。 */
+  onScreenshot?: () => void;
+}> = (props) => {
   let textarea: HTMLTextAreaElement | undefined;
   const [draftText, setDraftText] = createSignal("");
   const [selectedProfile, setSelectedProfile] = createSignal<string | null>(null);
@@ -58,7 +66,6 @@ export const StartupView: Component = () => {
     model: string;
     profiles: string[];
   } | null>(null);
-  const [attachments, setAttachments] = createSignal<string[]>([]);
 
   void (async () => {
     try {
@@ -98,17 +105,14 @@ export const StartupView: Component = () => {
 
   const handlePickAttachments = async (): Promise<void> => {
     try {
-      const paths = await transport.pickAttachments();
-      if (paths.length > 0) {
-        setAttachments((prev) => [...new Set([...prev, ...paths])]);
-      }
+      stageStartupAttachments(await transport.pickAttachments());
     } catch {
       // 静默处理
     }
   };
 
   const handleRemoveAttachment = (pathToRemove: string): void => {
-    setAttachments((prev) => prev.filter((p) => p !== pathToRemove));
+    removeStartupAttachment(pathToRemove);
   };
 
   const handleApplySuggestion = (prompt: string): void => {
@@ -126,11 +130,11 @@ export const StartupView: Component = () => {
       cwd: newSessionCwd(),
       profile: selectedProfile(),
       text,
-      attachmentPaths: attachments(),
+      attachmentPaths: startupAttachments(),
     });
     if (!ok) return; // 失败保留草稿,用户改完重试
     setDraftText("");
-    setAttachments([]);
+    clearStartupAttachments();
   };
 
   return (
@@ -277,9 +281,9 @@ export const StartupView: Component = () => {
       <div class="startup-composer-box">
         <div id="composer">
           <div class="composer-surface">
-            <Show when={attachments().length > 0}>
+            <Show when={startupAttachments().length > 0}>
               <div class="composer-attachments" aria-label="待发送附件">
-                <For each={attachments()}>
+                <For each={startupAttachments()}>
                   {(filePath) => (
                     <span class="composer-file-chip ready" title={filePath}>
                       <IconPaperclip />
@@ -323,6 +327,18 @@ export const StartupView: Component = () => {
                 >
                   <IconPlus />
                 </button>
+                {/* 截图与「添加附件」并排:同一份附件状态机,只是来源换成系统截图。 */}
+                <Show when={props.onScreenshot != null}>
+                  <button
+                    type="button"
+                    class="composer-tool-button composer-shot"
+                    aria-label={STR.shotAdd}
+                    title={STR.shotAddTitle}
+                    onClick={() => props.onScreenshot?.()}
+                  >
+                    <IconCamera />
+                  </button>
+                </Show>
               </div>
               <div class="composer-submit-area">
                 <button

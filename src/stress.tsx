@@ -1456,6 +1456,26 @@ function simulateAttach(): void {
   }, 600);
 }
 
+/**
+ * 相机按钮的演示:与 `simulateAttach` 同一套 chip 状态机,只是来源换成系统截图
+ * (生产的这一段是宿主 `capture_screenshot` 写临时文件 → `upload_attachment` 换引用,
+ * 夹具用定时器替掉这两次往返)。
+ *
+ * 刻意复用同一个 id 前缀 `E:/shots/`:这样点两次能当场看出**去重**在不在
+ * ——截图键被连按时不该叠出两个一样的 chip。
+ */
+function simulateScreenshot(): void {
+  const target = previewActiveTab().store;
+  const id = "E:/shots/qaqh-shot-1728000000000.png";
+  if (target.pendingAttachments[0]().some((item) => item.id === id)) return;
+  target.pendingAttachments[1]((current) => [...current, { id, name: "qaqh-shot-1728000000000.png", size: 0, mediaType: "", state: "uploading", reference: null, error: null }]);
+  setTimeout(() => {
+    target.pendingAttachments[1]((current) => current.map((item) => item.id === id
+      ? { ...item, size: 98_304, mediaType: "image/png", state: "ready", reference: { content_id: "sha256:c0ffee", media_type: "image/png", sha256: "sha256:c0ffee", truncated: false } }
+      : item));
+  }, 600);
+}
+
 // ── 启动 ─────────────────────────────────────────────────────────────────────
 
 declare global {
@@ -1524,6 +1544,7 @@ render(
                 onCompact={simulateCompact}
                 compactPhase={() => previewActiveTab().store.compact[0]().phase}
                 onPickAttachments={simulateAttach}
+                onScreenshot={simulateScreenshot}
                 attachments={() => previewActiveTab().store.pendingAttachments[0]()}
                 onRemoveAttachment={(id) => previewActiveTab().store.removeAttachment(id)}
                 profileView={fixtureProfileView}

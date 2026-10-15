@@ -5,7 +5,7 @@
 
 use serde::Serialize;
 use serde_json::{Value, json};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use qaqh_client::{
     ClientV2CommandAck, CommandOptions, ConversationCommand, ConversationInputPurpose,
@@ -817,5 +817,170 @@ mod tests {
 
         // 回包形状不符必须报错:字符串白名单时代的失败模式是静默空列表。
         assert!(sidebar_sessions(json!({"unexpected": "envelope"})).is_err());
+    }
+}
+/// 应用内截图（macOS）。
+///
+/// ## 为什么在宿主侧 spawn，而不是在渲染层
+///
+/// webview 没有截屏面：`getDisplayMedia` 要用户在同一处再选一次窗口、还带权限
+/// 弹窗，拿到的是媒体流而不是文件。这里直接调系统的 `/usr/sbin/screencapture`
+/// （macOS 自带），把结果写进**应用临时目录**，只把 `{path,name,size}` 回给渲染层
+/// ——字节永远不进 webview，入 daemon 仍走既有的 `upload_attachment`（同一张
+/// 单写口，不新辟上传面）。渲染层拿到路径后当普通附件用，所以截图能直接进输入区
+/// 发出去，这正是「前端不方便截图指出问题」要的那一步。
+///
+/// ## 三条边界
+///
+/// - **参数里不接受前端给的路径**：输出路径由宿主自己拼（临时目录 + 时间戳），
+///   渲染层无法指到别处；`Command` 直接带 argv，不经 shell，没有注入面。
+/// - **固定绝对路径** `/usr/sbin/screencapture`：从 `.app` bundle 启动时进程的
+///   `PATH` 很窄，靠 `which` 语义会偶发找不到。
+/// - **取消 ≠ 失败**：`-i` 交互态下按 Esc 退出时进程返回 0 但**不写文件**，
+///   所以「文件不存在」回 `Ok(None)`，界面据此说「已取消」而不是挂一个坏附件。
+///
+/// 权限口径：macOS 自 11 起，截屏受「屏幕录制」TCC 管控。第一次用会由系统弹一次
+/// 授权；未授权时 `screencapture` 仍可能返回成功但给出全黑图 —— 这条只能由用户在
+/// 系统设置里放行，本命令不猜、也不代填（见 README「应用内截图」）。
+#[derive(Serialize)]
+struct ScreenshotFile {
+    /// 绝对路径。**只**用于随后 `upload_attachment` 的入参，不进任何 daemon 命令。
+    path: String,
+    name: String,
+    size: u64,
+}
+
+/// 截图范围。前端传 `"selection"` / `"fullscreen"`；缺省 = 选区。
+#[derive(Clone, Copy, Debug)]
+enum ShotMode {
+    /// 系统十字准星，用户拉一块（最常用来「就指这里」）。
+    Selection,
+    /// 整屏一张，不动手（适合抓闪一下就没了的状态）。
+    Fullscreen,
+}
+
+impl ShotMode {
+    /// 解析前端给的 mode。空串/缺省按选区；未知值**报错**而不是回落到缺省——
+    /// 静默换范围等于让用户截错东西还以为截对了。
+    fn parse(value: Option<&str>) -> Result<Self, String> {
+        match value.map(str::trim).filter(|v| !v.is_empty()) {
+            None | Some("selection") => Ok(Self::Selection),
+            Some("fullscreen") => Ok(Self::Fullscreen),
+            Some(other) => Err(format!("unknown screenshot mode: {other}")),
+        }
+    }
+}
+
+/// `screencapture` 的 argv（含输出路径）。拆成纯函数好单测：这段是平台行为，
+/// 传错旗标不会报错，只会让用户拿到一张不对的图。
+///
+/// `-x` 静音（应用内触发不该响铃）；`-i` 进交互选区；`-c` 把图**同时**放进剪贴板
+/// （用户想直接贴到别处时省一步，不影响我们读文件）。
+fn screencapture_args(mode: ShotMode, path: &std::path::Path) -> Vec<String> {
+    let mut args = vec!["-x".to_string(), "-c".to_string()];
+    if matches!(mode, ShotMode::Selection) {
+        args.push("-i".to_string());
+    }
+    args.push(path.display().to_string());
+    args
+}
+
+/// 截图文件名。时间戳足够唯一（同一次运行里两次截屏至少隔了交互时间），
+/// 前缀 `qaqh-shot-` 让临时目录里一眼认得出是本应用产的。
+fn screenshot_name(stamp_ms: u128) -> String {
+    format!("qaqh-shot-{stamp_ms}.png")
+}
+
+#[tauri::command]
+pub async fn capture_screenshot(
+    app: AppHandle,
+    mode: Option<String>,
+) -> Result<Option<Value>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let shot_mode = ShotMode::parse(mode.as_deref())?;
+        let temp_dir = app.path().temp_dir().map_err(string_of)?;
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(string_of)?
+            .as_millis();
+        let name = screenshot_name(stamp);
+        let path = temp_dir.join(&name);
+        let args = screencapture_args(shot_mode, &path);
+        // 系统工具是阻塞子进程：放到 blocking 线程，别占着 async worker。
+        let status = tokio::task::spawn_blocking(move || {
+            std::process::Command::new("/usr/sbin/screencapture")
+                .args(&args)
+                .status()
+        })
+        .await
+        .map_err(|error| format!("screencapture 任务失败: {error}"))?
+        .map_err(|error| {
+            format!("无法调用 /usr/sbin/screencapture: {error}（macOS 自带该工具；若报错请在系统设置里放行屏幕录制后重试）")
+        })?;
+        if !status.success() {
+            return Err(format!("screencapture 退出码 {}", status));
+        }
+        // 取消（交互态按 Esc）走这条：进程成功但没有文件。
+        if !path.exists() {
+            return Ok(None);
+        }
+        let size = std::fs::metadata(&path).map_err(string_of)?.len();
+        serde_json::to_value(ScreenshotFile {
+            path: path.display().to_string(),
+            name,
+            size,
+        })
+        .map(Some)
+        .map_err(string_of)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, mode);
+        Err("应用内截图目前只在 macOS 提供：请用系统截图工具截好，再用「添加附件」选那个文件".to_string())
+    }
+}
+
+#[cfg(test)]
+mod screenshot_tests {
+    use super::{ShotMode, screenshot_name, screencapture_args};
+    use std::path::Path;
+
+    fn args(mode: ShotMode) -> Vec<String> {
+        screencapture_args(mode, Path::new("/tmp/qaqh-shot-1.png"))
+    }
+
+    #[test]
+    fn selection_adds_interactive_flag_and_keeps_output_last() {
+        let argv = args(ShotMode::Selection);
+        assert_eq!(argv.first().map(String::as_str), Some("-x"));
+        assert!(argv.iter().any(|flag| flag == "-i"), "选区态必须带 -i");
+        assert_eq!(argv.last().map(String::as_str), Some("/tmp/qaqh-shot-1.png"));
+    }
+
+    #[test]
+    fn fullscreen_does_not_open_the_crosshair() {
+        let argv = args(ShotMode::Fullscreen);
+        assert!(!argv.iter().any(|flag| flag == "-i"), "整屏不该进交互态");
+        // 输出路径始终在最后一位，且从不来自渲染层。
+        assert_eq!(argv.last().map(String::as_str), Some("/tmp/qaqh-shot-1.png"));
+    }
+
+    #[test]
+    fn mode_parse_is_explicit_about_unknown_values() {
+        assert!(matches!(ShotMode::parse(None), Ok(ShotMode::Selection)));
+        assert!(matches!(ShotMode::parse(Some("")), Ok(ShotMode::Selection)));
+        assert!(matches!(ShotMode::parse(Some("  ")), Ok(ShotMode::Selection)));
+        assert!(matches!(ShotMode::parse(Some("fullscreen")), Ok(ShotMode::Fullscreen)));
+        // 未知值报错而不是悄悄回落：静默换范围会让用户拿到一张不对的图。
+        let err = ShotMode::parse(Some("window")).expect_err("未知 mode 必须失败");
+        assert!(err.contains("window"), "错误里要带上用户给的值: {err}");
+    }
+
+    #[test]
+    fn file_name_is_png_and_prefixed() {
+        let name = screenshot_name(1_728_000_000_000);
+        assert!(name.starts_with("qaqh-shot-"), "{name}");
+        assert!(name.ends_with(".png"), "{name}");
     }
 }

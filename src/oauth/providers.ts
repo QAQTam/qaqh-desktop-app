@@ -77,6 +77,19 @@ export function providerById(id: string): ProviderEntry | null {
   return PROVIDERS.find((entry) => entry.id === id) ?? null;
 }
 
+/**
+ * 「把胶囊开关拨回开」该切到哪家 —— 优先**上次在用的那家账号额度**。
+ *
+ * 落点原来硬编码成套餐，于是「DeepSeek 账号 → 关掉 → 再打开」会把用户静默换到
+ * ChatGPT；`last` 缺失、指向 BYOK 或指向名录里没有的 id（名录改过）时，才退回
+ * 名录里第一家账号 provider。
+ */
+export function accountTargetId(last: string | null | undefined): string {
+  const entry = last == null ? null : providerById(last);
+  if (entry != null && entry.kind !== "byok") return entry.id;
+  return ACCOUNT_PROVIDERS[0]?.id ?? PLAN_PROVIDER_ID;
+}
+
 /** 名录自检：id 唯一、字段非空、恰好一家 byok。加条目时写错会在这里当场露馅。 */
 export function providerRegistryProblems(entries: readonly ProviderEntry[] = PROVIDERS): string[] {
   const problems: string[] = [];

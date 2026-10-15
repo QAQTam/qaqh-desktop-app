@@ -206,6 +206,90 @@
     font-weight: 600;
   }
 
+  /* ── 模型目录（生效那一家 + 还没生效的那一家的"待用"选择）────────── */
+  /* 与输入区 `.effort-card__models` 同形：同一个软件里"选一条模型"的两张表必须
+     长得一样，另起一套只会慢慢分叉。 */
+  .oauth-models {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .oauth-models__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+
+  .oauth-models__title {
+    color: var(--muted);
+    font-size: 0.9em;
+    font-weight: 500;
+  }
+
+  .oauth-models__list {
+    display: grid;
+    gap: 2px;
+    max-height: 42vh;
+    overflow-y: auto;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: var(--surface);
+  }
+
+  .oauth-models__list > button {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: var(--radius-control);
+    text-align: left;
+  }
+
+  .oauth-models__list > button:hover {
+    background: var(--surface-2);
+  }
+
+  .oauth-models__list > button.selected {
+    background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+    color: var(--accent);
+  }
+
+  .oauth-models__list > button small {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+  }
+
+  .oauth-models__unknown {
+    margin-left: auto;
+    color: var(--warn, var(--muted));
+    font-size: var(--fs-xs);
+  }
+
+  .oauth-models__empty {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--space-2) var(--space-3);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-control);
+    background: var(--surface-2);
+  }
+
+  .oauth-models__note {
+    margin: 0;
+    color: var(--text);
+    font-size: 0.88em;
+    overflow-wrap: anywhere;
+  }
+
+  .oauth-models__note--muted {
+    color: var(--muted);
+  }
+
   /* ── OAuth 打开时 BYOK 分区置灰 ──────────────────────────────── */
   /* fieldset 包住整个 Section（见 `byok`），所以它是个普通块级盒，不参与
      `.settings-fields` 的两列网格——不需要 `display:contents`。**刻意不用它**：

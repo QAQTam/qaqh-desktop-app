@@ -92,6 +92,9 @@
   .composer-tool-button svg { width: 14px; height: 14px; flex: none; }
   .composer-add-file { width: 32px; padding: 0; border-color: var(--border); color: var(--text); }
   .composer-add-file svg { width: 16px; height: 16px; }
+  /* 截图按钮与「添加附件」同尺寸:同一排控件,宽窄不一会让人以为是两种东西。 */
+  .composer-shot { width: 32px; padding: 0; border-color: var(--border); color: var(--text); }
+  .composer-shot svg { width: 16px; height: 16px; }
   /* 会话级 profile 选择器(§1.5):profile 名 + 生效 model 同一个 chip——
      model 是 profile 的属性,不单独给「临时换个模型 ID」的假入口。 */
   .composer-profile-button { max-width: min(280px, 34vw); color: var(--text); }

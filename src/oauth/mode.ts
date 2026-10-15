@@ -49,6 +49,31 @@ export function isAccountCredential(
  */
 export const isOauthMode = isPlanMode;
 
+/** 关掉时那一行的文案（开着的时候要说清是**哪一家**在接管，见 [`oauthPillView`]）。 */
+const OAUTH_PILL_OFF_HINT = "关闭时回到设置页里那套自带 key 的配置";
+
+/**
+ * 胶囊开关那一行的**判据与文案**（纯函数；接入页只管渲染，口径在这里钉住）。
+ *
+ * `on` 读的是「有没有在用账号额度」，不是「是不是套餐」：设置页那批 BYOK 字段的
+ * 置灰判据也是这个（`../settings/byok/Sections.tsx`）。两边不同判据时，切到
+ * DeepSeek 账号会让开关自己弹回"关" —— 界面在否认正在发生的事，用户读到的就是
+ * "我一登录 DeepSeek，OAuth 就被关了"。
+ *
+ * `activeName` 是当前生效那一家的展示名（`null` = 名录里没有 / 配置还没读到），
+ * 说出来才有地方交代"开着的是哪家"，否则开着 DeepSeek 时那句文案像是在说套餐。
+ */
+export function oauthPillView(
+  config: Pick<ConfigDto, "credential"> | null | undefined,
+  activeName: string | null,
+): { on: boolean; hint: string } {
+  if (!isAccountCredential(config)) return { on: false, hint: OAUTH_PILL_OFF_HINT };
+  return {
+    on: true,
+    hint: `已开启（${activeName ?? "账号额度"}）：模型与端点(BYOK) 由本模式接管（那几个字段在设置页置灰）`,
+  };
+}
+
 /**
  * 套餐模式下的上下文窗口：**统一 565K**（产品口径）。
  *

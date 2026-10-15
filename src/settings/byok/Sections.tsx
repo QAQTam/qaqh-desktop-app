@@ -59,8 +59,8 @@ export const ByokSection: Component = () => {
   /** 当前值可能不在后端允许词表里(旧配置留下的),补进选项免得下拉替用户改了值。 */
   const effortOptions = createMemo(() => {
     const current = config().reasoningEffort ?? "";
-    // 后端词表就是这份;以前这里硬抄了一份**旧五档(含 max、缺 ultra)**,
-    // 结果"选得到的存不下去、存得下去的最高档选不到"。
+    // 后端词表就是这份(上游六档,max 与 ultra 都收;见 models/specs.ts 的 ReasoningTier)。
+    // 这里多一档就是"选得到却存不下去",少一档就是"存得下去的最高档选不到"。
     const list: string[] = [...REASONING_EFFORTS];
     if (current !== "" && !list.includes(current)) list.unshift(current);
     return list;

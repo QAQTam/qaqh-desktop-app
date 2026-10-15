@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { EFFORT_LADDER } from "../src/models/specs";
-import { effortFillPercent, stepTier, tierIndexForPointer, tierTone } from "../src/composer/effort-track";
+import {
+  effortDisplayOf,
+  effortFillPercent,
+  stepTier,
+  tierIndexForPointer,
+  tierTone,
+} from "../src/composer/effort-track";
 
 const RECT = { left: 100, width: 400 };
 
@@ -74,5 +80,47 @@ describe("配色分级", () => {
     for (const tier of ["low", "medium", "high", "xhigh", "max"] as const) {
       expect(tierTone(tier)).toBe("normal");
     }
+  });
+});
+
+/**
+ * chip 上那个词的三态（回归："默认显示轻度，点进去才变真值"）。
+ *
+ * 病根是把"还没读到配置"和"后端就是第一档"画成同一个样子：首帧
+ * `currentEffort()` 为空 → `?? allowed[0]` → `low`/「轻度」，而后端 profile
+ * 缺省时回填的是 `high`。
+ */
+describe("档名三态", () => {
+  const LADDER = EFFORT_LADDER;
+
+  it("配置还没读到 → pending：不许报任何档名", () => {
+    expect(effortDisplayOf("", LADDER, false)).toEqual({ kind: "pending" });
+    // 读失败留下一个旧值也不许当真：loaded=false 一律压过值本身。
+    expect(effortDisplayOf("high", LADDER, false)).toEqual({ kind: "pending" });
+  });
+
+  it("读到空串 = 没设过，与「没读到」分开说", () => {
+    expect(effortDisplayOf("", LADDER, true)).toEqual({ kind: "unset" });
+    expect(effortDisplayOf("   ", LADDER, true)).toEqual({ kind: "unset" });
+  });
+
+  it("读到且在表里 → 就是那个档（后端真值优先，绝不再落到首档）", () => {
+    expect(effortDisplayOf("high", LADDER, true)).toEqual({ kind: "tier", tier: "high" });
+    expect(effortDisplayOf("max", LADDER, true)).toEqual({ kind: "tier", tier: "max" });
+  });
+
+  it("读到但不在当前模型的档位表里 → offLadder 并原样带出那个值", () => {
+    // 例：套餐桶只到 ultra 但没有 max，而配置里留着别处带来的 max。
+    expect(effortDisplayOf("max", ["low", "medium", "high", "xhigh", "ultra"], true)).toEqual({
+      kind: "offLadder",
+      raw: "max",
+    });
+    // 后端 `EFFORT_OFF` 会把这类值提升成 `low` 再发（思考不可关），但 `config.load`
+    // 原样回吐存的串 —— 界面要说"后端现值是 minimal"，不许冒充第一档或替它改写。
+    expect(effortDisplayOf("minimal", LADDER, true)).toEqual({ kind: "offLadder", raw: "minimal" });
+  });
+
+  it("值两边空白都吃掉：带空格的配置值仍认得出来", () => {
+    expect(effortDisplayOf("  xhigh ", LADDER, true)).toEqual({ kind: "tier", tier: "xhigh" });
   });
 });

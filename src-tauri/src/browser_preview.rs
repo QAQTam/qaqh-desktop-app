@@ -124,6 +124,9 @@ async fn invoke(
             // 同理:附件多选对话框也挂不上,回空数组(=用户取消)。上传路径因此
             // 在预览里不会被触发,但命令面保持与桌面壳一致。
             "pick_attachments" => Ok(json!([])),
+            // 截图同理:预览里没有系统工具可调,回 `null`(=用户取消),
+            // 让预览夹具继续走「已上传附件」那条渲染分支而不是报错。
+            "capture_screenshot" => Ok(Value::Null),
             "upload_attachment" => {
                 let seed = required_string(&args, "seed")?;
                 let path = required_string(&args, "path")?;

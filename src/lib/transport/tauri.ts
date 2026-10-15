@@ -20,6 +20,8 @@ import {
   attachmentRefsOf,
   type AttachmentUploadWire,
   isTauriRuntime,
+  type ScreenshotWire,
+  type ShotMode,
   type StreamHandlers,
   type TimelinePageResponse,
   type TimelineStatusWire,
@@ -129,6 +131,11 @@ export class TauriTransport implements TransportBackend {
 
   pickAttachments(): Promise<string[]> {
     return invoke<string[]>("pick_attachments");
+  }
+
+  /** 应用内截图(macOS 系统 `screencapture`);`null` = 用户在准星上按了 Esc。 */
+  captureScreenshot(mode: ShotMode): Promise<ScreenshotWire | null> {
+    return invoke<ScreenshotWire | null>("capture_screenshot", { mode });
   }
 
   uploadAttachment(seed: string, path: string): Promise<AttachmentUploadWire> {

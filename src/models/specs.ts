@@ -19,12 +19,24 @@
  * | 模型目录里的 `modelContextWindow` | `contextWindow` |
  *
  * 档位阶梯与后端**逐字同序**（`qaqh-gate/src/types.rs::EFFORT_LADDER` 六档：
- * low → medium → high → xhigh → max → ultra），可用性由后端按端点 compat 钳制。
- * Codex 自己那套只有五档（没有 `max`），所以"哪几家能选 `max`"必须靠各桶的
- * `efforts` 明写，不能指望"缺省即全阶梯"。
+ * low → medium → high → xhigh → max → ultra），可用性再由后端按端点 compat 钳制
+ * （`clamp_effort_to_allowlist`，稀疏允许表按阶梯距离吸附，未知值给最高允许档）。
+ * Codex 自己那套没有 `max`，所以"哪几家能选 `max`"必须靠各桶的 `efforts` 明写，
+ * 不能指望"缺省即全阶梯"。
  */
 
-/** 推理强度档位。顺序即阶梯，由弱到强；与后端 `EFFORT_LADDER` 逐字同序。 */
+/** 推理强度档位。顺序即阶梯，由弱到强；与后端 `EFFORT_LADDER` 逐字同序。
+ *
+ * `ultra` 的来历（2026-10-14 复核，别再按"后端只有五档"改掉它）：
+ *  - 上游 `origin/main` 的 `aa7f2b3 feat(siwc): … effort ultra …`（10-14 11:17）
+ *    把 `EFFORT_LADDER` 定成六档，`ConfigPatch::validate` 收
+ *    `low|medium|high|xhigh|max|ultra`；前端 16:43 那次"与后端六档同序"是对它的镜像。
+ *  - 本地那份 `../qaqh-backend` checkout 停在 `6a0e282`（10-10 冻结基线，落后上游
+ *    12 个提交且已分叉），那里还是五档 —— **拿它当权威会得出相反的错误结论**。
+ *  - 已知裂缝：随仓 sidecar `src-tauri/binaries/qaqh-daemon-*` 是 `2.0.0-beta.3`
+ *    （10-11 构建，比 aa7f2b3 早三天），字符串里没有 `ultra`。也就是说**当前这个
+ *    二进制会拒 ultra**，而它该被重新构建到 RC1。见 README「推理强度档位」。
+ */
 export type ReasoningTier = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 /**
@@ -152,4 +164,13 @@ export function modelDefaultEffort(spec: ModelSpec): ReasoningTier {
 /** 该模型的上下文窗口（缺省 = 保守值，不是"很大"）。 */
 export function modelContextWindow(spec: ModelSpec): number {
   return spec.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+}
+
+/**
+ * GPT 家族判定。套餐目录的 slug 一律 `gpt-*`（实测 2026-10-14，见上表）；BYOK
+ * 上用户自己的端点同理。**只认前缀不猜全表**：上游加新模型不该让这里的名单过期。
+ * 目前唯一的消费者是思考摘要的富呈现特判（`../turn/thinking-label`）。
+ */
+export function isGptFamilyModel(model: string): boolean {
+  return /^gpt[-_]/i.test(model.trim());
 }

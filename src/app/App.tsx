@@ -40,6 +40,7 @@ import {
   setBootError,
   setDraftOf,
   sessionCatalog,
+  stageStartupAttachments,
   tabs,
   type Tab,
 } from "../tabs/store";
@@ -47,6 +48,7 @@ import { SessionView } from "../session/SessionView";
 import { StartupView } from "../session/StartupView";
 import { WorkspacePanel } from "../workspace/WorkspacePanel";
 import { Composer, type SendBlockReason } from "../composer/Composer";
+import { bootModelConfig, refreshConfig } from "../composer/model-config";
 import { lanActive, refreshLanStatus, sessionWorkspaceName } from "../composer/identity";
 import { ApprovalStack } from "../approval/ApprovalCards";
 import { lazy } from "solid-js";
@@ -59,6 +61,7 @@ import {
   toggleSettings,
 } from "../settings/store";
 import { STR } from "../lib/strings";
+import { isScreenshotShortcut, screenshotSupported, takeScreenshot } from "../lib/screenshot";
 import { isTauriRuntime, listenHostDiagnostics, openExternalUrl, transport, tauriHost } from "../lib/transport";
 import { applyTheme, storedTheme } from "../lib/theme";
 import { toast, ToastHost } from "../ui/toast";
@@ -66,6 +69,15 @@ import { DiffReviewDrawer } from "../diff/DiffReviewDrawer";
 import "../styles/app.css";
 
 const inTauri = isTauriRuntime();
+
+/**
+ * 应用内截图可用性(宿主形态 + 平台)。按钮出不出、快捷键响不响都读这一句,
+ * 免得出现"按了没反应"那种最难查的坏控件。
+ */
+const shotSupported = screenshotSupported({
+  inTauri,
+  userAgent: typeof navigator === "undefined" ? "" : navigator.userAgent,
+});
 
 /** D1 兼容性失败详情(conn://incompatible);null = 正常。 */
 const [hostIncompatible, setHostIncompatible] = createSignal<Record<string, unknown> | null>(null);
@@ -101,6 +113,48 @@ const App: Component = () => {
   const [quitError, setQuitError] = createSignal<string | null>(null);
   let quitCancelButton: HTMLButtonElement | undefined;
 
+  /** 系统准星占着屏幕:一次只允许一个截图动作在飞。 */
+  const [shotBusy, setShotBusy] = createSignal(false);
+
+  /**
+   * 截一张图,落到**当前正在用的那个输入区**:
+   *  - Startup(会话还没建)→ 暂存路径,随首条消息一起上传(`submitStartupSession`);
+   *  - 有活动会话 → 直接走附件面,变成输入区里的 chip。
+   *
+   * 三种结局分开说话:取消不该弹错误,失败不该静默,成功要说清挂上了哪一张——
+   * 用户按完键需要立刻知道图到手了没有。
+   */
+  const screenshot = async (): Promise<void> => {
+    if (!shotSupported || shotBusy()) return;
+    setShotBusy(true);
+    try {
+      const outcome = await takeScreenshot("selection");
+      if (outcome.kind === "cancelled") {
+        toast(STR.shotCancelled, "info", { dedupeKey: "screenshot" });
+        return;
+      }
+      if (outcome.kind === "failed") {
+        toast(`${STR.shotFailed}:${outcome.message}`, "err", { dedupeKey: "screenshot" });
+        return;
+      }
+      const path = outcome.shot.path;
+      const tab = activeTab();
+      try {
+        if (isStartup() || tab == null) stageStartupAttachments([path]);
+        else await tab.store.attachPaths([path]);
+      } catch (cause) {
+        // 挂不上(离线/seed 没了)要出声:图已经在临时目录里,丢了用户不知道。
+        toast(`${STR.shotFailed}:${cause instanceof Error ? cause.message : String(cause)}`, "err", {
+          dedupeKey: "screenshot",
+        });
+        return;
+      }
+      toast(STR.shotAttached(outcome.shot.name), "ok", { dedupeKey: "screenshot" });
+    } finally {
+      setShotBusy(false);
+    }
+  };
+
   onSettled(() => {
     void bootTabs().catch((error: unknown) => {
       // boot() 只对「没有可用会话」写 bootError;bootstrap/网络异常在此兜底,
@@ -112,8 +166,15 @@ const App: Component = () => {
     const poll = setInterval(() => void pollSessions(), 15_000);
     // 身份行的局域网判据读一次就够:开/关局域网都要重启 daemon,那是设置页的动作。
     void refreshLanStatus();
+    // 模型与推理强度是**全局配置**的投影:不预读,输入区那颗强度 chip 首帧就只能按
+    // "档位表第一档"画——把"还没读到"冒充成「轻度」。旧行为是等用户点开卡片才读,
+    // 于是"默认轻度、点进去才变真值"。配置是 daemon 全局态,读它不该等一次点击。
+    void bootModelConfig();
     const onFocus = (): void => {
       void pollSessions();
+      // 窗口重新聚焦时重读一次配置:别的端(TUI / 手改 config.toml / 设置页另一台)
+      // 可能刚改过 model 与强度,chip 不该继续显示上次那一份。
+      void refreshConfig();
       const tab = activeTab();
       // reconnecting 也重试:状态可能因事件竞态/退避中卡在中间态,
       // 聚焦触发宿主重建流(activate_timeline 会发新 open 事件自愈)。
@@ -190,6 +251,13 @@ const App: Component = () => {
       if (event.key === "Escape" && devConsoleOpen()) {
         event.preventDefault();
         closeDevConsole();
+        return;
+      }
+      // 截图键放在设置浮层的分支**之前**:设置页正是最需要截图的地方(OAuth/BYOK
+      // 那批字段都在那儿),浮层开着时也该能截。唯一让路的是上面的退出确认遮罩。
+      if (isScreenshotShortcut(event)) {
+        event.preventDefault();
+        void screenshot();
         return;
       }
       // 浮层开着时快捷键归浮层:Ctrl+T/W/Tab/1-9 不该在遮罩背后建会话、切标签。
@@ -440,7 +508,9 @@ const App: Component = () => {
               when={!isStartup() && activeTab() != null}
               fallback={
                 <div class="session-column">
-                  <StartupView />
+                  <StartupView
+                    onScreenshot={shotSupported ? () => void screenshot() : undefined}
+                  />
                 </div>
               }
             >
@@ -476,6 +546,7 @@ const App: Component = () => {
                         onPickAttachments={() => void tab.store.addAttachments().catch((error) => {
                           toast(`${STR.attachmentFailed}：${String(error instanceof Error ? error.message : error)}`, "err");
                         })}
+                        onScreenshot={shotSupported ? () => void screenshot() : undefined}
                         attachments={() => tab.store.pendingAttachments[0]()}
                         onRemoveAttachment={(id) => tab.store.removeAttachment(id)}
                         profileView={() => tab.store.composerProfile[0]()}

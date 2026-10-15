@@ -11,6 +11,7 @@
  * 等到 `block_opened`)一律按「思考」显示——**不猜**。
  */
 import { STR } from "../lib/strings";
+import { isGptFamilyModel } from "../models/specs";
 import type { ReasoningKind } from "../api/qaqh/ReasoningKind";
 
 /** 折叠行标签。 */
@@ -21,4 +22,16 @@ export function thinkingLabel(kind: ReasoningKind | null | undefined): string {
 /** 悬停说明;无需解释的档位返回 `undefined`(不挂空 title)。 */
 export function thinkingTitle(kind: ReasoningKind | null | undefined): string | undefined {
   return kind === "summary" ? STR.thinkingSummaryTitle : undefined;
+}
+
+/**
+ * 思考块的**富呈现**特判:当前配置是套餐(OAuth)且模型属 GPT 家族时,上游回传的
+ * 摘要本身是 markdown(小标题/列表/代码块),按纯文本渲染会把 `##`、`-` 原样摆给
+ * 用户。此时**不折叠**(默认展开)并走流式 Markdown;其余配置照旧纯文本+折叠。
+ *
+ * 判据读**配置**而不是 `reasoning_kind`:历史回合可能缺标注,而「套餐 + GPT 家族」
+ * 本身已保证这块内容是服务端摘要——按 kind 再闸一道只会把缺标注的块漏回纯文本。
+ */
+export function thinkingRichSummary(oauthPlan: boolean, model: string): boolean {
+  return oauthPlan && isGptFamilyModel(model);
 }
