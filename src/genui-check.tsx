@@ -58,6 +58,23 @@ const ASK_TODO = [
   "ui.end();",
 ].join("\n");
 const JSONL_FENCE = "```qaqh-ui v=0.1 format=jsonl";
+/** v0.2(A2UI 消息流管线):同一计数器配方,验证版本分流/translate/registry/SurfaceView2 全链。 */
+const V2_FENCE = "```qaqh-ui v=0.2 format=tsx";
+const V2_COUNTER = [
+  'ui.surface("v2-counter", { root: "card", fallback: "v2 计数器,可增加或重置。" });',
+  'const count = ui.state("count", "integer", 0);',
+  'const tags = ui.state("tags", "list", ["alpha"]);',
+  'ui.node("card", <Card title="v2 计数器" children={["value", "increment", "reset"]} />);',
+  'ui.node("value", <Metric label="当前计数" value={count} />);',
+  'ui.node("increment", <Button label="增加" onPress={ui.set("count", count + 1)} />);',
+  'ui.node("reset", <Button label="重置" onPress={ui.reset()} />);',
+  'ui.node("tagcard", <Card title="标签" children={["tags", "add", "del", "rows"]} />);',
+  'ui.node("tags", <TagList items={tags} />);',
+  'ui.node("add", <Button label="加 beta" onPress={ui.append("tags", "beta")} />);',
+  'ui.node("del", <Button label="删 beta" onPress={ui.remove("tags", "beta")} />);',
+  'ui.node("rows", <Text text={"· " + item} repeat={ui.for("tags", "item")} />);',
+  "ui.end();",
+].join("\n");
 /** 软告警:声明了 repeat 行却忘了挂进根容器 → 编译通过、界面少一块,只提示不报错。 */
 const ORPHAN = [
   'ui.surface("orphan", { root: "card" });',
@@ -121,6 +138,14 @@ render(() => (
     </section>
     <section id="genui-warn">
       <AssistantContent text={() => `孤儿节点\n${FENCE}\n${ORPHAN}\n\`\`\``} revision="orphan" streaming={false} />
+    </section>
+    <section id="genui-v2">
+      <AssistantContent
+        text={() => `v0.2(A2UI 消息流)\n${V2_FENCE}\n${V2_COUNTER}\n\`\`\`\n以上按钮应可交互:增加/重置/加删标签。`}
+        revision="v2"
+        streaming={false}
+        onFollowUp={(queued) => setQueued(`v2 队列:${queued}`)}
+      />
     </section>
   </main>
 ), document.getElementById("root")!);
