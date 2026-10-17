@@ -9,9 +9,10 @@
  *    清空不会生效(dto.rs:10-11),所以这些框清空即视作未改动。
  *  - MCP/LSP 只有读模型(ConfigDto:56-59 注明写模型另立),这里只读展示。
  *
- * BYOK 六字段与档案预设拆在 `byok/Sections`(两个分区按导航顺序分别渲染);
+ * BYOK 六字段与档案预设拆在 `byok/Sections`(两个分区按导航分别渲染);
  * 设备配对在 `PairingSection`;
- * 左侧分区导航按 section id 跳转(长表单不再一滚到底)。
+ * 左侧分区导航是**切换式单页**:点谁渲染谁(2026-10-16 起,原「长滚动+锚点
+ * 跳转+scroll-spy」因高亮与视口脱节下线),草稿在 store,切换不丢改动。
  */
 import { createEffect, createMemo, createSignal, For, onSettled, Show, type Component } from "solid-js";
 import IconRotate from "~icons/lucide/rotate-ccw";
@@ -55,19 +56,25 @@ import { ByokSection, ProfilesSection } from "./byok/Sections";
 import { PairingSection } from "./PairingSection";
 import { AboutSection } from "./AboutSection";
 
-/** 左侧分区导航;与各 Section 的 id 一一对应。 */
+/**
+ * 左侧分区导航:分组 + 点击切换(切换式单页——点谁渲染谁,不做滚动联动)。
+ * `data-section-id` 被 visual-capture.mjs 按 id 点击,改名前先查那边。
+ */
 const NAV = [
-  { id: "section-byok", label: "模型与端点" },
-  { id: "section-profiles", label: "档案预设" },
-  { id: "section-permission", label: "权限档位" },
-  { id: "section-context", label: "上下文" },
-  { id: "section-runtime", label: "运行时" },
-  { id: "section-appearance", label: "外观" },
-  { id: "section-subagent", label: "子代理" },
-  { id: "section-pairing", label: "设备配对" },
-  { id: "section-mcp", label: "MCP / LSP" },
-  { id: "section-about", label: "关于" },
+  { id: "section-byok", label: "模型与端点", group: "接入" },
+  { id: "section-profiles", label: "档案预设", group: "接入" },
+  { id: "section-pairing", label: "设备配对", group: "接入" },
+  { id: "section-permission", label: "权限档位", group: "运行" },
+  { id: "section-context", label: "上下文", group: "运行" },
+  { id: "section-runtime", label: "运行时", group: "运行" },
+  { id: "section-subagent", label: "子代理", group: "运行" },
+  { id: "section-mcp", label: "MCP / LSP", group: "运行" },
+  { id: "section-appearance", label: "外观", group: "界面" },
+  { id: "section-about", label: "关于", group: "关于" },
 ] as const;
+
+/** 导航渲染顺序 = 分组 contiguous 排列;pane 渲染与顺序无关(各自 Show)。 */
+const NAV_GROUP_ORDER = ["接入", "运行", "界面", "关于"] as const;
 
 const FontPicker: Component<{
   label: string;
@@ -135,49 +142,14 @@ export const SettingsView: Component = () => {
 
   const bypassPending = createMemo(() => requireBypass() && needsBypassConfirm(patch()));
 
-  const revealNavItem = (id: string): void => {
-    page?.querySelector<HTMLElement>(`.settings-nav-item[data-section-id="${id}"]`)
-      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  };
-
   /**
-   * 跳到某分区。**只滚 `.settings-body`**，不用 `scrollIntoView`：
-   * 后者会把**所有可滚动祖先**一起滚，包括 document / 外壳——于是整页连底栏
-   * 一起被向上顶起、窗口底部露出一块空白，左侧图标栏的首项也会被滚出视野
-   * （真机截图实证）。分区导航的语义是「在内容区内滚动」，不该动外层的壳。
+   * 切换式单页:点谁渲染谁。没有滚动联动/锚点跳转,不存在「高亮与视口分家」
+   * 这一类 bug;未激活分区不渲染,外观区那排字体下拉也不再常驻。
+   * 草稿在 `./store` 的 signal 里,切换分区不丢未保存改动。
    */
-  const jumpTo = (id: string): void => {
-    setActiveSection(id);
-    revealNavItem(id);
-    const target = document.getElementById(id);
-    if (target == null) return;
-    const scroller = target.closest<HTMLElement>(".settings-body");
-    if (scroller == null) {
-      target.scrollIntoView({ block: "start" });
-      return;
-    }
-    const delta = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
-    scroller.scrollTo({ top: scroller.scrollTop + delta, behavior: "smooth" });
-  };
-
-  const syncActiveSection = (scroller: HTMLDivElement): void => {
-    const nav = scroller.querySelector<HTMLElement>(".settings-nav");
-    const threshold = scroller.getBoundingClientRect().top + Math.min(nav?.getBoundingClientRect().height ?? 0, 48) + 12;
-    let current: string = NAV[0].id;
-    for (const item of NAV) {
-      const section = document.getElementById(item.id);
-      if (section == null) continue;
-      if (section.getBoundingClientRect().top > threshold) break;
-      current = item.id;
-    }
-    if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4) {
-      current = NAV[NAV.length - 1]!.id;
-    }
-    if (current !== activeSection()) {
-      setActiveSection(current);
-      revealNavItem(current);
-    }
-  };
+  const activeLabel = createMemo(
+    () => NAV.find((item) => item.id === activeSection())?.label ?? "",
+  );
 
   return (
     <main class="settings-page" ref={(node) => { page = node; }} aria-labelledby="settings-title">
@@ -185,6 +157,9 @@ export const SettingsView: Component = () => {
           <h1 id="settings-title" tabindex={-1}>{STR.settings}</h1>
           <Show when={(draft()?.activeProfile ?? "") !== ""}>
             <span class="settings-sub">profile · {draft()?.activeProfile}</span>
+          </Show>
+          <Show when={activeLabel() !== ""}>
+            <span class="settings-sub">· {activeLabel()}</span>
           </Show>
         </header>
 
@@ -203,27 +178,39 @@ export const SettingsView: Component = () => {
         <Show when={draft()}>
           {(config) => (
             <>
-              <div class="settings-body" onScroll={(event) => syncActiveSection(event.currentTarget)}>
+              <div class="settings-body">
                 <nav class="settings-nav" aria-label="设置分区">
-                  <For each={NAV}>
-                    {(item) => (
-                      <button
-                        type="button"
-                        class={`settings-nav-item${activeSection() === item.id ? " active" : ""}`}
-                        aria-current={activeSection() === item.id ? "location" : undefined}
-                        data-section-id={item.id}
-                        onClick={() => jumpTo(item.id)}
-                      >
-                        {item.label}
-                      </button>
+                  <For each={[...NAV_GROUP_ORDER]}>
+                    {(group) => (
+                      <>
+                        <div class="settings-nav-group">{group}</div>
+                        <For each={NAV.filter((item) => item.group === group)}>
+                          {(item) => (
+                            <button
+                              type="button"
+                              class={`settings-nav-item${activeSection() === item.id ? " active" : ""}`}
+                              aria-current={activeSection() === item.id ? "location" : undefined}
+                              data-section-id={item.id}
+                              onClick={() => setActiveSection(item.id)}
+                            >
+                              {item.label}
+                            </button>
+                          )}
+                        </For>
+                      </>
                     )}
                   </For>
                 </nav>
                 <div class="settings-content">
-                  <ByokSection />
+                  <Show when={activeSection() === "section-byok"}>
+                    <ByokSection />
+                  </Show>
 
-                  <ProfilesSection />
+                  <Show when={activeSection() === "section-profiles"}>
+                    <ProfilesSection />
+                  </Show>
 
+                  <Show when={activeSection() === "section-permission"}>
                   <Section
                     id="section-permission"
                     title="权限档位"
@@ -267,7 +254,9 @@ export const SettingsView: Component = () => {
                       </div>
                     </Show>
                   </Section>
+                  </Show>
 
+                  <Show when={activeSection() === "section-context"}>
                   <Section id="section-context" title="上下文与压缩">
                     <Field label={STR.settingsAutoCompact} hint={STR.settingsAutoCompactHint}>
                       <TextInput
@@ -292,7 +281,9 @@ export const SettingsView: Component = () => {
                       onToggle={(value) => setField("complianceEnabled", value)}
                     />
                   </Section>
+                  </Show>
 
+                  <Show when={activeSection() === "section-runtime"}>
                   <Section id="section-runtime" title="运行时">
                     <Field label={STR.settingsDefaultShell} hint={STR.settingsDefaultShellHint}>
                       <TextInput
@@ -311,7 +302,9 @@ export const SettingsView: Component = () => {
                       />
                     </Field>
                   </Section>
+                  </Show>
 
+                  <Show when={activeSection() === "section-appearance"}>
                   <Section id="section-appearance" title="外观" desc={STR.settingsThemeNote}>
                     <Field label="界面风格预设" hint="支持经典工作台与 macOS 26 水感流体玻璃（Liquid Glass），纯前端独立生效。">
                       <select
@@ -397,7 +390,9 @@ export const SettingsView: Component = () => {
                       <a href="/fonts/THIRD-PARTY-NOTICES.txt">第三方字体说明</a>。
                     </p>
                   </Section>
+                  </Show>
 
+                  <Show when={activeSection() === "section-subagent"}>
                   <Section
                     id="section-subagent"
                     title="子代理"
@@ -476,9 +471,13 @@ export const SettingsView: Component = () => {
                       />
                     </Field>
                   </Section>
+                  </Show>
 
-                  <PairingSection />
+                  <Show when={activeSection() === "section-pairing"}>
+                    <PairingSection />
+                  </Show>
 
+                  <Show when={activeSection() === "section-mcp"}>
                   <Section
                     id="section-mcp"
                     title="MCP / LSP(只读)"
@@ -541,8 +540,11 @@ export const SettingsView: Component = () => {
                       </table>
                     </Show>
                   </Section>
+                  </Show>
 
-                  <AboutSection />
+                  <Show when={activeSection() === "section-about"}>
+                    <AboutSection />
+                  </Show>
                 </div>
               </div>
 

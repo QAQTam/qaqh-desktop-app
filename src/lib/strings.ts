@@ -155,6 +155,7 @@ export const STR = {
   shotAttached: (name: string) => `截图已加入附件：${name}`,
   shotCancelled: "已取消截图（没写文件，也没加附件）",
   shotFailed: "截图失败",
+  shotPermission: "截图需要「屏幕录制」权限：已打开系统设置，请在列表中勾选本应用后重试",
   truncatedWindow: "更早的回合未在此窗口内",
   decidedAllow: "已允许",
   decidedDeny: "已拒绝",

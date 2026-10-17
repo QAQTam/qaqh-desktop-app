@@ -21,7 +21,8 @@
     "marked": "^16.4.1",
     "qrcode": "^1.5.4",
     "shiki": "^3.15.0",
-    "solid-js": "2.0.0-rc.13"
+    "solid-js": "2.0.0-rc.13",
+    "tauri-plugin-macos-permissions-api": "^2.3.0"
   },
   "devDependencies": {
     "@iconify-json/lucide": "^1.2.68",

@@ -3,6 +3,7 @@ import type { TimelineBlock } from "./TimelineBlock";
 import type { TimelineFailure } from "./TimelineFailure";
 import type { TimelineTool } from "./TimelineTool";
 import type { TimelineTurnState } from "./TimelineTurnState";
+import type { UsageInfo } from "./UsageInfo";
 
 /**
  * One mutation of the ordered transcript.
@@ -15,4 +16,4 @@ stream?: string | null,
 /**
  * 累计观测字节（emitted + dropped），0 = 未接线。
  */
-bytes_total?: number, } | { "type": "tool_estimated", block_id: string, lines_added: number, lines_removed: number, } | { "type": "block_sealed", block_id: string, } | { "type": "round_sealed", is_final: boolean, } | { "type": "turn_sealed", state: TimelineTurnState, failure?: TimelineFailure | null, };
+bytes_total?: number, } | { "type": "tool_estimated", block_id: string, lines_added: number, lines_removed: number, } | { "type": "usage_sampled", usage: UsageInfo, } | { "type": "block_sealed", block_id: string, } | { "type": "round_sealed", is_final: boolean, } | { "type": "turn_sealed", state: TimelineTurnState, failure?: TimelineFailure | null, };

@@ -42,8 +42,20 @@ export type ConfigPatchWire = Optionalize<Omit<ConfigPatch, "subagent">> & {
  *  `ReasoningTier` 注释。多一档 = 下拉里摆一个后端会拒的值;少一档 = 后端接受的
  *  最高档被自己人拒掉。 */
 export const REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"] as const;
-/** BYOK 的四条 wire——没有 provider 目录可查,协议由用户直接声明。 */
-export const WIRE_PROTOCOLS = ["openai", "responses", "anthropic", "gemini"] as const;
+/** BYOK 的四条 wire——没有 provider 目录可查,协议由用户直接声明。
+ *  值取后端 `qaqh_types::Wire` 的规范序列化名（provider.rs:29,2026-10 改名:
+ *  openai→chat、anthropic→messages;旧拼写在后端 serde alias 层兼容,但
+ *  `config.load` 回显的恒为规范名,下拉里必须摆规范值,否则选中态丢失）。 */
+export const WIRE_PROTOCOLS = ["chat", "responses", "messages", "gemini"] as const;
+/** 历史拼写 → 规范名（后端 `Wire::parse` 同表）。旧 profile/草稿里可能还存着。 */
+const WIRE_LEGACY_ALIASES: Record<string, string> = {
+  openai: "chat",
+  "openai-compatible": "chat",
+  chat_completions: "chat",
+  anthropic: "messages",
+  claude: "messages",
+  "openai-responses": "responses",
+};
 
 /** "" = 跟随系统(apply_patch:lang/theme/tokenizerPath 空串 = 清除)。 */
 export const THEME_OPTIONS = [
@@ -176,8 +188,12 @@ export function validatePatch(patch: ConfigPatchWire): string | null {
     return "contextLength 必须是大于 0 的整数";
   }
   const wire = patch.wire;
-  if (wire != null && !(WIRE_PROTOCOLS as readonly string[]).includes(wire)) {
-    return `wire 仅允许 ${WIRE_PROTOCOLS.join("|")}，收到 ${wire}`;
+  if (wire != null) {
+    // 规范名直通;历史拼写先归一(旧 profile/夹具还可能带着)。
+    if (wire in WIRE_LEGACY_ALIASES) patch.wire = WIRE_LEGACY_ALIASES[wire]!;
+    else if (!(WIRE_PROTOCOLS as readonly string[]).includes(wire)) {
+      return `wire 仅允许 ${WIRE_PROTOCOLS.join("|")}，收到 ${wire}`;
+    }
   }
   const effort = patch.reasoningEffort;
   if (effort != null && !(REASONING_EFFORTS as readonly string[]).includes(effort)) {

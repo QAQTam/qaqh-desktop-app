@@ -34,6 +34,7 @@ qaqh-memwatch = { path = "../../qaqh-backend/crates/qaqh-memwatch" }
 # 避免拖第二套 TLS 栈进产物。
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+tauri-plugin-macos-permissions = "2.3.0"
 
 # 界面进程组(`procgroup.rs`):要问 WebView2 引擎「你起了哪些进程、各是什么角色」,
 # 就得用它的接口类型,而 tauri 不 re-export `webview2_com`。`windows-core` 只为

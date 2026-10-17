@@ -443,6 +443,9 @@ export class SessionStore {
       this.consumedSeq = Math.max(this.consumedSeq, entry.timeline_seq);
       this.scheduleFlush();
     } else {
+      // 流中 usage 采样（瞬态、~1s 节流）：温和路径只同步官方分子/缓存命中，
+      // 不清流窗口、不改 tok/s、不灭脉冲——结算语义仍归 block seal / 回合终态。
+      if (event.type === "usage_sampled") this.applyUsageSampled(event.usage);
       this.mutate((draft) => {
         // 结构事件是顺序屏障:同一事务先落地较早的增量,不能用更高水位吞掉它们。
         this.flushFragmentsInto(draft);
@@ -701,6 +704,26 @@ export class SessionStore {
         contextPercent: Math.min(100, (currentTotal / this.contextLength!) * 100),
       }));
     }
+  }
+
+  /**
+   * 流中 usage 采样（`usage_sampled` timeline 事件，后端 ~1s 节流）的温和消费：
+   *  - `prompt_tokens` 是本轮请求的实时官方上下文，比「上一轮 prompt」新鲜——
+   *    有就重基线（`updateComposerUsage` 的最终结算随后会覆盖成权威终值）；
+   *  - 端点可能只报 output（Anthropic `message_delta`），没有 prompt 就不动
+   *    分子，更不能清零——那会把表盘打到 0%。
+   *  - 只动 contextPercent / cacheHitPercent；tok/s、`isStreaming`、流窗口
+   *    都是吐字速率的状态机，采样事件不得碰（那是块 seal 的职责）。
+   */
+  private applyUsageSampled(usage: UsageInfo): void {
+    if (usage.prompt_tokens > 0) this.measuredContextTokens = usage.prompt_tokens;
+    this.composerMetrics[1]((current) => ({
+      ...current,
+      cacheHitPercent: usage.cache_usage_reported === false
+        ? null
+        : cacheHitPercent(usage) ?? current.cacheHitPercent,
+    }));
+    this.publishContextPercent();
   }
 
   private updateComposerUsage(usage: UsageInfo): void {

@@ -98,7 +98,8 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default()
         // 单实例(D1):多开窗口聚焦到既有实例,宿主状态不复制。
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
@@ -108,7 +109,12 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_dialog::init());
+    // macOS 系统权限检测/申请(屏幕录制等)。插件只支持 macOS,其他平台不注册。
+    // `#[cfg]` 不能挂链式调用的表达式上,所以 builder 分步构建。
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_plugin_macos_permissions::init());
+    builder
         .manage(daemon::HostState::new())
         .invoke_handler(tauri::generate_handler![
             set_window_theme,

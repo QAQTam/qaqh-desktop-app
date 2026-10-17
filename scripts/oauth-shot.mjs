@@ -94,7 +94,7 @@ try {
       // 「正在读取账号状态」。这里直接扮演宿主，答出一份**已登录**的投影
       // （投影里永远没有凭据字段——后端在类型层就不下发）。
       const FIXTURES = {
-        "config.load": { credential: "deepseek_account", model: "deepseek-flash", reasoningEffort: "high", wire: "openai", baseUrl: "https://api.deepseek.com", contextLength: 1000000, profiles: [], activeProfile: null },
+        "config.load": { credential: "deepseek_account", model: "deepseek-flash", reasoningEffort: "high", wire: "chat", baseUrl: "https://api.deepseek.com", contextLength: 1000000, profiles: [], activeProfile: null },
         "siwc.status": null,
         "dsaccount.status": {
           signedIn: true,

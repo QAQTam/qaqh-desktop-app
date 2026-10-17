@@ -26,16 +26,24 @@ import { isAccountCredential } from "../../oauth/mode";
 /** 预设模板:预填 endpoint + wire(与后端 FIRST_RUN_CONFIG 的 DeepSeek 示例一致);
  *  model 各家变动频繁,留空让用户填,不硬编码会过期的 id。 */
 const PRESET_TEMPLATES = [
-  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com", wire: "openai" },
+  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com", wire: "chat" },
   { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", wire: "responses" },
-  { id: "anthropic", label: "Anthropic", baseUrl: "https://api.anthropic.com", wire: "anthropic" },
+  { id: "anthropic", label: "Anthropic", baseUrl: "https://api.anthropic.com", wire: "messages" },
   // Gemini 的 `:generateContent` 路径由 wire 补;endpoint 必须自带版本前缀
   // (`/v1beta` 不属于 wire 路径),漏掉会打到无版本的 `/models/...`。
   { id: "gemini", label: "Google Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", wire: "gemini" },
-  { id: "zhipu", label: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", wire: "openai" },
-  { id: "moonshot", label: "Kimi (Moonshot)", baseUrl: "https://api.moonshot.cn/v1", wire: "openai" },
-  { id: "custom", label: "自定义", baseUrl: "", wire: "openai" },
+  { id: "zhipu", label: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", wire: "chat" },
+  { id: "moonshot", label: "Kimi (Moonshot)", baseUrl: "https://api.moonshot.cn/v1", wire: "chat" },
+  { id: "custom", label: "自定义", baseUrl: "", wire: "chat" },
 ] as const;
+
+/** 下拉展示名:规范值 + 官方协议全称。value 恒为规范名(与后端序列化一致)。 */
+const WIRE_LABELS: Record<string, string> = {
+  chat: "chat（OpenAI Chat Completions）",
+  responses: "responses（OpenAI Responses）",
+  messages: "messages（Anthropic Messages）",
+  gemini: "gemini（Google generateContent）",
+};
 
 const secretPlaceholder = (masked: string): string =>
   masked === MASK ? "已配置(留空保持不变)" : "未配置";
@@ -114,7 +122,9 @@ export const ByokSection: Component = () => {
             value={config().wire}
             onChange={(event) => setField("wire", event.currentTarget.value)}
           >
-            <For each={[...WIRE_PROTOCOLS]}>{(wire) => <option value={wire}>{wire}</option>}</For>
+            <For each={[...WIRE_PROTOCOLS]}>
+              {(wire) => <option value={wire}>{WIRE_LABELS[wire] ?? wire}</option>}
+            </For>
           </select>
         </Field>
         <Field label={STR.settingsModel}>

@@ -115,6 +115,9 @@ window.__t = {
     el.dispatchEvent(new Event("change", { bubbles: true }));
   },
   click: (sel) => document.querySelector(sel)?.click(),
+  // 切换式单页:按 data-section-id 点导航切 pane(visual-capture 同款语义)。
+  // 注意:本文件 helper 整体在一个外层模板串里,这里不能用嵌套反引号。
+  nav: (id) => document.querySelector('.settings-nav-item[data-section-id="' + id + '"]')?.click(),
   text: (sel) => document.querySelector(sel)?.innerText ?? "",
   key: (key, opts = {}) => window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...opts })),
   calls: (method) => window.__qaqhProbe.calls.filter((item) => item.method === method),
@@ -141,13 +144,23 @@ const steps = [
     `,
   },
   {
-    name: "全量字段落位(读模型逐字段进表单)",
+    name: "全量字段落位(逐 pane 遍历:读模型逐字段进表单)",
     code: `
-      const sections = document.querySelectorAll(".settings-section").length;
-      const inputs = document.querySelectorAll(".settings-body input, .settings-body select").length;
-      const readonlyTables = document.querySelectorAll(".readonly-table").length;
-      // 2026-10-08 起 10 个分区:BYOK/档案/权限/上下文/运行时/外观/子代理/设备配对/MCP-LSP/关于。
-      // 新增或删除分区要同步这里——计数是「整页真的渲染出来了」的冒烟,不是契约。
+      // 2026-10-16 起设置页是切换式单页:一次只渲染一个分区,冒烟改为逐 pane 点击遍历。
+      const NAV = ["section-byok","section-profiles","section-pairing","section-permission",
+                   "section-context","section-runtime","section-subagent","section-mcp",
+                   "section-appearance","section-about"];
+      let sections = 0, inputs = 0, readonlyTables = 0;
+      for (const id of NAV) {
+        __t.nav(id);
+        await __t.wait(120);
+        sections += document.querySelectorAll(".settings-section").length;
+        inputs += document.querySelectorAll(".settings-body input, .settings-body select").length;
+        readonlyTables += document.querySelectorAll(".readonly-table").length;
+      }
+      __t.nav("section-byok");
+      await __t.wait(150);
+      // 新增或删除分区要同步 NAV——计数是「每个 pane 真的渲染出来了」的冒烟,不是契约。
       return { ok: sections === 10 && inputs >= 26 && readonlyTables === 3
                  && __t.value("模型") === "ox-alpha-free" && __t.value("最大输出令牌") === "96000",
                detail: { sections, inputs, readonlyTables, model: __t.value("模型"), maxTokens: __t.value("最大输出令牌") } };
@@ -191,7 +204,7 @@ const steps = [
   {
     name: "BYOK 端点改动:endpoint + wire 各发一项",
     code: `
-      __t.pick("协议", "anthropic");
+      __t.pick("协议", "messages");
       await __t.wait(250);
       __t.type("接口地址", "https://other.example/v1");
       await __t.wait(250);
@@ -201,14 +214,16 @@ const steps = [
       __t.click(".primary-mini");
       await __t.wait(600);
       const patch = __t.lastSave() ?? {};
-      return { ok: foot.includes("2 项") && wire === "anthropic" && endpoint === "https://other.example/v1"
-                 && patch.wire === "anthropic" && patch.baseUrl === "https://other.example/v1",
+      return { ok: foot.includes("2 项") && wire === "messages" && endpoint === "https://other.example/v1"
+                 && patch.wire === "messages" && patch.baseUrl === "https://other.example/v1",
                detail: { foot, wire, endpoint, patchKeys: Object.keys(patch) } };
     `,
   },
   {
     name: "档位降到 3:先拦下,打字确认后才写",
     code: `
+      __t.nav("section-permission");
+      await __t.wait(200);
       const before = __t.saves().length;
       __t.click('input[name="permission-tier"][value="3"]');
       await __t.wait(200);
@@ -233,8 +248,13 @@ const steps = [
   {
     name: "脏草稿下拒绝对 profile 动手(不静默覆盖草稿)",
     code: `
+      __t.nav("section-byok");
+      await __t.wait(150);
       __t.type("模型", "dirt-while-profile");
       await __t.wait(200);
+      // 草稿是 store 级的:切到档案 pane,脏标记跟着走。
+      __t.nav("section-profiles");
+      await __t.wait(150);
       const before = __t.calls("profile.delete").length;
       // 目标必须是非活动 profile:活动档的删除按钮本来就 disabled。
       document.querySelector(".profile-row:not(.active) .ghost-mini.is-danger")?.click();
@@ -247,6 +267,8 @@ const steps = [
   {
     name: "重新读取:丢掉草稿并回到基线",
     code: `
+      __t.nav("section-byok");
+      await __t.wait(150);
       const loads = __t.calls("config.load").length;
       [...document.querySelectorAll(".settings-foot-actions .ghost-mini")].find((b) => b.textContent.includes("重新读取"))?.click();
       await __t.wait(600);
@@ -361,17 +383,19 @@ try {
   await cdp.evaluate(`(() => { const __t = window.__t; return (async () => {
     if (__t.modal() == null) __t.key(",", { ctrlKey: true });
     await __t.wait(700);
-    __t.type("模型", "ox-two"); __t.pick("主题", "dark");
-    document.querySelector(".settings-body").scrollTop = 0;
-    await __t.wait(400); return "shot-ready";
+    __t.type("模型", "ox-two");
+    // 切换式单页:主题在外观 pane,截图前先切过去。
+    __t.nav("section-appearance");
+    await __t.wait(300);
+    __t.pick("主题", "dark");
+    await __t.wait(300); return "shot-ready";
   })(); })()`);
   mkdirSync(dirname(SHOT), { recursive: true });
   const shot = await cdp.send("Page.captureScreenshot", { format: "png" });
   writeFileSync(SHOT, Buffer.from(shot.data, "base64"));
-  // 第二张:滚到底,看子代理/profile/MCP 只读区。
+  // 第二张:切到子代理 pane,看子代理字段与底部保存栏(原「滚到底」语义的 pane 版)。
   await cdp.evaluate(`(() => { const __t = window.__t; return (async () => {
-    const body = document.querySelector(".settings-body");
-    body.scrollTop = body.scrollHeight;
+    __t.nav("section-subagent");
     await __t.wait(300);
     return document.querySelector(".settings-foot-state")?.innerText ?? "";
   })(); })()`);

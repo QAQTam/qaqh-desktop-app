@@ -611,7 +611,10 @@ pub async fn host_process_group(app: AppHandle) -> Result<Value, String> {
 #[tauri::command]
 pub fn open_external(app: AppHandle, url: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    if !(url.starts_with("http://") || url.starts_with("https://")) {
+    // http/https 之外只放行系统设置面板深链(截图授权引导用)。定点枚举,
+    // 不开任意 scheme——任意 scheme 等于让 webview 请求面替用户拉起任意 handler。
+    let allowed_deeplink = url.starts_with("x-apple.systempreferences:");
+    if !allowed_deeplink && !(url.starts_with("http://") || url.starts_with("https://")) {
         return Err("only http/https urls are allowed".into());
     }
     app.opener().open_url(url, None::<&str>).map_err(string_of)
@@ -891,6 +894,27 @@ fn screenshot_name(stamp_ms: u128) -> String {
     format!("qaqh-shot-{stamp_ms}.png")
 }
 
+/// 屏幕录制 TCC 预检/申请（CoreGraphics,macOS 10.15+）。
+///
+/// 为什么宿主还要第二道防线:前端经插件预检后到 `screencapture` 真正执行之间
+/// 有窗口期(用户可在系统设置里随时关掉授权);未授权时 `screencapture` 退出码
+/// 为 0 但产出**全黑图**,只在退出码层面看是察觉不到的。两个 C 函数 CoreGraphics
+/// 直接导出,wry 已链接该 framework,无需新增依赖。
+#[cfg(target_os = "macos")]
+mod screen_recording {
+    unsafe extern "C" {
+        fn CGPreflightScreenCaptureAccess() -> bool;
+        fn CGRequestScreenCaptureAccess() -> bool;
+    }
+    pub fn preflight() -> bool {
+        unsafe { CGPreflightScreenCaptureAccess() }
+    }
+    /// 触发系统授权归因(未授权过会弹一次 TCC 弹窗);返回申请后的状态。
+    pub fn request() -> bool {
+        unsafe { CGRequestScreenCaptureAccess() }
+    }
+}
+
 #[tauri::command]
 pub async fn capture_screenshot(
     app: AppHandle,
@@ -898,6 +922,14 @@ pub async fn capture_screenshot(
 ) -> Result<Option<Value>, String> {
     #[cfg(target_os = "macos")]
     {
+        // TCC 门控:未授权先走一次系统申请,仍拒绝则报结构化错误——前端按
+        // `SCREEN_RECORDING_REQUIRED` 标记归并为「权限引导」结局,弹引导卡。
+        if !screen_recording::preflight() && !screen_recording::request() {
+            return Err(
+                "SCREEN_RECORDING_REQUIRED::截图需要「屏幕录制」权限：请在 系统设置 → 隐私与安全性 → 屏幕录制 中勾选本应用后重试"
+                    .to_string(),
+            );
+        }
         let shot_mode = ShotMode::parse(mode.as_deref())?;
         let temp_dir = app.path().temp_dir().map_err(string_of)?;
         let stamp = std::time::SystemTime::now()

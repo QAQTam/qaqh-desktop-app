@@ -79,6 +79,50 @@ test("流式期间：text_delta 驱动实时瞬时 tok/s 与 isStreaming: true",
   expect(live.contextPercent).toBeGreaterThan(0);
 });
 
+test("流中 usage 采样：官方分子即时同步，且不打断吐字脉冲（温和路径）", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(0);
+  const { store, feedTimeline, frame } = createMetricsHarness();
+  (store as unknown as { contextLength: number }).contextLength = 100_000;
+
+  feedTimeline({ type: "block_opened", block: { block_id: "ans_1", kind: "text", state: "open" } });
+  vi.advanceTimersByTime(100);
+  feedTimeline({ type: "text_delta", block_id: "ans_1", delta: "正在流式生成回答的一段文本测试内容。" });
+  frame();
+  const streamingBefore = store.composerMetrics[0]();
+  expect(streamingBefore.isStreaming).toBe(true);
+  const tpsBefore = streamingBefore.tokensPerSecond;
+
+  // 端点在流中报 usage（message_start 一类）：prompt=5000 → 5%，脉冲与 tok/s 不动。
+  feedTimeline({
+    type: "usage_sampled",
+    usage: {
+      prompt_tokens: 5000, completion_tokens: 10, total_tokens: 5010,
+      prompt_cache_hit_tokens: 4000, prompt_cache_miss_tokens: 1000,
+      reasoning_tokens: 0, cache_usage_reported: true,
+    },
+  });
+  const sampled = store.composerMetrics[0]();
+  expect(sampled.contextPercent).toBeCloseTo(5, 5);
+  expect(sampled.cacheHitPercent).toBeCloseTo(80, 1);
+  expect(sampled.isStreaming).toBe(true);
+  expect(sampled.tokensPerSecond).toBe(streamingBefore.tokensPerSecond);
+
+  // 只报 output 的端点（Anthropic message_delta）：没有 prompt 就不得清零分子。
+  feedTimeline({
+    type: "usage_sampled",
+    usage: {
+      prompt_tokens: 0, completion_tokens: 20, total_tokens: 20,
+      prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 0,
+      reasoning_tokens: 0, cache_usage_reported: false,
+    },
+  });
+  const outputOnly = store.composerMetrics[0]();
+  expect(outputOnly.contextPercent).toBeCloseTo(5, 5);
+  expect(outputOnly.isStreaming).toBe(true);
+  expect(outputOnly.tokensPerSecond).toBe(tpsBefore);
+});
+
 test("思考(reasoning)期间同样要出速率：reasoning 块也是模型产出", () => {
   vi.useFakeTimers();
   vi.setSystemTime(0);

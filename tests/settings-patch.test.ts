@@ -23,7 +23,7 @@ function dto(overrides: Partial<ConfigDto> = {}): ConfigDto {
   const base: ConfigDto = {
     model: "ox-alpha-free",
     baseUrl: "https://opencode.ai/zen/go/v1",
-    wire: "openai",
+    wire: "chat",
     maxTokens: 96000,
     contextLength: 1000000,
     reasoningEffort: "max",
@@ -154,10 +154,13 @@ describe("validatePatch", () => {
     expect(validatePatch({ maxTokens: 96000 })).toBeNull();
   });
 
-  test("wire 只认四条 BYOK 协议(没有 provider 目录可兜底)", () => {
-    for (const wire of ["openai", "responses", "anthropic", "gemini"]) {
+  test("wire 只认四条 BYOK 协议(后端规范名);历史拼写归一到规范名", () => {
+    for (const wire of ["chat", "responses", "messages", "gemini"]) {
       expect(validatePatch({ wire })).toBeNull();
     }
+    // 旧拼写在后端 serde alias 层兼容;前端校验顺手归一,保住旧 profile/夹具。
+    expect(validatePatch({ wire: "openai" })).toBeNull();
+    expect(validatePatch({ wire: "anthropic" })).toBeNull();
     expect(validatePatch({ wire: "deepseek" })).toContain("wire");
     expect(validatePatch({ wire: "" })).toContain("wire");
   });

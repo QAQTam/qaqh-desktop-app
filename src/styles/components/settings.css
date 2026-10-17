@@ -27,15 +27,24 @@
     padding: 24px clamp(20px, 3vw, 36px); overflow: auto;
     display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 0 32px;
   }
-  /* 左侧分区导航:粘在滚动容器顶部;窄屏退化为横向条。 */
+  /* 左侧分区导航:分组标题 + 点击切换;pane 内容超长时仍粘在滚动容器顶部。 */
   .settings-nav { display: grid; gap: 2px; align-content: start; position: sticky; top: 0; align-self: start; }
+  .settings-nav-group {
+    margin: 10px 0 2px; padding: 0 10px;
+    color: var(--muted); font-size: var(--fs-xs); font-weight: 500;
+    letter-spacing: 0.05em;
+  }
+  .settings-nav-group:first-child { margin-top: 0; }
   .settings-nav-item {
     text-align: left; padding: 6px 10px; border-radius: var(--r-md);
     color: var(--muted); font-size: var(--fs-sm);
     transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
   }
   .settings-nav-item:hover { background: var(--surface-2); color: var(--text); }
-  .settings-nav-item.active { background: var(--surface-2); color: var(--text); font-weight: 500; }
+  .settings-nav-item.active {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    color: var(--accent); font-weight: 500;
+  }
   .settings-content { min-width: 0; max-width: 740px; }
   .settings-section { padding: 0 0 18px; }
   .settings-section + .settings-section { padding-top: 2px; }

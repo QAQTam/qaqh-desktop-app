@@ -19,7 +19,7 @@ baseUrl: string,
 wire: string, 
 /**
  * 该 endpoint 的**凭据来源**：`api_key`（BYOK，缺省）| `chatgpt_plan`（本机
- * ChatGPT 套餐额度）。
+ * ChatGPT 套餐额度）| `deepseek_account`（本机 DeepSeek 账号余额）。
  *
  * 显式声明而不是从「apiKey 是否为空」推导——隐式推导会把一个配置错误变成
  * 「静默用了别的额度」。`chatgpt_plan` 只与 `responses` wire + 官方 base_url

@@ -108,7 +108,8 @@ export function switchFields(
       // DeepSeek 账号余额走 OpenAI 兼容的 chat completions；官方 base 由后端的
       // `apply_deepseek_account` 钉死，这里只在**已知**时写（`apiBase` 取自
       // `dsaccount.status.inferenceOrigin`，前端不拼 URL）。
-      wire: "openai",
+      // qaqh_types::Wire 规范名（2026-10 起 openai → chat）。
+      wire: "chat",
       // 分母跟着这一家走（实测 1M）：不写就沿用上一家的值，压缩时机就错了。
       contextLength: saved.contextLength ?? DSACCOUNT_CONTEXT_LENGTH,
       ...(apiBase == null ? {} : { baseUrl: apiBase }),

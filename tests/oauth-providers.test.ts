@@ -59,7 +59,7 @@ const BYOK_CONFIG = {
   model: "deepseek-v4.1-flash",
   reasoningEffort: "high",
   baseUrl: "https://api.deepseek.com",
-  wire: "openai",
+  wire: "chat",
   contextLength: 128_000,
 };
 
@@ -215,7 +215,7 @@ describe("每 provider 状态：切换与还原", () => {
     if (entry == null) return;
     expect(switchFields(entry, {}, "https://api.deepseek.com")).toMatchObject({
       credential: "deepseek_account",
-      wire: "openai",
+      wire: "chat",
       baseUrl: "https://api.deepseek.com",
       contextLength: DSACCOUNT_CONTEXT_LENGTH,
     });
@@ -266,7 +266,7 @@ describe("每 provider 状态：切换与还原", () => {
       credential: "api_key",
       model: "deepseek-v4.1-flash",
       baseUrl: "https://api.deepseek.com",
-      wire: "openai",
+      wire: "chat",
     });
     // 没抓过的槽位不写空值（合并补丁的空串 = 保持现值，写空等于没写还更容易误读）。
     states = rememberState(states, plan.id, {});

@@ -15,6 +15,10 @@
  *    （`upload_attachment`）——不为截图新辟一条上传口。
  */
 import { transport, type ScreenshotWire, type ShotMode } from "./transport";
+import {
+  checkScreenRecordingPermission,
+  requestScreenRecordingPermission,
+} from "tauri-plugin-macos-permissions-api";
 
 /**
  * 截图快捷键：`⌘⇧S`（mac）/ `Ctrl+Shift+S`（其余平台）。
@@ -44,16 +48,39 @@ export function isScreenshotShortcut(event: ShortcutProbe): boolean {
   return event.key.toLowerCase() === "s";
 }
 
-/** 一次截图的三种结局（**刻意不用 `null` 表示两种意思**）。 */
+/** 一次截图的四种结局（**刻意不用 `null` 表示两种意思**）。 */
 export type ShotOutcome =
   | { kind: "captured"; shot: ScreenshotWire }
   | { kind: "cancelled" }
+  /** 屏幕「屏幕录制」TCC 未授权：UI 应弹引导并打开系统设置，而不是当失败静默。 */
+  | { kind: "permission" }
   | { kind: "failed"; message: string };
 
 /** 可注入的取图动作（测试里给假宿主）。 */
-export type ShotDeps = { capture: (mode: ShotMode) => Promise<ScreenshotWire | null> };
+export type ShotDeps = {
+  capture: (mode: ShotMode) => Promise<ScreenshotWire | null>;
+  /**
+   * 屏幕「屏幕录制」授权预检：true = 已授权可截。缺省 = **跳过门控**（测试与
+   * 非 Tauri 环境不接插件）；运行时由 defaultDeps 接插件实现。
+   */
+  ensureScreenRecording?: () => Promise<boolean>;
+};
 
-const defaultDeps: ShotDeps = { capture: (mode) => transport.captureScreenshot(mode) };
+const defaultDeps: ShotDeps = {
+  capture: (mode) => transport.captureScreenshot(mode),
+  // fail-open：预检本身出错（非 mac / 插件异常）时不拦截图，行为退回旧路径
+  //（宿主命令自己的错误信息兜底），绝不因为预检故障把可用功能锁死。
+  ensureScreenRecording: async () => {
+    try {
+      if (await checkScreenRecordingPermission()) return true;
+      // 首次调用会触发系统授权弹窗（TCC 归因到本 app）；曾被拒则无弹窗，回 false。
+      await requestScreenRecordingPermission();
+      return checkScreenRecordingPermission();
+    } catch {
+      return true;
+    }
+  },
+};
 
 const messageOf = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
@@ -80,11 +107,25 @@ export async function takeScreenshot(
   mode: ShotMode = "selection",
   deps: ShotDeps = defaultDeps,
 ): Promise<ShotOutcome> {
+  // 授权预检在取图之前：未授权时 `screencapture` 会「成功」但产出**全黑图**，
+  // 与取消难以区分还污染附件区——必须在 spawn 之前拦下。
+  if (deps.ensureScreenRecording != null) {
+    let authorized = false;
+    try {
+      authorized = await deps.ensureScreenRecording();
+    } catch {
+      authorized = true; // 预检故障 fail-open,同 defaultDeps 的口径。
+    }
+    if (!authorized) return { kind: "permission" };
+  }
   let shot: ScreenshotWire | null;
   try {
     shot = await deps.capture(mode);
   } catch (cause) {
-    return { kind: "failed", message: messageOf(cause) };
+    const message = messageOf(cause);
+    // 宿主预检(第二道防线)拦下的授权缺口,归并到同一个引导结局。
+    if (message.includes("SCREEN_RECORDING_REQUIRED")) return { kind: "permission" };
+    return { kind: "failed", message };
   }
   if (shot == null) return { kind: "cancelled" };
   if (typeof shot.path !== "string" || shot.path.trim() === "") {

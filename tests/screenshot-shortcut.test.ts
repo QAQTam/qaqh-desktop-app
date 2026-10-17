@@ -40,6 +40,36 @@ describe("截图键位（⌘⇧S）", () => {
     expect(isScreenshotShortcut(key({ metaKey: false, ctrlKey: false }))).toBe(false);
   });
 
+  it("授权门控:预检不过 → permission 结局,且**不调用**取图(黑图根本不该产生)", async () => {
+    let captured = 0;
+    const outcome = await takeScreenshot("selection", {
+      capture: () => {
+        captured += 1;
+        return Promise.resolve({ path: "/tmp/x.png", name: "x.png", size: 1 });
+      },
+      ensureScreenRecording: () => Promise.resolve(false),
+    });
+    expect(outcome).toEqual({ kind: "permission" });
+    expect(captured).toBe(0);
+  });
+
+  it("授权门控:宿主预检(SCREEN_RECORDING_REQUIRED 标记)也归并为 permission", async () => {
+    const outcome = await takeScreenshot("selection", {
+      capture: () => Promise.reject(new Error("SCREEN_RECORDING_REQUIRED::需要屏幕录制权限")),
+      ensureScreenRecording: () => Promise.resolve(true),
+    });
+    expect(outcome).toEqual({ kind: "permission" });
+  });
+
+  it("授权门控:预检本身抛错 → fail-open,照常取图", async () => {
+    const outcome = await takeScreenshot("selection", {
+      capture: () => Promise.resolve({ path: "/tmp/x.png", name: "x.png", size: 1 }),
+      ensureScreenRecording: () => Promise.reject(new Error("plugin down")),
+    });
+    expect(outcome.kind).toBe("captured");
+  });
+
+
   it("带 Alt 不占用，按住连发也不连拍", () => {
     expect(isScreenshotShortcut(key({ altKey: true }))).toBe(false);
     expect(isScreenshotShortcut(key({ repeat: true }))).toBe(false);

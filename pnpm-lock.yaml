@@ -38,6 +38,9 @@ importers:
       solid-js:
         specifier: 2.0.0-rc.13
         version: 2.0.0-rc.13
+      tauri-plugin-macos-permissions-api:
+        specifier: ^2.3.0
+        version: 2.3.0
     devDependencies:
       '@iconify-json/lucide':
         specifier: ^1.2.68
@@ -1131,6 +1134,9 @@ packages:
   strip-ansi@6.0.1:
     resolution: {integrity: sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A==}
     engines: {node: '>=8'}
+
+  tauri-plugin-macos-permissions-api@2.3.0:
+    resolution: {integrity: sha512-pZp0jmDySysBqrGueknd1a7Rr4XEO9aXpMv9TNrT2PDHP0MSH20njieOagsFYJ5MCVb8A+wcaK0cIkjUC2dOww==}
 
   tinybench@6.2.0:
     resolution: {integrity: sha512-78U2TlB2CnVenajOFzf3BKSm0J6oz5L0NV7g32LCPccvYc0lbWvys4d3uUUCS2B1N8PAf2+aekR8i1KbC3HO7Q==}
@@ -2296,6 +2302,10 @@ snapshots:
   strip-ansi@6.0.1:
     dependencies:
       ansi-regex: 5.0.1
+
+  tauri-plugin-macos-permissions-api@2.3.0:
+    dependencies:
+      '@tauri-apps/api': 2.12.1
 
   tinybench@6.2.0: {}
 

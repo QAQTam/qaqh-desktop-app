@@ -19,7 +19,7 @@ export type ConfigPatch = {
  */
 apiKey: string | null, model: string | null, baseUrl: string | null, wire: string | null, 
 /**
- * 凭据来源：`api_key` | `chatgpt_plan`。缺失 = 不动（K3）。
+ * 凭据来源：`api_key` | `chatgpt_plan` | `deepseek_account`。缺失 = 不动（K3）。
  *
  * 值域在 [`ConfigPatch::validate`] 收口；这里刻意**不**给「未知值退化成
  * api_key」的兜底——静默改变额度来源比报错难查得多。

@@ -133,6 +133,12 @@ const App: Component = () => {
         toast(STR.shotCancelled, "info", { dedupeKey: "screenshot" });
         return;
       }
+      if (outcome.kind === "permission") {
+        // 直接把「屏幕录制」设置面板送到用户面前(opener 对 x-apple. 深链走系统打开)。
+        void openExternalUrl("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture");
+        toast(STR.shotPermission, "info", { dedupeKey: "screenshot" });
+        return;
+      }
       if (outcome.kind === "failed") {
         toast(`${STR.shotFailed}:${outcome.message}`, "err", { dedupeKey: "screenshot" });
         return;
