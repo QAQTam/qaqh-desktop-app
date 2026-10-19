@@ -55,13 +55,56 @@ describe("reduceCompact:终态词表", () => {
   });
 
   test("failed / skipped / cancelled 都不算「已压缩」", () => {
-    expect(run({ phase: "idle" }, "compact_finished", { status: "failed" })).toEqual({ phase: "failed" });
-    expect(run({ phase: "idle" }, "compact_finished", { status: "skipped" })).toEqual({ phase: "skipped", status: "skipped" });
-    expect(run({ phase: "idle" }, "compact_finished", { status: "cancelled" })).toEqual({ phase: "skipped", status: "cancelled" });
+    expect(run({ phase: "idle" }, "compact_finished", { status: "failed" })).toEqual({ phase: "failed", reason: null });
+    expect(run({ phase: "idle" }, "compact_finished", { status: "skipped" })).toEqual({ phase: "skipped", status: "skipped", reason: null });
+    expect(run({ phase: "idle" }, "compact_finished", { status: "cancelled" })).toEqual({ phase: "skipped", status: "cancelled", reason: null });
   });
 
   test("skipped 的计数缺省时仍收敛(线上这些字段是 Option)", () => {
     expect(run({ phase: "idle" }, "compact_finished", { status: "skipped" })).toMatchObject({ phase: "skipped" });
+  });
+});
+
+describe("reduceCompact:终态原因(线上加法字段 `reason`)", () => {
+  test("failed 带出后端的中文原因", () => {
+    expect(run({ phase: "idle" }, "compact_finished", {
+      status: "failed", reason: "HTTP 429: rate limited",
+    })).toEqual({ phase: "failed", reason: "HTTP 429: rate limited" });
+  });
+
+  test("skipped / cancelled 也带原因:每种「没压缩」都要能区分", () => {
+    expect(run({ phase: "idle" }, "compact_finished", {
+      status: "skipped", reason: "没有可压缩的历史：当前上下文里还没有任何消息。",
+    })).toEqual({
+      phase: "skipped", status: "skipped", reason: "没有可压缩的历史：当前上下文里还没有任何消息。",
+    });
+    expect(run({ phase: "idle" }, "compact_finished", {
+      status: "cancelled",
+      reason: "压缩期间上下文已更新（revision 3 → 4），为避免覆盖新内容已丢弃本次摘要；请重新发起压缩。",
+    })).toMatchObject({ phase: "skipped", status: "cancelled", reason: expect.stringContaining("上下文已更新") });
+  });
+
+  test("旧 daemon 缺字段 / 空串 / 空白 / 非字符串都收敛成 null,不渲染空原因行", () => {
+    const asFailed = (reason: unknown) => run({ phase: "idle" }, "compact_finished", { status: "failed", reason });
+    expect(asFailed(undefined)).toEqual({ phase: "failed", reason: null });
+    expect(asFailed("")).toEqual({ phase: "failed", reason: null });
+    expect(asFailed("   ")).toEqual({ phase: "failed", reason: null });
+    expect(asFailed(42)).toEqual({ phase: "failed", reason: null });
+    expect(run({ phase: "idle" }, "compact_finished", { status: "skipped", reason: null }))
+      .toEqual({ phase: "skipped", status: "skipped", reason: null });
+  });
+
+  test("成功终态不带原因(线上成功为 None),reason 不挤进 done", () => {
+    expect(run({ phase: "idle" }, "compact_finished", {
+      status: "completed", summary_chars: 812, turns_removed: 6, reason: null,
+    })).toEqual({ phase: "done", completedAt: 1000, summaryChars: 812, turnsRemoved: 6 });
+  });
+
+  test("重新发起压缩时旧原因不残留", () => {
+    const failed: CompactState = { phase: "failed", reason: "上一次的错误" };
+    expect(run(failed, "compact_started", { compact_id: "c2", turns_total: 8, turns_keeping: 2 })).toEqual({
+      phase: "running", compactId: "c2", turnsTotal: 8, turnsKeeping: 2, summary: "",
+    });
   });
 });
 
@@ -74,7 +117,7 @@ describe("reduceCompact:落盘事实收口", () => {
   test("事实先到时保留已落定终态(次序无关收敛)", () => {
     const done: CompactState = { phase: "done", completedAt: 1, summaryChars: 9, turnsRemoved: 2 };
     expect(run(done, "compacted", {})).toBe(done);
-    const skipped: CompactState = { phase: "skipped", status: "skipped" };
+    const skipped: CompactState = { phase: "skipped", status: "skipped", reason: null };
     expect(run(skipped, "compacted", {})).toBe(skipped);
   });
 });

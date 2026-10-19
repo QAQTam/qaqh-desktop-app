@@ -448,7 +448,7 @@ export const Composer: Component<{
                   </span>
                   <Show when={metrics().cacheHitPercent != null}>
                     <span class="composer-identity-item" title="本轮 prompt cache 命中 token / 已报告的命中与未命中 token">
-                      缓存命中 <strong>{metrics().cacheHitPercent!.toFixed(0)}%</strong>
+                      缓存命中 <strong>{metrics().cacheHitPercent!.toFixed(2)}%</strong>
                     </span>
                   </Show>
                   <For each={extras().slice(0, EXTRA_HUD_LIMIT)}>

@@ -237,7 +237,7 @@
   .tool-diffstat.is-estimate { opacity: .66; text-decoration: underline dashed 1px; text-underline-offset: 3px; }
   .diff-stat-flag { margin-left: 3px; font-weight: 400; opacity: .75; }
 
-  .tool-detail { display: grid; gap: 6px; margin: 2px 6px 8px 14px; padding: 4px 0 4px 14px; border-left: 1px solid var(--border); min-width: 0; }
+  .tool-detail { display: grid; gap: 6px; margin: 2px 6px 12px 30px; padding: 4px 0; min-width: 0; }
   .tool-detail-label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: var(--fs-xs); }
   .tool-command, .tool-text {
     background: var(--surface-code);
@@ -255,9 +255,19 @@
   }
   .tool-text { max-height: 280px; overflow: auto; overscroll-behavior: contain; }
   .tool-progress { color: var(--muted); max-height: 160px; overflow: auto; }
-  .tool-shell-output { display: grid; gap: 6px; min-width: 0; max-height: 280px; overflow: auto; overscroll-behavior: contain; }
+  /* 一份输出只有一个表面和一个滚动区，stdout/stderr 不再各套边框。 */
+  .tool-output {
+    min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-control);
+    background: var(--surface-code); overflow: hidden;
+  }
+  .tool-output > .tool-detail-label { padding: 4px 10px; border-bottom: 1px solid var(--border); }
+  .tool-shell-output { display: grid; gap: 0; min-width: 0; max-height: 280px; overflow: auto; overscroll-behavior: contain; }
   .tool-shell-output.tool-progress { max-height: 160px; }
-  .tool-shell-output .tool-text { max-height: none; overflow: visible; }
+  .tool-shell-output .tool-text {
+    max-height: none; overflow: visible;
+    border: 0; border-radius: 0; background: transparent; font-size: var(--fs-xs);
+  }
+  .tool-shell-output > .tool-detail-label { padding: 4px 10px 0; }
   .tool-stderr { color: var(--err); }
   .tool-text .tool-section-line { display: block; margin: 2px 0 1px; color: var(--muted); font-weight: 600; letter-spacing: 0.02em; }
   .tool-error { color: var(--err); }

@@ -1,9 +1,9 @@
 /**
  * 工作区集合面板(待办是当前唯一数据分区):占会话右栏(真实分配列宽,不覆盖正文),
- * 展开 320px、收起缩到胶囊本身宽度;有待办自动展开、清空自动收起,手动开合优先于自动。
+ * 展开 320px、收起为 40px 图标栏;有待办自动展开、清空自动收起,手动开合优先于自动。
  *
- * 工作区区域过窄时(容器宽度低于 NARROW_RAIL_MAX)自动收起为胶囊条——仍占位、不压正文;
- * 点胶囊仍可强制展开,占的是真实列宽,同样不会盖住消息。
+ * 工作区区域过窄时(容器宽度低于 NARROW_RAIL_MAX)自动收起为窄栏——仍占位、不覆盖正文;
+ * 点图标仍可强制展开,占的是真实列宽,同样不会盖住消息。
  *
  * 状态视觉:空心圆=待办;spinner=进行中;勾选+次级文字=完成;红点=取消。
  * 无逐条错峰动画,避免快照更新时重复播放;数据单源 store.todos(todo.list RPC,
@@ -20,7 +20,7 @@ import { STR } from "../lib/strings";
 import { normalizeStatus } from "../lib/todo";
 import type { SessionStore } from "../session/store";
 
-/** 会话列宽度低于此值时,右栏默认收起为胶囊条(仍占位,不覆盖消息)。 */
+/** 会话列宽度低于此值时,右栏默认收起为窄栏(仍占位,不覆盖消息)。 */
 const NARROW_RAIL_MAX = 720;
 
 const TodoRow: Component<{ item: { title?: string; status?: string; evidence?: string } }> = (props) => {
@@ -65,7 +65,7 @@ export const WorkspacePanel: Component<{ store: SessionStore }> = (props) => {
       if (total === 0) setManual(null);
     },
   );
-  // 窄屏自动收起为胶囊条;manual 优先,点胶囊仍可强制展开(占真实列宽,不覆盖消息)。
+  // 窄屏自动收起为窄栏;manual 优先,点图标仍可强制展开(占真实列宽,不覆盖消息)。
   const open = () => manual() ?? (items().length > 0 && !narrow());
 
   // 量的是父容器(.session-column)的可用宽度:右栏自己是 auto 列,量自己会循环。

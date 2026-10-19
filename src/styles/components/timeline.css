@@ -14,7 +14,7 @@
   #main { min-height: 0; display: grid; }
   .session-column {
     display: grid;
-    /* 第 2 列是工作区右栏(auto:收起缩到胶囊宽度、展开 320px)。正文与输入框都在第 1 列,
+    /* 第 2 列是工作区右栏(auto:收起 40px、展开 320px)。正文与输入框都在第 1 列,
        所以右栏开合只会推挤两者、不会让它们彼此错位,也不会覆盖消息。 */
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-rows: minmax(0, 1fr) auto auto;

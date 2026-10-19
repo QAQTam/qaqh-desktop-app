@@ -20,6 +20,12 @@
   .compact-card.skipped .compact-card-mark { background: var(--muted); }
   .compact-card.failed .compact-card-mark { background: var(--err); }
   .compact-card.failed .compact-card-head strong { color: var(--err); }
+  /* 失败/跳过的具体原因(线上 `CompactFinished.reason`):状态词做标题,原因另起一行。 */
+  .compact-card-reason {
+    margin: 0; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .compact-card.failed .compact-card-reason { color: var(--err); }
   .compact-card-summary {
     max-height: 168px; overflow: auto;
     margin: 0; padding: 8px 10px;
@@ -67,27 +73,24 @@
     justify-self: end; align-self: stretch;
     display: flex; flex-direction: column;
     min-width: 0;
-    padding: var(--space-3) var(--space-3) 0 0;
+    overflow: hidden;
+    border-left: 1px solid var(--border);
+    background: var(--surface);
   }
   .workspace-panel-surface {
-    flex: none;
+    flex: 1; min-height: 0;
     width: var(--workspace-panel-width);
-    max-height: min(70vh, 100%);
+    height: 100%;
     display: flex; flex-direction: column;
-    border: 1px solid var(--border); border-radius: var(--radius-panel); overflow: hidden;
+    overflow: hidden;
     background: var(--surface);
-    box-shadow: var(--shadow-soft);
-    transform-origin: top right;
-    transition: width var(--dur-layout) var(--ease),
-                max-height var(--dur-layout) var(--ease),
-                box-shadow var(--dur) var(--ease);
+    transition: width var(--dur-layout) var(--ease);
   }
-  /* 收起: 缩小到胶囊宽度与 48px 单行高度，正文拿回列宽。
-     固定宽度配合 overflow: hidden 保证无论内部文字多长，收放过程都平滑可插值。 */
+  /* 收起保留窄栏入口，正文拿回列宽；入口不随内容刷新移动。 */
   .workspace-panel.collapsed .workspace-panel-surface {
-    width: var(--workspace-panel-collapsed-width, 126px);
-    max-height: 48px;
+    width: var(--workspace-panel-collapsed-width, 40px);
   }
+  .workspace-panel.collapsed .workspace-panel-head > span { display: none; }
   html.tauri .workspace-panel-surface {
     background: var(--surface);
     -webkit-backdrop-filter: none;
@@ -95,7 +98,7 @@
   }
   .workspace-panel-head {
     display: flex; align-items: center; gap: 8px;
-    flex: none; min-height: 48px; padding: 0 var(--space-4);
+    flex: none; min-height: 40px; padding: 0 var(--space-3);
     color: var(--muted); font-size: var(--fs-sm);
     border-bottom: 1px solid var(--border);
     text-align: left;

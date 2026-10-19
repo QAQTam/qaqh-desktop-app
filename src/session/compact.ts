@@ -9,6 +9,10 @@
  * 唯一容易搞错的一点:`CompactProgress.delta` 是**累积全文快照**——桥把 provider
  * 分片按 256 字符合并后发整段,不是增量分片。所以这里整段替换;拼加会让文本按
  * 帧长堆叠,而丢帧不需要补偿(下一帧自带全文)。
+ *
+ * 第二个坑:`CompactFinished.reason` 是**加法字段**(`Option<String>`,成功时为
+ * `None`,失败/跳过/取消时是面向用户的中文整句)。旧 daemon 不带这个字段,所以
+ * 缺省必须收敛成 `null`——不能拿 `status` 反推,也不能把空串当原因渲染。
  */
 import type { Slot, Turn } from "./types";
 
@@ -16,10 +20,13 @@ export type CompactState =
   | { phase: "idle" }
   | { phase: "running"; compactId: string | null; turnsTotal: number | null; turnsKeeping: number | null; summary: string }
   | { phase: "done"; completedAt: number; summaryChars: number | null; turnsRemoved: number | null }
-  /** 终态但没压缩:`skipped` = 没有可压缩的内容,`cancelled` = 回合被取消。 */
-  | { phase: "skipped"; status: "skipped" | "cancelled" }
-  /** 线上 `CompactFinished` 不带失败原因字段,所以这里没有 reason 可展示。 */
-  | { phase: "failed" };
+  /**
+   * 终态但没压缩:`skipped` = 没有可压缩的内容,`cancelled` = 回合被取消。
+   * `reason` 是后端给出的具体中文说明(如"没有可压缩的历史:…"),旧 daemon 为 null。
+   */
+  | { phase: "skipped"; status: "skipped" | "cancelled"; reason: string | null }
+  /** 压缩失败;`reason` 是后端的中文失败说明,旧 daemon 无此字段时为 null。 */
+  | { phase: "failed"; reason: string | null };
 
 /** 能驱动压缩态的四个动作:三个过程 kind + 一个落盘事实。 */
 export type CompactAction = "compacted" | "compact_started" | "compact_progress" | "compact_finished";
@@ -30,6 +37,12 @@ function asFiniteNumber(value: unknown): number | null {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
+}
+
+/** 线上 `reason` 是可选的整句中文;空串/纯空白与非字符串一律当"没有原因"。 */
+function asReason(value: unknown): string | null {
+  const text = asString(value)?.trim() ?? "";
+  return text === "" ? null : text;
 }
 
 export function reduceCompact(
@@ -67,8 +80,9 @@ export function reduceCompact(
     }
     case "compact_finished": {
       const status = asString(body.status) ?? "";
-      if (status === "failed") return { phase: "failed" };
-      if (status === "skipped" || status === "cancelled") return { phase: "skipped", status };
+      const reason = asReason(body.reason);
+      if (status === "failed") return { phase: "failed", reason };
+      if (status === "skipped" || status === "cancelled") return { phase: "skipped", status, reason };
       return {
         phase: "done",
         completedAt: at,

@@ -16,6 +16,7 @@ import {
   needsBypassConfirm,
   parseToolList,
   validatePatch,
+  type ConfigPatchWire,
 } from "../src/settings/patch";
 import { EFFORT_LADDER } from "../src/models/specs";
 
@@ -130,6 +131,18 @@ describe("buildPatch", () => {
     expect(same.subagent).toBeUndefined();
   });
 
+  test("wire 变更:比较按规范名、出网按 daemon 认的旧拼写;同义拼写不算改动", () => {
+    // 读模型回显规范名、下拉也摆规范名,但直发规范名会被 daemon 的
+    // `ConfigPatch::validate` 400 掉——出网必须换成旧拼写(chat→openai 等)。
+    expect(buildPatch(dto({ wire: "messages" }), dto()).wire).toBe("openai");
+    expect(buildPatch(dto(), dto({ wire: "messages" })).wire).toBe("anthropic");
+    expect(buildPatch(dto(), dto({ wire: "gemini" })).wire).toBe("gemini");
+    // 规范名与旧拼写是同一个值(后端 `Wire::parse` 同一枚举):比较先归一,不产生差异。
+    expect(isPatchEmpty(buildPatch(dto({ wire: "openai" }), dto({ wire: "chat" })))).toBe(true);
+    // 没改就不发。
+    expect(buildPatch(dto(), dto()).wire).toBeUndefined();
+  });
+
   test("档位从 2 改成 3 才触发 bypass 确认;2→1 不要", () => {
     expect(needsBypassConfirm(buildPatch(dto(), dto({ permissionLevel: 3 })))).toBe(true);
     expect(needsBypassConfirm(buildPatch(dto(), dto({ permissionLevel: 1 })))).toBe(false);
@@ -154,13 +167,25 @@ describe("validatePatch", () => {
     expect(validatePatch({ maxTokens: 96000 })).toBeNull();
   });
 
-  test("wire 只认四条 BYOK 协议(后端规范名);历史拼写归一到规范名", () => {
-    for (const wire of ["chat", "responses", "messages", "gemini"]) {
-      expect(validatePatch({ wire })).toBeNull();
+  test("wire 两种拼写都收;出网落成 daemon 写模型认的旧拼写(规范名被改写)", () => {
+    // 规范名(读模型回显)与旧拼写(更早配置)是同一个枚举的两种写法;收全,
+    // 但落成 daemon `ConfigPatch::validate` 认的那组(直发 chat/messages = 400)。
+    const mappings: Array<[string, string]> = [
+      ["chat", "openai"],
+      ["responses", "responses"],
+      ["messages", "anthropic"],
+      ["gemini", "gemini"],
+    ];
+    for (const [wire, expected] of mappings) {
+      const patch: ConfigPatchWire = { wire };
+      expect(validatePatch(patch), wire).toBeNull();
+      expect(patch.wire, wire).toBe(expected);
     }
-    // 旧拼写在后端 serde alias 层兼容;前端校验顺手归一,保住旧 profile/夹具。
-    expect(validatePatch({ wire: "openai" })).toBeNull();
-    expect(validatePatch({ wire: "anthropic" })).toBeNull();
+    // 旧拼写直通且幂等。
+    const legacy: ConfigPatchWire = { wire: "anthropic" };
+    expect(validatePatch(legacy)).toBeNull();
+    expect(legacy.wire).toBe("anthropic");
+    // 词表外的值与空串照旧拒绝。
     expect(validatePatch({ wire: "deepseek" })).toContain("wire");
     expect(validatePatch({ wire: "" })).toContain("wire");
   });

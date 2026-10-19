@@ -125,7 +125,8 @@
     *, *::before, *::after { box-shadow: none !important; text-shadow: none !important; }
     .session-capsule { background: Canvas; border-color: ButtonText; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
     .global-nav { background: Canvas; border-color: ButtonText; }
-    .global-nav-item.active { background: Highlight; color: HighlightText; }
+    .global-nav-item.active { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+    .global-nav-item.active span { background: transparent; color: inherit; }
     .tools-empty { background: Canvas; border-color: ButtonText; }
     .tab.active, .session-menu-row.active { background: Highlight; color: HighlightText; border-color: Highlight; }
     .session-menu, .settings-page, .toast, .connection-notice { background: Canvas; border-color: ButtonText; box-shadow: none; }

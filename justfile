@@ -124,7 +124,6 @@ desktop-dev:
 [windows]
 desktop-build: renderer-build
     just verify-backend
-    just build-pre
     cargo build --manifest-path ../qaqh-backend/Cargo.toml --release -p qaqh-daemon
     just place-sidecar release
     pnpm tauri build

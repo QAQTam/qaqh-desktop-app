@@ -20,13 +20,13 @@
  *    两边必须同一个判据，否则切到 DeepSeek 时开关会自己弹回"关"。模型目录按
  *    provider 归口（`./model-catalog`），本页与输入区共用同一份判定。
  */
-import { createSignal, For, Match, onCleanup, onSettled, Show, Switch, type Component } from "solid-js";
-import IconChevronLeft from "~icons/lucide/chevron-left";
+import { createSignal, For, Match, onSettled, Show, Switch, type Component } from "solid-js";
+import IconChevronDown from "~icons/lucide/chevron-down";
 
 import type { ConfigDto } from "../api/qaqh/ConfigDto";
 import { DsAccountCard } from "../dsaccount/components/AccountCard";
 import {
-  dsFrontAccountState,
+  dsAccountView,
   type DsAccountStatus,
   type DsVerifyResult,
 } from "../dsaccount/state";
@@ -55,6 +55,8 @@ import { modelSpec, type SpecBucket } from "../models/specs";
 import { siwcApiBase, siwcPlanBadgeVisible, type SiwcSessionStatus } from "../siwc/brand";
 import { SiwcConnectionCard } from "../siwc/components/ConnectionCard";
 import { SiwcFirstRunNotice } from "../siwc/components/FirstRunNotice";
+import { SiwcSignInButton } from "../siwc/components/SignInButton";
+import { siwcAccountView } from "../siwc/state";
 import { toast } from "../ui/toast";
 import { oauthPillView } from "./mode";
 import {
@@ -194,10 +196,10 @@ const ModelList: Component<{
 };
 
 /**
- * 一张 provider 卡：正面是「谁」，点击翻面到「怎么连 / 连上后怎样」。
- * 卡片骨架与流程解耦——`Switch` 按 `kind` 分支，友商接入时加一个分支即可。
+ * 服务商摘要行：登录与当前来源分别呈现，详情按需展开。
+ * 隐藏详情不占布局空间，但保留 DOM，收起不会重置账号卡或登录流程。
  */
-const ProviderCard: Component<{
+const ProviderRow: Component<{
   entry: ProviderEntry;
   active: boolean;
   /** 当前生效的模型名（用于展示；来自 daemon 配置，不是本卡的本地状态）。 */
@@ -206,8 +208,8 @@ const ProviderCard: Component<{
   options: ModelEntry[] | null;
   catalogBusy: boolean;
   catalogError: string | null;
-  /** 翻面 / 点「刷新目录」：按这一家的来源拉一次目录。 */
-  onEnsureCatalog: () => void;
+  /** 展开 / 点「刷新目录」：按这一家的来源拉一次目录。 */
+  onEnsureCatalog: (force?: boolean) => void;
   /** 选一条模型：生效中 → 落盘；未生效 → 只记进该 provider 的槽位。 */
   onPickModel: (slug: string) => void;
   status: SiwcSessionStatus | null;
@@ -230,12 +232,32 @@ const ProviderCard: Component<{
   onDsVerify: () => void;
   onDsOpenLink: (url: string) => void;
 }> = (props) => {
-  const [flipped, setFlipped] = createSignal(false);
+  const [expanded, setExpanded] = createSignal(false);
+  const detailsId = () => `oauth-details-${props.entry.id}`;
+  const planView = () => siwcAccountView(props.status);
+  const accountView = () => dsAccountView(props.dsStatus);
   const connected = (): boolean => props.status?.status === "connected";
-
-  const stateLabel = (): string => {
-    if (props.active) return props.busy ? "切换中…" : "使用中";
-    return "未启用";
+  const accountLabel = (): string => {
+    if (props.entry.kind === "account") {
+      switch (accountView().kind) {
+        case "loading": return "读取中…";
+        case "connecting": return "等待浏览器授权";
+        case "signed-in": return `已登录 · ${accountView().displayName ?? "DeepSeek 账号"}`;
+        case "damaged": return "需要重新登录";
+        default: return "未登录";
+      }
+    }
+    switch (planView().kind) {
+      case "connecting": return "等待浏览器授权";
+      case "reauth-required": return "需要重新登录";
+      case "identity-only": return "已登录 · 套餐用量未启用";
+      case "plan": return "已登录 · 套餐用量已启用";
+      default: return "未登录";
+    }
+  };
+  const toggleDetails = (): void => {
+    if (!expanded()) props.onEnsureCatalog();
+    setExpanded(!expanded());
   };
 
   /** 模型展示名 + 是否收录（未收录要说出来，不能让用户以为我们认得它）。 */
@@ -264,7 +286,8 @@ const ProviderCard: Component<{
         tone: siwcPlanBadgeVisible(current) ? "ok" : "muted",
       });
     }
-    const model = modelLabel();
+    // 配置中的模型属于当前来源，不能把 DeepSeek 模型展示在未启用的 OpenAI 详情中。
+    const model = props.active ? modelLabel() : null;
     if (model != null) rows.push({ label: "模型", value: model });
     const apiBase = siwcApiBase(current);
     if (apiBase != null) rows.push({ label: "端点", value: apiBase });
@@ -273,129 +296,137 @@ const ProviderCard: Component<{
 
   return (
     <article
-      class={`oauth-card${flipped() ? " is-flipped" : ""}${props.active ? " is-active" : ""}`}
+      class={`oauth-provider${props.active ? " is-active" : ""}`}
       data-provider={props.entry.id}
     >
-      <div class="oauth-card__inner">
-        <button
-          type="button"
-          class="oauth-card__face oauth-card__front"
-          aria-expanded={flipped() ? "true" : "false"}
-          onClick={() => {
-            // 一翻面就去拉这一家的目录：不拉的话背面只能显示"目录为空"。
-            props.onEnsureCatalog();
-            setFlipped(true);
-          }}
-        >
-          <span class="oauth-card__brand">{props.entry.name}</span>
-          <span class="oauth-card__state">{stateLabel()}</span>
-          <span class="oauth-card__blurb">{props.entry.blurb}</span>
-          <span class="oauth-card__hint">
-            {props.entry.kind === "plan"
-              ? "点击卡片：使用 ChatGPT 登录"
-              : props.entry.kind === "account"
-                ? "点击卡片：使用 DeepSeek 账号登录"
-                : "点击卡片：查看怎么切回来"}
-          </span>
-          {/* 账号态放正面：不用翻面就知道登录没（"已登录"= 本地有凭据）。 */}
-          {props.entry.kind === "account" ? (
-            <span class="oauth-card__hint">{dsFrontAccountState(props.dsStatus)}</span>
-          ) : null}
-        </button>
-
-        <div class="oauth-card__face oauth-card__back">
-          <button
-            type="button"
-            class="ghost-mini oauth-card__back-btn"
-            onClick={() => setFlipped(false)}
-          >
-            <IconChevronLeft />
-            <span>返回</span>
-          </button>
-
-          <Switch>
-            <Match when={props.entry.kind === "plan"}>
-              <SiwcConnectionCard
-                status={props.status}
-                busy={props.busy}
-                onSignIn={() => props.onSignIn()}
-                onCancel={() => props.onCancel()}
-                onSignOut={() => props.onSignOut()}
-                onOpenUsage={(url) => props.onOpenUsage(url)}
-              />
-              <Show when={quotaRows().length > 0}>
-                <dl class="oauth-quota">
-                  <For each={quotaRows()}>
-                    {(row) => (
-                      <>
-                        <dt>{row.label}</dt>
-                        <dd
-                          class={
-                            row.tone === "muted" ? "is-muted" : row.tone === "ok" ? "is-ok" : undefined
-                          }
-                        >
-                          {row.value}
-                        </dd>
-                      </>
-                    )}
-                  </For>
-                </dl>
-              </Show>
-            </Match>
-            <Match when={props.entry.kind === "account"}>
-              {/* 与 OpenAI 那张完全对称：背面就是这一家的账号卡。 */}
-              <DsAccountCard
-                status={props.dsStatus}
-                balance={props.dsBalance}
-                busy={props.dsBusy}
-                onSignIn={() => props.onDsSignIn()}
-                onCancel={() => props.onDsCancel()}
-                onSignOut={() => props.onDsSignOut()}
-                verify={props.dsVerify}
-                verifyBusy={props.dsVerifyBusy}
-                onVerify={() => props.onDsVerify()}
-                onOpenLink={(url) => props.onDsOpenLink(url)}
-              />
-            </Match>
-            <Match when={props.entry.kind === "byok"}>
-              <p class="oauth-card__blurb">
-                自带 key 的模型与端点由你在设置页维护；切换回来时，我们把你**切走之前**
-                那套（模型 / 端点 / 协议）写回配置。
-              </p>
-            </Match>
-          </Switch>
-
-          <Show when={props.entry.kind !== "byok"}>
-            <ModelList
-              active={props.active}
-              providerName={props.entry.name}
-              bucket={specBucketOfKind(props.entry.kind)}
-              model={props.model}
-              options={props.options}
-              busy={props.catalogBusy}
-              error={props.catalogError}
-              onReload={() => props.onEnsureCatalog()}
-              onPick={(slug) => props.onPickModel(slug)}
-            />
-          </Show>
-
-          <Show when={!props.active}>
-            <button
-              type="button"
-              class="ghost-mini"
-              disabled={props.busy}
-              onClick={() => props.onSwitch()}
-            >
-              切到这一家
-            </button>
+      <div class="oauth-provider__summary">
+        <div class="oauth-provider__identity">
+          <div class="oauth-provider__heading">
+            <h3>{props.entry.name}</h3>
+            <Show when={props.active}><span class="oauth-provider__active">当前使用</span></Show>
+          </div>
+          <p class="oauth-provider__status">{accountLabel()}</p>
+          <Show when={!expanded() && (props.entry.kind === "account" ? accountView().error : planView().error)}>
+            {(message) => <p class="oauth-provider__error">{message()}</p>}
           </Show>
         </div>
+        <div class="oauth-provider__actions">
+          <Show when={props.entry.kind === "plan"}>
+            <Show when={["disconnected", "reauth-required", "identity-only"].includes(planView().kind)}>
+              <SiwcSignInButton disabled={props.busy} onPress={() => props.onSignIn()} />
+            </Show>
+            <Show when={planView().kind === "connecting"}>
+              <button type="button" class="ghost-mini" onClick={() => props.onCancel()}>取消登录</button>
+            </Show>
+          </Show>
+          <Show when={props.entry.kind === "account"}>
+            <Show when={accountView().canSignIn}>
+              <button type="button" class="oauth-provider__connect" disabled={props.dsBusy} onClick={() => props.onDsSignIn()}>
+                {accountView().kind === "damaged" ? "重新登录" : "登录"}
+              </button>
+            </Show>
+            <Show when={accountView().canCancel}>
+              <button type="button" class="ghost-mini" onClick={() => props.onDsCancel()}>取消登录</button>
+            </Show>
+          </Show>
+          <button
+            type="button"
+            class="ghost-mini oauth-provider__toggle"
+            aria-label={`${expanded() ? "收起" : "展开"}${props.entry.name}详情`}
+            aria-expanded={expanded() ? "true" : "false"}
+            aria-controls={detailsId()}
+            onClick={toggleDetails}
+          >
+            <span>{expanded() ? "收起" : "详情"}</span>
+            <IconChevronDown />
+          </button>
+        </div>
+      </div>
+
+      <div id={detailsId()} class="oauth-provider__details" hidden={!expanded()}>
+        <Switch>
+          <Match when={props.entry.kind === "plan"}>
+            <SiwcConnectionCard
+              status={props.status}
+              busy={props.busy}
+              hideSignInActions
+              onSignIn={() => props.onSignIn()}
+              onCancel={() => props.onCancel()}
+              onSignOut={() => props.onSignOut()}
+              onOpenUsage={(url) => props.onOpenUsage(url)}
+            />
+            <Show when={quotaRows().length > 0}>
+              <dl class="oauth-quota">
+                <For each={quotaRows()}>
+                  {(row) => (
+                    <>
+                      <dt>{row.label}</dt>
+                      <dd
+                        class={
+                          row.tone === "muted" ? "is-muted" : row.tone === "ok" ? "is-ok" : undefined
+                        }
+                      >
+                        {row.value}
+                      </dd>
+                    </>
+                  )}
+                </For>
+              </dl>
+            </Show>
+          </Match>
+          <Match when={props.entry.kind === "account"}>
+            <DsAccountCard
+              status={props.dsStatus}
+              balance={props.dsBalance}
+              busy={props.dsBusy}
+              hideSignInActions
+              onSignIn={() => props.onDsSignIn()}
+              onCancel={() => props.onDsCancel()}
+              onSignOut={() => props.onDsSignOut()}
+              verify={props.dsVerify}
+              verifyBusy={props.dsVerifyBusy}
+              onVerify={() => props.onDsVerify()}
+              onOpenLink={(url) => props.onDsOpenLink(url)}
+            />
+          </Match>
+          <Match when={props.entry.kind === "byok"}>
+            <p class="oauth-provider__status">
+              自带 key 的模型与端点由你在设置页维护；切换回来时，我们把你**切走之前**
+              那套（模型 / 端点 / 协议）写回配置。
+            </p>
+          </Match>
+        </Switch>
+
+        <Show when={props.entry.kind !== "byok"}>
+          <ModelList
+            active={props.active}
+            providerName={props.entry.name}
+            bucket={specBucketOfKind(props.entry.kind)}
+            model={props.model}
+            options={props.options}
+            busy={props.catalogBusy}
+            error={props.catalogError}
+            onReload={() => props.onEnsureCatalog(true)}
+            onPick={(slug) => props.onPickModel(slug)}
+          />
+        </Show>
+
+        <Show when={!props.active}>
+          <button
+            type="button"
+            class="ghost-mini"
+            disabled={props.busy || (props.entry.kind === "account" && props.dsBusy)}
+            onClick={() => props.onSwitch()}
+          >
+            设为当前来源
+          </button>
+        </Show>
       </div>
     </article>
   );
 };
 
-export const OAuthPage: Component = () => {
+export const OAuthPage: Component<{ onOpenSettings?: () => void }> = (props) => {
   const available = isTauriRuntime();
   /** 已保存事实（`config.load` 的整份读模型）：切换要快照它，所以留整份。 */
   const [config, setConfig] = createSignal<ConfigDto | null>(null);
@@ -414,7 +445,7 @@ export const OAuthPage: Component = () => {
 
   /**
    * 模型目录（按来源分槽）。`entries == null` 与 `entries == []` 是两回事：
-   * 前者是"还没拿到"（登录没完成 / 还没翻过这张卡），后者是"这家确实给了个空表"，
+   * 前者是"还没拿到"（登录没完成 / 还没展开过详情），后者是"这家确实给了个空表"，
    * 文案必须分开，否则用户不知道该去登录还是该来提 bug。
    */
   const [catalogs, setCatalogs] = createSignal<Partial<Record<CatalogKind, CatalogSlot>>>({});
@@ -523,7 +554,7 @@ export const OAuthPage: Component = () => {
       // 登录进行中由流程驱动自己轮询，页面这边不掺和（免得两个轮询抢状态）。
       if (dsAttempt() == null) void refreshDs();
     }, 10_000);
-    onCleanup(() => window.clearInterval(timer));
+    return () => window.clearInterval(timer);
   });
 
   /**
@@ -789,95 +820,103 @@ export const OAuthPage: Component = () => {
   };
 
   return (
-    <div class="oauth-page">
+    <div class="oauth-page settings-page">
       <header class="oauth-page-head">
         <h1>接入</h1>
-        <p>
-          用你自己的账号额度完成推理，无需配置 API key。凭据保存在本机（加密），
-          不会出到前端；打开开关后，设置页的「模型与端点(BYOK)」由本页接管。
-        </p>
+        <p>管理推理来源、账号与模型。</p>
       </header>
 
-      <Show
-        when={available}
-        fallback={<p class="field-hint">浏览器预览下不可用：请在桌面壳里打开本页面。</p>}
-      >
-        <section class="oauth-section">
-          <div class={`oauth-mode${pill().on ? " is-on" : ""}`}>
-            <label class="oauth-pill">
-              <input
-                type="checkbox"
-                checked={pill().on}
-                disabled={busy()}
-                onChange={(event) => toggleOauth(event.currentTarget.checked)}
-              />
-              <span class="oauth-pill__track" aria-hidden="true">
-                <span class="oauth-pill__thumb" />
-              </span>
-              <span class="oauth-pill__text">
-                <span class="oauth-pill__title">OAuth 模式</span>
-                <span class="oauth-pill__hint">{pill().hint}</span>
-              </span>
-            </label>
-            <p class="oauth-mode__note">
-              开关即生效。切换时我们会先记下你当前那套配置，切回来再写回——不会丢。
-            </p>
-          </div>
-        </section>
+      <div class="oauth-page-body">
+        <Show
+          when={available}
+          fallback={<p class="field-hint">浏览器预览下不可用：请在桌面壳里打开本页面。</p>}
+        >
+          <section class="oauth-section">
+            <div class={`oauth-mode${pill().on ? " is-on" : ""}`}>
+              <label class="oauth-pill">
+                <input
+                  type="checkbox"
+                  checked={pill().on}
+                  disabled={busy() || config() == null}
+                  onChange={(event) => toggleOauth(event.currentTarget.checked)}
+                />
+                <span class="oauth-pill__track" aria-hidden="true">
+                  <span class="oauth-pill__thumb" />
+                </span>
+                <span class="oauth-pill__text">
+                  <span class="oauth-pill__title">使用账号额度</span>
+                  <span class="oauth-pill__hint">{config() == null ? "正在读取配置…" : pill().on ? `当前来源：${activeName() ?? "账号额度"}` : "关闭时使用已保存的 API key 配置"}</span>
+                </span>
+              </label>
+            </div>
+          </section>
 
-        <section class="oauth-section">
-          <h2 class="oauth-section-title">服务商</h2>
-          <For each={ACCOUNT_PROVIDERS}>
-            {(entry) => {
-              const slot = () => slotOf(entry);
-              return (
-              <ProviderCard
-                entry={entry}
-                active={activeId() === entry.id}
-                model={config()?.model ?? null}
-                options={optionsOf(entry)}
-                catalogBusy={slot().busy}
-                catalogError={slot().error}
-                onEnsureCatalog={() => {
-                  const kind = catalogKindOf(entry.kind);
-                  if (kind != null) void ensureCatalog(kind, true);
+          <section class="oauth-section">
+            <h2 class="oauth-section-title">服务商</h2>
+            <div class="oauth-provider-list">
+              <For each={ACCOUNT_PROVIDERS}>
+                {(entry) => {
+                  const slot = () => slotOf(entry);
+                  return (
+                    <ProviderRow
+                      entry={entry}
+                      active={activeId() === entry.id}
+                      model={config()?.model ?? null}
+                      options={optionsOf(entry)}
+                      catalogBusy={slot().busy}
+                      catalogError={slot().error}
+                      onEnsureCatalog={(force = false) => {
+                        const kind = catalogKindOf(entry.kind);
+                        if (kind != null) void ensureCatalog(kind, force);
+                      }}
+                      onPickModel={(slug) => void pickModel(entry, slug)}
+                      status={status()}
+                      busy={busy()}
+                      onSwitch={() => void switchTo(entry)}
+                      onSignIn={() => void signIn()}
+                      onCancel={() => void cancel()}
+                      onSignOut={() => void signOut()}
+                      onOpenUsage={(url) => void openExternal(url)}
+                      dsStatus={dsStatus()}
+                      dsBalance={dsBalance()}
+                      dsBusy={dsBusy()}
+                      onDsSignIn={() => void dsSignIn()}
+                      onDsCancel={() => void dsCancel()}
+                      onDsSignOut={() => void dsSignOut()}
+                      dsVerify={dsVerify()}
+                      dsVerifyBusy={dsVerifyBusy()}
+                      onDsVerify={() => void dsVerifyNow()}
+                      onDsOpenLink={(url) => void openExternal(url)}
+                    />
+                  );
                 }}
-                onPickModel={(slug) => void pickModel(entry, slug)}
-                status={status()}
-                busy={busy()}
-                onSwitch={() => void switchTo(entry)}
-                onSignIn={() => void signIn()}
-                onCancel={() => void cancel()}
-                onSignOut={() => void signOut()}
-                onOpenUsage={(url) => void openExternal(url)}
-                dsStatus={dsStatus()}
-                dsBalance={dsBalance()}
-                dsBusy={dsBusy()}
-                onDsSignIn={() => void dsSignIn()}
-                onDsCancel={() => void dsCancel()}
-                onDsSignOut={() => void dsSignOut()}
-                dsVerify={dsVerify()}
-                dsVerifyBusy={dsVerifyBusy()}
-                onDsVerify={() => void dsVerifyNow()}
-                onDsOpenLink={(url) => void openExternal(url)}
-              />
-              );
-            }}
-          </For>
-        </section>
+              </For>
+            </div>
+          </section>
 
-        <Show when={error()}>
-          {(message) => <p class="field-hint is-error oauth-page-error">{message()}</p>}
+          <section class="oauth-section oauth-byok">
+            <div>
+              <h2 class="oauth-section-title">API key 与端点</h2>
+              <p>{config() == null ? "正在读取配置…" : pill().on ? "账号额度已启用，切回 API key 时会恢复原配置。" : "当前使用设置页中保存的配置。"}</p>
+            </div>
+            <Show when={props.onOpenSettings}>
+              <button type="button" class="ghost-mini" onClick={() => props.onOpenSettings?.()}>前往设置</button>
+            </Show>
+          </section>
+          <p class="oauth-page-note">凭据加密保存在本机，登录将在系统浏览器中完成。</p>
+          <Show when={error()}>
+            {(message) => <p role="alert" class="field-hint is-error oauth-page-error">{message()}</p>}
+          </Show>
         </Show>
-      </Show>
 
-      <SiwcFirstRunNotice
-        open={firstRun()}
-        onDismiss={() => {
-          markFirstRunSeen();
-          setFirstRun(false);
-        }}
-      />
+        <SiwcFirstRunNotice
+          open={firstRun()}
+          onDismiss={() => {
+            markFirstRunSeen();
+            setFirstRun(false);
+          }}
+        />
+      </div>
     </div>
   );
 };

@@ -130,6 +130,20 @@ const PAGE_LIMIT = 30;
 const RESNAPSHOT_DEBOUNCE_MS = 2_000;
 /** 压缩终态卡(done/skipped)自动退场的延时;failed 不退,留待用户处理。 */
 const COMPACT_CARD_TTL_MS = 8_000;
+
+/**
+ * 压缩命令**没送达**时的本地原因。
+ *
+ * 命令被 reject / IPC 抛错意味着 daemon 侧不会发 `CompactFinished`,线上 reason
+ * 永远不会到;不在这里合成一句话,卡片就只剩「压缩失败」四个字,用户无从判断
+ * 是"没连上"还是"压缩本身出错"。
+ */
+function compactDeliveryFailure(error: unknown): string {
+  const detail = (error instanceof Error ? error.message : String(error ?? "")).trim();
+  return detail === ""
+    ? "压缩请求未能送达 daemon，请检查连接后重试。"
+    : `压缩请求未能送达 daemon（${detail}），请检查连接后重试。`;
+}
 /**
  * 取消看门狗:`conversation_cancel` 发出后,超过此时长仍未见 `turn_finished` /
  * `turn_interrupted`,就本地强制收口(BUG-2026-10-15:后端工具卡死时 turn 状态机
@@ -1077,7 +1091,8 @@ export class SessionStore {
   /**
    * 手动压缩上下文。ack 只代表进队,所以先乐观置 running,否则按钮点了要等
    * 第一帧过程事件才有反馈;真实终态以 `compact_finished` / `compaction_applied`
-   * 为准。投递失败只是个失败态,原因只在控制台(`compact_finished` 不带原因)。
+   * 为准。终态原因读线上 `compact_finished.reason`(失败/跳过/取消都有中文说明);
+   * 只有"命令没送达"这条路径不会有事件,原因就地合成。
    */
   async compactContext(): Promise<void> {
     this.setCompact({ phase: "running", compactId: null, turnsTotal: null, turnsKeeping: null, summary: "" });
@@ -1085,7 +1100,7 @@ export class SessionStore {
       await transport.command("conversation", { channel: "conversation", type: "conversation_compact" }, this.seed);
     } catch (error) {
       console.warn("[compact] 压缩命令投递失败", error);
-      this.setCompact({ phase: "failed" });
+      this.setCompact({ phase: "failed", reason: compactDeliveryFailure(error) });
     }
   }
 

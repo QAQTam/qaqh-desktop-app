@@ -27,6 +27,8 @@ type Props = {
   balance: DsBalance | null;
   /** 本组件发起的动作还在跑（按钮置灰）。 */
   busy?: boolean;
+  /** 接入页的登录和取消入口位于服务商摘要行。 */
+  hideSignInActions?: boolean;
   onSignIn: () => void;
   onCancel: () => void;
   onSignOut: () => void;
@@ -117,7 +119,7 @@ export const DsAccountCard: Component<Props> = (props) => {
         {(notice) => <p class="field-hint">{notice()}</p>}
       </Show>
       <div class="siwc-card__actions">
-        <Show when={view().canSignIn}>
+        <Show when={!props.hideSignInActions && view().canSignIn}>
           <button
             type="button"
             class="siwc-signin"
@@ -127,7 +129,7 @@ export const DsAccountCard: Component<Props> = (props) => {
             {view().kind === "damaged" ? "重新登录 DeepSeek 账号" : "登录 DeepSeek 账号"}
           </button>
         </Show>
-        <Show when={view().canCancel}>
+        <Show when={!props.hideSignInActions && view().canCancel}>
           <button type="button" class="ghost-mini" onClick={() => props.onCancel()}>
             取消登录
           </button>

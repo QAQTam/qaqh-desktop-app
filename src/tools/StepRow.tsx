@@ -64,14 +64,16 @@ const ExecResult: Component<{ step: ToolStep }> = (props) => {
   onCleanup(() => { if (frame != null) cancelAnimationFrame(frame); });
   return <>
     <Show when={content().text || content().stderr}>
-      <div class="tool-detail-label">{live() ? "运行输出" : "执行结果"}<span class="spacer" /><CopyButton text={() => [content().text, content().stderr].filter(Boolean).join("\n")} /></div>
-      <div ref={scroller} class={{ "tool-shell-output": true, "tool-progress": live() }} tabindex={0} role="region" aria-label={live() ? "运行输出" : "执行结果"}
-        onWheel={(event) => { if (event.deltaY < 0) following = false; }}
-        onPointerDown={() => { following = false; }} onTouchStart={() => { following = false; }}
-        onKeyDown={(event) => { if (["ArrowUp", "PageUp", "Home"].includes(event.key)) following = false; }}
-        onScroll={(event) => { const el = event.currentTarget; if (el.scrollHeight - el.scrollTop - el.clientHeight <= 2) following = true; }}>
-        <Show when={content().text}><ShellText text={content().text} /></Show>
-        <Show when={content().stderr}><div class="tool-detail-label">stderr</div><pre class="tool-text tool-stderr">{content().stderr}</pre></Show>
+      <div class="tool-output">
+        <div class="tool-detail-label">{live() ? "运行输出" : "执行结果"}<span class="spacer" /><CopyButton text={() => [content().text, content().stderr].filter(Boolean).join("\n")} /></div>
+        <div ref={scroller} class={{ "tool-shell-output": true, "tool-progress": live() }} tabindex={0} role="region" aria-label={live() ? "运行输出" : "执行结果"}
+          onWheel={(event) => { if (event.deltaY < 0) following = false; }}
+          onPointerDown={() => { following = false; }} onTouchStart={() => { following = false; }}
+          onKeyDown={(event) => { if (["ArrowUp", "PageUp", "Home"].includes(event.key)) following = false; }}
+          onScroll={(event) => { const el = event.currentTarget; if (el.scrollHeight - el.scrollTop - el.clientHeight <= 2) following = true; }}>
+          <Show when={content().text}><ShellText text={content().text} /></Show>
+          <Show when={content().stderr}><div class="tool-detail-label">stderr</div><pre class="tool-text tool-stderr">{content().stderr}</pre></Show>
+        </div>
       </div>
     </Show>
     <Show when={content().truncated}><div class="tool-truncated">仅显示输出尾部</div></Show>

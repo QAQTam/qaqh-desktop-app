@@ -1,4 +1,4 @@
-/* OAuth（ChatGPT 套餐）分区：胶囊开关 + provider 翻转卡片 + 额度区。
+/* 接入：设置行 + 服务商摘要列表 + 按需展开的账号与模型详情。
  *
  * 置灰规则也在这里：OAuth 打开后，`模型与端点(BYOK)` 的 wire/endpoint 由该模式
  * 接管（套餐只走 Responses + 官方端点），所以那些输入必须不可改——否则用户改了也
@@ -8,22 +8,27 @@
  */
 
 @layer components {
-  /* ── 页面骨架（GlobalNav 独立页，与 `.tools-page` 同构）────────────── */
+  /* 与设置页共用标题起点、边距与滚动职责。 */
   .oauth-page {
-    display: grid; align-content: start; justify-items: center; gap: 20px;
-    min-width: 0; min-height: 0; overflow: auto; padding: clamp(24px, 8vh, 72px) 24px;
+    grid-template-rows: auto minmax(0, 1fr);
   }
-  .oauth-page-head { width: min(720px, 100%); }
+  .oauth-page-head {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    min-height: 58px; padding: 10px clamp(20px, 3vw, 36px);
+    border-bottom: 1px solid var(--border);
+  }
   .oauth-page-head h1 { font-size: var(--fs-lg); font-weight: 600; }
-  .oauth-page-head p { margin-top: 4px; color: var(--muted); font-size: var(--fs-sm); }
-  .oauth-section { display: grid; gap: 10px; width: min(720px, 100%); }
-  .oauth-section-title { color: var(--muted); font-size: var(--fs-sm); font-weight: 500; }
-  .oauth-page-error { width: min(720px, 100%); }
-  /* 正在被使用的服务商：给卡片正面一个可见的边（不是唯一的状态信号，
-     状态文字仍在卡上——颜色不承担唯一语义）。 */
-  .oauth-card.is-active .oauth-card__front {
-    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  .oauth-page-head p { color: var(--muted); font-size: var(--fs-xs); }
+  .oauth-page-body {
+    display: grid; align-content: start; gap: 24px;
+    width: min(860px, 100%); min-width: 0; min-height: 0; margin-inline: auto;
+    padding: 24px clamp(20px, 3vw, 36px); overflow: auto;
+    scrollbar-gutter: stable;
   }
+  .oauth-section { display: grid; gap: 10px; min-width: 0; }
+  .oauth-section-title { color: var(--muted); font-size: var(--fs-sm); font-weight: 500; }
+  .oauth-page-error { color: var(--err); }
+  .oauth-page-note { color: var(--muted); font-size: var(--fs-xs); }
 
   .oauth-mode {
     display: flex;
@@ -35,17 +40,16 @@
     display: flex;
     align-items: center;
     gap: var(--space-3);
-    padding: var(--space-3);
+    min-height: 72px;
+    padding: var(--space-3) var(--space-4);
     border: 1px solid var(--border);
-    border-radius: var(--radius-pill);
-    background: var(--surface-2);
+    border-radius: var(--radius-control);
+    background: var(--surface);
     cursor: pointer;
   }
 
-  .oauth-mode.is-on .oauth-pill {
-    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-    background: var(--accent-soft);
-  }
+  .oauth-pill:has(input:disabled) { cursor: default; }
+  .oauth-pill:has(input:disabled) .oauth-pill__track { opacity: .55; }
 
   /* 真 checkbox 留在 DOM 里（键盘/无障碍），视觉用 track+thumb 表达。 */
   .oauth-pill input {
@@ -93,6 +97,8 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+    order: -1;
+    flex: 1; min-width: 0;
   }
 
   .oauth-pill__title {
@@ -110,67 +116,68 @@
     margin: 0;
   }
 
-  /* ── provider 翻转卡片 ───────────────────────────────────────── */
-  .oauth-card {
-    perspective: 1000px;
-  }
-
-  .oauth-card__inner {
-    display: grid;
-    transition: transform 320ms cubic-bezier(0.2, 0.7, 0.3, 1);
-    transform-style: preserve-3d;
-  }
-
-  .oauth-card.is-flipped .oauth-card__inner {
-    transform: rotateY(180deg);
-  }
-
-  /* 两面共用同一格：高度取较高者，翻转时不会跳。 */
-  .oauth-card__face {
-    grid-area: 1 / 1;
-    backface-visibility: hidden;
-    -webkit-backface-visibility: hidden;
-  }
-
-  .oauth-card__front {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    justify-content: center;
-    gap: var(--space-1);
-    padding: var(--space-4);
+  /* 一组连续摘要行；展开内容仅在可见时参与布局。 */
+  .oauth-provider-list {
     border: 1px solid var(--border);
-    border-radius: var(--radius-panel);
+    border-radius: var(--radius-control);
     background: var(--surface);
-    box-shadow: var(--shadow-soft);
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
+    min-width: 0;
   }
-
-  .oauth-card__brand {
-    font-weight: 600;
-    color: var(--text);
+  .oauth-provider + .oauth-provider { border-top: 1px solid var(--border); }
+  .oauth-provider__summary {
+    display: flex; align-items: center; gap: 16px;
+    min-height: 76px; padding: 12px 16px;
   }
-
-  .oauth-card__state,
-  .oauth-card__hint {
-    color: var(--muted);
-    font-size: 0.88em;
+  .oauth-provider__identity { flex: 1; min-width: 0; }
+  .oauth-provider__heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
+  .oauth-provider__heading h3 { font-size: var(--fs-sm); font-weight: 600; }
+  .oauth-provider__active { color: var(--accent); font-size: var(--fs-xs); }
+  .oauth-provider__status { color: var(--muted); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+  .oauth-provider__error { color: var(--err); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+  .oauth-provider__actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+  .oauth-provider__connect, .oauth-provider__actions .siwc-signin {
+    min-height: var(--control-height); padding: 0 12px;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-control);
+    background: var(--text); color: var(--surface); font-size: var(--fs-xs);
   }
-
-  .oauth-card__back {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    transform: rotateY(180deg);
+  .oauth-provider__connect:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 88%, var(--surface)); }
+  .oauth-provider__connect:disabled { opacity: .55; }
+  .oauth-provider__toggle { min-height: var(--control-height); }
+  .oauth-provider__toggle svg { transition: transform var(--dur-fast) var(--ease); }
+  .oauth-provider__toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+  .oauth-provider__details {
+    display: grid; gap: 16px; min-width: 0;
+    padding: 16px; border-top: 1px solid var(--border);
   }
-
-  .oauth-card__back-btn {
-    align-self: flex-start;
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
+  .oauth-provider__details[hidden] { display: none; }
+  .oauth-provider__details > .ghost-mini { justify-self: start; }
+  .oauth-provider__details .siwc-card {
+    padding: 0; border: 0; border-radius: 0; background: transparent;
+  }
+  .oauth-byok {
+    grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+    padding-top: 20px; border-top: 1px solid var(--border);
+  }
+  .oauth-byok p { color: var(--muted); font-size: var(--fs-xs); }
+  @media (max-width: 639px) {
+    .oauth-page-head { gap: 4px 12px; min-height: 52px; }
+    .oauth-page-body { padding: 16px; gap: 20px; }
+    .oauth-provider__summary { flex-wrap: wrap; gap: 8px; padding: 12px; }
+    .oauth-provider__actions { margin-left: auto; }
+    .oauth-provider__details { padding: 12px; }
+    .oauth-byok { grid-template-columns: minmax(0, 1fr); }
+    .oauth-byok > button { justify-self: start; }
+  }
+  @media (forced-colors: active) {
+    .oauth-provider__connect, .oauth-provider__actions .siwc-signin {
+      forced-color-adjust: none;
+      background: ButtonFace; color: ButtonText; border-color: ButtonText;
+    }
+    .oauth-provider__actions .siwc-signin span { background: transparent; color: inherit; }
+    .oauth-pill__track { forced-color-adjust: none; background: ButtonFace; border: 1px solid ButtonText; }
+    .oauth-pill__thumb { background: ButtonText; }
+    .oauth-pill input:checked + .oauth-pill__track { background: Highlight; }
+    .oauth-pill input:checked + .oauth-pill__track .oauth-pill__thumb { background: HighlightText; }
   }
 
   /* ── 额度区（登录后）─────────────────────────────────────────── */
@@ -180,8 +187,7 @@
     gap: var(--space-1) var(--space-3);
     margin: 0;
     padding: var(--space-3);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-panel);
+    border-radius: var(--radius-control);
     background: var(--surface-2);
   }
 

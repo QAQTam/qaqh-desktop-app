@@ -33,6 +33,14 @@ function compactMeta(state: CompactState): string {
   return parts.join(" · ");
 }
 
+/**
+ * 终态原因(失败/跳过/取消):后端 `CompactFinished.reason` 的中文整句,原样展示。
+ * 标题仍用状态词(`压缩失败`),原因作为第二行补充——成功终态没有原因。
+ */
+function compactReason(state: CompactState): string {
+  return state.phase === "failed" || state.phase === "skipped" ? state.reason ?? "" : "";
+}
+
 export const SessionView: Component<{ tab: Tab }> = (props) => {
   let scroller: HTMLDivElement | undefined;
   const [pinned, setPinned] = createSignal(true);
@@ -365,6 +373,9 @@ export const SessionView: Component<{ tab: Tab }> = (props) => {
                   <span class="compact-card-progress">{compactMeta(compact())}</span>
                 </Show>
               </div>
+              <Show when={compactReason(compact()) !== ""}>
+                <p class="compact-card-reason">{compactReason(compact())}</p>
+              </Show>
               <Show when={summary() !== ""}>
                 <pre class="compact-card-summary">{summary()}</pre>
               </Show>

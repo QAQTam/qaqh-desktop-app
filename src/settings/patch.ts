@@ -43,9 +43,13 @@ export type ConfigPatchWire = Optionalize<Omit<ConfigPatch, "subagent">> & {
  *  最高档被自己人拒掉。 */
 export const REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"] as const;
 /** BYOK 的四条 wire——没有 provider 目录可查,协议由用户直接声明。
- *  值取后端 `qaqh_types::Wire` 的规范序列化名（provider.rs:29,2026-10 改名:
- *  openai→chat、anthropic→messages;旧拼写在后端 serde alias 层兼容,但
- *  `config.load` 回显的恒为规范名,下拉里必须摆规范值,否则选中态丢失）。 */
+ *  值是后端 `qaqh_types::Wire` 的**规范序列化名**（provider.rs:29,2026-10 改名:
+ *  openai→chat、anthropic→messages;`config.load` 回显与下拉选中态都按它）。
+ *
+ *  ⚠ 但**写出去不能发规范名**:daemon 的 `ConfigPatch::validate()` 目前只收
+ *  `openai|responses|anthropic|gemini` 这组旧拼写,收到 `chat`/`messages` 直接
+ *  400(action_failed)——2026-10-18 切 DeepSeek 账号/关 OAuth 翻车即此。出网
+ *  统一过 [`wireForDaemon`];旧拼写在 `Wire::parse` 是永久别名,新旧 daemon 都收。 */
 export const WIRE_PROTOCOLS = ["chat", "responses", "messages", "gemini"] as const;
 /** 历史拼写 → 规范名（后端 `Wire::parse` 同表）。旧 profile/草稿里可能还存着。 */
 const WIRE_LEGACY_ALIASES: Record<string, string> = {
@@ -56,6 +60,27 @@ const WIRE_LEGACY_ALIASES: Record<string, string> = {
   claude: "messages",
   "openai-responses": "responses",
 };
+/** 规范名 → daemon `ConfigPatch::validate()` 认的**写模型拼写**。 */
+const WIRE_DAEMON_SPELLING: Record<string, string> = {
+  chat: "openai",
+  responses: "responses",
+  messages: "anthropic",
+  gemini: "gemini",
+};
+
+/** 任一种已知拼写 → 规范名;认不出(含空串)返回 null。trim+小写与 `Wire::parse` 同调。 */
+export function canonicalWire(wire: string | null | undefined): string | null {
+  const value = (wire ?? "").trim().toLowerCase();
+  if (value === "") return null;
+  if ((WIRE_PROTOCOLS as readonly string[]).includes(value)) return value;
+  return WIRE_LEGACY_ALIASES[value] ?? null;
+}
+
+/** 任一种已知拼写 → daemon 写模型可接受拼写;认不出返回 null(调用方按「不发」处理)。 */
+export function wireForDaemon(wire: string | null | undefined): string | null {
+  const canonical = canonicalWire(wire);
+  return canonical == null ? null : (WIRE_DAEMON_SPELLING[canonical] ?? null);
+}
 
 /** "" = 跟随系统(apply_patch:lang/theme/tokenizerPath 空串 = 清除)。 */
 export const THEME_OPTIONS = [
@@ -151,7 +176,14 @@ export function buildPatch(baseline: ConfigDto, draft: ConfigDto): ConfigPatchWi
   keepIfBlank(raw, "model", baseline.model, draft.model);
   keepIfBlank(raw, "baseUrl", baseline.baseUrl, draft.baseUrl);
   // wire 恒为非空枚举值(空即非法),按差异发送而非按空串保持。
-  changed(raw, "wire", baseline.wire, draft.wire);
+  // 比较先归一到规范名(读模型回显规范名,旧快照可能带旧拼写),出网换成 daemon
+  // 写模型认的拼写——直接把 `chat`/`messages` 发出去就是 400(action_failed)。
+  const baseWire = canonicalWire(baseline.wire);
+  const draftWire = canonicalWire(draft.wire);
+  if (draftWire != null && draftWire !== baseWire) {
+    const sendWire = wireForDaemon(draftWire);
+    if (sendWire != null) raw["wire"] = sendWire;
+  }
   keepIfBlank(raw, "reasoningEffort", baseline.reasoningEffort, draft.reasoningEffort);
   // 空串 = 清除
   clearable(raw, "tokenizerPath", baseline.tokenizerPath, draft.tokenizerPath);
@@ -173,6 +205,9 @@ export const isPatchEmpty = (patch: ConfigPatchWire): boolean => Object.keys(pat
 /**
  * 镜像 ConfigPatch::validate(lib.rs:262-314),返回首个违规说明;全通过则 null。
  *
+ * wire 有一处**有意的超集+改写**:规范名与旧拼写都收(Wire::parse 同域),但值会
+ * 被改写成 daemon 写模型认的旧拼写——读模型回显的规范名直发会被 400(action_failed)。
+ *
  * NaN 必须在这里拦:JSON 没有 NaN,`JSON.stringify(NaN)` 产出 `null`,后端按
  * 「字段不动」处理——静默丢掉用户的改动,比报错更糟。
  */
@@ -189,11 +224,14 @@ export function validatePatch(patch: ConfigPatchWire): string | null {
   }
   const wire = patch.wire;
   if (wire != null) {
-    // 规范名直通;历史拼写先归一(旧 profile/夹具还可能带着)。
-    if (wire in WIRE_LEGACY_ALIASES) patch.wire = WIRE_LEGACY_ALIASES[wire]!;
-    else if (!(WIRE_PROTOCOLS as readonly string[]).includes(wire)) {
+    // 两种拼写都收(与 `Wire::parse` 同域);但落成**出网拼写**——daemon 的
+    // validate 只认旧词表(openai|responses|anthropic|gemini),规范名必须在这里
+    // 换掉,否则保存/切换必然 400。
+    const sendWire = wireForDaemon(wire);
+    if (sendWire == null) {
       return `wire 仅允许 ${WIRE_PROTOCOLS.join("|")}，收到 ${wire}`;
     }
+    patch.wire = sendWire;
   }
   const effort = patch.reasoningEffort;
   if (effort != null && !(REASONING_EFFORTS as readonly string[]).includes(effort)) {

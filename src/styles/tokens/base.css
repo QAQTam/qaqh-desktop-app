@@ -2,15 +2,15 @@
 
 @layer tokens {
   :root {
-    --bg: #f5f7fa;
+    --bg: #f7f7f8;
     --surface: #ffffff;
-    --surface-2: #ebeff5;
-    --surface-user: #ebeff5;
-    --surface-code: #f0f3f7;
-    --border: #dce3ed;
+    --surface-2: #f0f1f3;
+    --surface-user: #f0f1f3;
+    --surface-code: #f1f2f4;
+    --border: #e1e3e7;
     --border-strong: #7b8aa0;
-    --text: #192334;
-    --muted: #59677a;
+    --text: #20242b;
+    --muted: #626975;
     --accent: #2563eb;
     --on-accent: #ffffff;
     --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
@@ -47,7 +47,7 @@
     --control-height: 36px;
     --content-gutter: var(--space-6);
     --workspace-panel-width: 320px;
-    --workspace-panel-collapsed-width: 126px;
+    --workspace-panel-collapsed-width: 40px;
     /* 正文 14px 对齐 Codex 桌面端(实测全角步进 14px);行距写成 24/14 这个无单位
        比例而不是 1.5,是为了把字号与行距解耦 —— 沿用 1.5 会让 14px 掉到 21px 行距,
        字和行一起缩,密度不变。
@@ -107,15 +107,15 @@
      :root[data-theme] 是主路径;媒体查询只兜「JS 未运行的首帧」,避免闪白。
      两处 token 表必须保持一致。 */
   :root[data-theme="dark"] {
-    --bg: #13171d;
-    --surface: #1d232c;
-    --surface-2: #27303b;
-    --surface-user: #27303b;
-    --surface-code: #171d25;
-    --border: #354252;
+    --bg: #17181b;
+    --surface: #202226;
+    --surface-2: #292c31;
+    --surface-user: #292c31;
+    --surface-code: #1b1d21;
+    --border: #373b42;
     --border-strong: #718198;
-    --text: #edf2f8;
-    --muted: #a4b1c3;
+    --text: #edeef0;
+    --muted: #abb0b8;
     --accent: #8ab4ff;
     --on-accent: #13171d;
     --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -144,15 +144,15 @@
 
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]):not([data-theme="dark"]) {
-      --bg: #13171d;
-      --surface: #1d232c;
-      --surface-2: #27303b;
-      --surface-user: #27303b;
-      --surface-code: #171d25;
-      --border: #354252;
+      --bg: #17181b;
+      --surface: #202226;
+      --surface-2: #292c31;
+      --surface-user: #292c31;
+      --surface-code: #1b1d21;
+      --border: #373b42;
       --border-strong: #718198;
-      --text: #edf2f8;
-      --muted: #a4b1c3;
+      --text: #edeef0;
+      --muted: #abb0b8;
       --accent: #8ab4ff;
       --on-accent: #13171d;
       --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);

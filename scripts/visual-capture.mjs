@@ -150,9 +150,10 @@ async function capture(name, { view, theme, material, width, height, section, cl
       const i = id == null ? null : id.getBoundingClientRect();
       const panelOpen = !panel.classList.contains('collapsed');
       const hasIdentity = i != null;
-      return { leftDelta: Math.abs(a.left - b.left), rightDelta: Math.abs(a.right - b.right), messageWidth: a.width, messagesWidth: m.width, composerWidth: b.width, panelHeight: p.height, bodyBelowHeader: !panelOpen || c.top >= h.bottom - 1, overflow: document.documentElement.scrollWidth > innerWidth, panelOpen, noOverlap: p.left >= m.right - 1, identityBelowSurface: !hasIdentity || i.top >= b.bottom - 1, identityAligned: !hasIdentity || (Math.abs(i.left - b.left) <= 2 && Math.abs(i.right - b.right) <= 2), profileChip: !hasIdentity || document.querySelector('.composer-profile-button') != null };
+      const dock = document.querySelector('.session-column').getBoundingClientRect();
+      return { leftDelta: Math.abs(a.left - b.left), rightDelta: Math.abs(a.right - b.right), messageWidth: a.width, messagesWidth: m.width, composerWidth: b.width, panelHeight: p.height, panelDocked: Math.abs(p.top - dock.top) <= 2 && Math.abs(p.bottom - dock.bottom) <= 2, bodyBelowHeader: !panelOpen || c.top >= h.bottom - 1, overflow: document.documentElement.scrollWidth > innerWidth, panelOpen, noOverlap: p.left >= m.right - 1, identityBelowSurface: !hasIdentity || i.top >= b.bottom - 1, identityAligned: !hasIdentity || (Math.abs(i.left - b.left) <= 2 && Math.abs(i.right - b.right) <= 2), profileChip: !hasIdentity || document.querySelector('.composer-profile-button') != null };
     })()`);
-    if (geometry.leftDelta > 2 || geometry.rightDelta > 2 || geometry.overflow || !geometry.noOverlap || !geometry.bodyBelowHeader
+    if (geometry.leftDelta > 2 || geometry.rightDelta > 2 || geometry.overflow || !geometry.noOverlap || !geometry.bodyBelowHeader || !geometry.panelDocked
       || !geometry.identityBelowSurface || !geometry.identityAligned || !geometry.profileChip) {
       throw new Error(`${name}: alignment failed ${JSON.stringify(geometry)}`);
     }
@@ -178,8 +179,8 @@ async function capture(name, { view, theme, material, width, height, section, cl
         }
         requestAnimationFrame(sample);
       })`);
-      if (motion.worst > 2 || motion.overlapped || motion.maxPanelHeight <= motion.closedPanelHeight + 1 || motion.minMessagesWidth >= motion.collapsedMessagesWidth - 1) {
-        throw new Error(`${name}: rail must push (never cover) the message column and expand downward ${JSON.stringify(motion)}`);
+      if (motion.worst > 2 || motion.overlapped || Math.abs(motion.maxPanelHeight - motion.closedPanelHeight) > 2 || motion.minMessagesWidth >= motion.collapsedMessagesWidth - 1) {
+        throw new Error(`${name}: docked rail must push (never cover) the message column and keep its full height ${JSON.stringify(motion)}`);
       }
       console.log(`${name}: motion ${JSON.stringify(motion)}`);
       if (!await cdp.evaluate("!document.querySelector('.workspace-panel').classList.contains('collapsed')")) throw new Error(`${name}: workspace rail did not reopen`);
@@ -297,7 +298,10 @@ try {
     ["approval-light-solid-640x480", { view: "approval", theme: "light", material: "solid", width: 640, height: 480 }],
     ["approval-dark-glass-480x640", { view: "approval", theme: "dark", material: "glass", width: 480, height: 640 }],
   ];
-  for (const [name, options] of scenarios) await capture(name, options);
+  const filter = process.env.QAQH_VISUAL_FILTER;
+  for (const [name, options] of scenarios) {
+    if (filter == null || new RegExp(filter).test(name)) await capture(name, options);
+  }
 } finally {
   cdp.socket.close();
   child.kill();

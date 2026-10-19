@@ -6,6 +6,7 @@
  * `transport.timelinePage` 被挂了一个内存假页,不写任何后端、不发任何命令。
  */
 import { render } from "@solidjs/web";
+import { invoke } from "@tauri-apps/api/core";
 import { createSignal, Show, untrack } from "solid-js";
 import { SessionStore } from "./session/store";
 import type { SessionRunStatus } from "./api/qaqh/SessionRunStatus";
@@ -457,6 +458,10 @@ if (isVisualPreview) {
     ],
   };
   transport.rpc = async <T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> => {
+    // OAuth 截图使用启动脚本注入的宿主夹具，覆盖配置读写以验证真实切换流程。
+    if (previewView === "oauth" && previewParams.has("oauthState") && window.__TAURI_INTERNALS__ != null) {
+      return invoke<T>("service_rpc", { method, params });
+    }
     if (method === "config.load") return structuredClone(previewConfig) as T;
     // 开发者控制台夹具:形状与 daemon 的 diagnostics.memory 快照同形且逐秒自走,
     // 于是表格与环图能在浏览器里验收(见 lib/memwatch-sim.ts)。
@@ -1393,10 +1398,11 @@ function fixtureCompactState(): import("./session/store").CompactState {
     return { phase: "done", completedAt: Date.now(), summaryChars: FIXTURE_SUMMARY.length, turnsRemoved: 8 };
   }
   if (previewCompact === "failed") {
-    return { phase: "failed" };
+    // 线上失败/跳过都带中文 reason(旧 daemon 为 null);夹具按新口径展示原因行。
+    return { phase: "failed", reason: "压缩未发起：端点配置不可用（缺少 api_key）。" };
   }
   if (previewCompact === "skipped") {
-    return { phase: "skipped", status: "skipped" };
+    return { phase: "skipped", status: "skipped", reason: "没有可压缩的轮次：历史只剩最近保留区和上一份摘要。" };
   }
   return { phase: "idle" };
 }
@@ -1523,7 +1529,7 @@ render(
             {/* Keep the shared stress metrics target available in this shell-only fixture. */}
             <div id="messages" hidden />
           </Show>
-          <Show when={currentView() === "oauth"}><OAuthPage /></Show>
+          <Show when={currentView() === "oauth"}><OAuthPage onOpenSettings={() => navigatePreview("settings")} /></Show>
           <Show when={currentView() === "messages"}>
             <div class="session-column" id={`panel-${previewActiveTab().id}`} role="region" aria-label="当前会话">
               <SessionView tab={previewActiveTab()} />
@@ -1567,8 +1573,10 @@ render(
   document.getElementById("root") as HTMLElement,
 );
 
-if (previewView !== "settings") churnReset();
+if (document.getElementById("messages") != null) churnReset();
 void (async () => {
+  // 接入页没有消息树，不能启动消息压力夹具的 observer、resnapshot 与 metrics。
+  if (previewView === "oauth") return;
   if (previewView === "settings") {
     await reloadSettings();
     // 视觉验收要拍到控制台本身,而不是只拍到「关于」里那个后门入口。

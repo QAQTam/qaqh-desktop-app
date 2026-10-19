@@ -151,6 +151,16 @@ const userSkillsFixture = {
   diagnostics: [],
 };
 
+/** wire 落盘的读回形态与 daemon 一致:`Wire::parse` 收旧拼写,读模型恒回规范名。 */
+const CANONICAL_WIRE: Record<string, string> = {
+  openai: "chat",
+  "openai-compatible": "chat",
+  chat_completions: "chat",
+  anthropic: "messages",
+  claude: "messages",
+  "openai-responses": "responses",
+};
+
 /** 假宿主的 merge patch 应用:与 daemon 同语义——缺字段不动,`"****"`/空串密钥保持。 */
 function applyMergePatch(target: ConfigDto, patch: Record<string, unknown>): void {
   for (const [key, value] of Object.entries(patch)) {
@@ -159,6 +169,12 @@ function applyMergePatch(target: ConfigDto, patch: Record<string, unknown>): voi
       continue;
     }
     if (key === "apiKey" && (value === "****" || value === "")) continue;
+    // 出网是旧拼写(`openai`/`anthropic`),回显恒为规范名——不换回来,设置页
+    // 下拉(只摆规范名)保存后就会丢选中态。
+    if (key === "wire" && typeof value === "string") {
+      (target as Record<string, unknown>)[key] = CANONICAL_WIRE[value] ?? value;
+      continue;
+    }
     (target as Record<string, unknown>)[key] = value;
   }
 }

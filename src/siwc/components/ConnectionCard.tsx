@@ -15,6 +15,8 @@ import { SiwcSignInButton } from "./SignInButton";
 type Props = {
   status: SiwcSessionStatus | null;
   busy?: boolean;
+  /** 接入页由服务商摘要行提供登录与取消入口，详情不重复呈现。 */
+  hideSignInActions?: boolean;
   onSignIn: () => void;
   onCancel: () => void;
   onSignOut?: () => void;
@@ -39,15 +41,15 @@ export const SiwcConnectionCard: Component<Props> = (props) => {
       </Show>
 
       <div class="siwc-card__actions">
-        <Show when={view().kind === "disconnected" || view().kind === "reauth-required"}>
+        <Show when={!props.hideSignInActions && (view().kind === "disconnected" || view().kind === "reauth-required")}>
           <SiwcSignInButton disabled={props.busy === true} onPress={() => props.onSignIn()} />
         </Show>
-        <Show when={view().kind === "connecting"}>
+        <Show when={!props.hideSignInActions && view().kind === "connecting"}>
           <button type="button" class="ghost-mini" onClick={() => props.onCancel()}>
             {view().action}
           </button>
         </Show>
-        <Show when={view().kind === "identity-only"}>
+        <Show when={!props.hideSignInActions && view().kind === "identity-only"}>
           <SiwcSignInButton disabled={props.busy === true} onPress={() => props.onSignIn()} />
         </Show>
         <Show when={view().kind === "plan" && !view().usageActionPrimary}>

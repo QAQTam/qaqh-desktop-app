@@ -202,7 +202,7 @@ const steps = [
     `,
   },
   {
-    name: "BYOK 端点改动:endpoint + wire 各发一项",
+    name: "BYOK 端点改动:endpoint + wire 各发一项(wire 出网用 daemon 认的旧拼写)",
     code: `
       __t.pick("协议", "messages");
       await __t.wait(250);
@@ -214,8 +214,10 @@ const steps = [
       __t.click(".primary-mini");
       await __t.wait(600);
       const patch = __t.lastSave() ?? {};
+      // 下拉与读模型是规范名 messages;出网必须是 daemon 写模型校验认的 anthropic,
+      // 直发 messages 会被 400 掉(bcbf013 后的真机回归)。
       return { ok: foot.includes("2 项") && wire === "messages" && endpoint === "https://other.example/v1"
-                 && patch.wire === "messages" && patch.baseUrl === "https://other.example/v1",
+                 && patch.wire === "anthropic" && patch.baseUrl === "https://other.example/v1",
                detail: { foot, wire, endpoint, patchKeys: Object.keys(patch) } };
     `,
   },

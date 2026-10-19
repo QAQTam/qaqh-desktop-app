@@ -445,7 +445,7 @@ const App: Component = () => {
           </button>
         </Show>
         <Show when={!inTauri}><div class="titlebar-brand">QAQH</div></Show>
-        <div class="titlebar-session-title">{settingsOpen() ? "设置" : section() === "tools" ? "工具" : section() === "oauth" ? "接入" : (isStartup() ? "消息" : (activeTab()?.store.title[0]() || "消息"))}</div>
+        <div class="titlebar-session-title">{settingsOpen() ? "设置" : section() === "tools" ? "工具" : section() === "oauth" ? "接入" : "消息"}</div>
       </header>
       <GlobalNav
         active={settingsOpen() ? "settings" : section()}
@@ -568,7 +568,7 @@ const App: Component = () => {
             </Show>
           </Show>
           <Show when={section() === "tools"}><ToolsPage /></Show>
-          <Show when={section() === "oauth"}><OAuthPage /></Show>
+          <Show when={section() === "oauth"}><OAuthPage onOpenSettings={() => navigateSection("settings")} /></Show>
         </main>
         </div>
           </>
