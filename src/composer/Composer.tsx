@@ -389,6 +389,17 @@ export const Composer: Component<{
                 Object.entries(metrics().extras ?? {})
                   .filter(([, value]) => value !== 0)
                   .sort(([a], [b]) => a.localeCompare(b));
+              /**
+               * 让分母露脸：百分比只是「已用 ÷ 窗口」，而窗口是**配置值**
+               * （设置页「上下文窗口」= 后端本地压缩分母）。不写出来的话，
+               * 「怎么才 1%」只能靠猜——很可能配置里就写着 1,000,000。
+               */
+              const windowNote = (): string => {
+                const window = metrics().contextWindow;
+                return window == null
+                  ? STR.contextWindowUnknown
+                  : STR.contextWindowDenominator(window.toLocaleString("en-US"));
+              };
               return (
                 <>
                   <span
@@ -415,7 +426,7 @@ export const Composer: Component<{
                       type="button"
                       class="composer-context-trigger"
                       aria-expanded={openMenu() === "context" ? "true" : "false"}
-                      title="上下文窗口：点开查看占用与压缩"
+                      title={`上下文窗口：${windowNote()}；点开查看占用与压缩`}
                       onClick={() => setOpenMenu(openMenu() === "context" ? null : "context")}
                     >
                       上下文 <strong>{metrics().contextPercent != null ? `${metrics().contextPercent!.toFixed(0)}%` : "0%"}</strong>
@@ -429,6 +440,7 @@ export const Composer: Component<{
                         <span class="composer-context-bar" aria-hidden="true">
                           <span style={{ width: `${Math.min(100, Math.max(0, metrics().contextPercent ?? 0))}%` }} />
                         </span>
+                        <p class="composer-context-window">{windowNote()}</p>
                         <p class="composer-context-note">{STR.contextOccupied}</p>
                         <div class="composer-context-breakdown">
                           <strong>{STR.contextBreakdownPending}</strong>

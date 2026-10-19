@@ -14,6 +14,7 @@
 import { createSignal, createStore } from "solid-js";
 import { transport, tauriHost, type ApprovalView, type StreamHandlers, type TimelineStatusWire, type TodoItemWire } from "../lib/transport";
 import { now } from "../lib/time";
+import { onConfigChanged } from "../lib/config-events";
 import { applyEntry, applySnapshot, emptySession, forceSealTurn, prependPage } from "./reducer";
 import { evictForWindow, fillGapHeights } from "./pagination";
 import type { SessionState, TimelineEntryWire, Wait } from "./types";
@@ -57,6 +58,14 @@ export interface ComposerMetrics {
   /** 是否当前正处于模型增量流式生成中。 */
   isStreaming?: boolean;
   contextPercent: number | null;
+  /**
+   * 百分比的分母本身(`config.load().contextLength`)。
+   *
+   * 必须和百分比一起发布:分子(usage.prompt_tokens)本身看不出「按多少算的」,
+   * 分母不露脸时「上下文怎么才 1%」只能靠猜(实际是配置里写着 1,000,000)。
+   * null = 还没读到。
+   */
+  contextWindow: number | null;
   cacheHitPercent: number | null;
   /** 上一轮端点回的原生 usage 整数项(`credit` 等未建模字段);没有就是空对象。 */
   extras: Record<string, number>;
@@ -159,7 +168,7 @@ export class SessionStore {
 
   connection = createSignal<ConnectionKind>("reconnecting");
   activity = createSignal<SessionActivity | null>(null);
-  composerMetrics = createSignal<ComposerMetrics>({ tokensPerSecond: null, isStreaming: false, contextPercent: null, cacheHitPercent: null, extras: {} });
+  composerMetrics = createSignal<ComposerMetrics>({ tokensPerSecond: null, isStreaming: false, contextPercent: null, contextWindow: null, cacheHitPercent: null, extras: {} });
   composerProfile = createSignal<SessionProfileView>({ selected: null, activeProfile: null, effective: null, model: null, catalog: [] });
   title = createSignal<string | null>(null);
   pending = createSignal<ApprovalView[]>([]);
@@ -245,12 +254,21 @@ export class SessionStore {
   private activeStreamWindow: Array<{ at: number; tokens: number }> = [];
   /** 当前轮次当前流式输出的累积估算 token 数。 */
   private activeStreamTokens = 0;
+  /** 配置广播的退订函数(见 `lib/config-events`)。 */
+  private unsubscribeConfig: (() => void) | null = null;
 
   constructor(seed: string) {
     this.seed = seed;
     // `name`:归因(attribution/diagnostics)里这条 store 的节点标成 `session.<key>`,
     // 否则热路径上的 memo 只能靠调用栈认。
     this.state = createStore<SessionState>(emptySession(), { name: "session" });
+    // 配置写口都不在本 store(设置页 / 接入页 / 输入区模型卡片),而 daemon 不推
+    // config-changed:靠 `notifyConfigChanged()` 广播。不订阅的话,设置页把「上下文
+    // 窗口」改完再点保存,百分比仍按旧分母算,要等**下一轮结束**(`refreshConfigView`
+    // 只挂在 attach 与 turn 边界)才纠正——"分母不是我刚设的值"就是这么来的。
+    this.unsubscribeConfig = onConfigChanged(() => {
+      void this.refreshConfigView();
+    });
   }
 
   private get stateGet(): SessionState {
@@ -292,6 +310,8 @@ export class SessionStore {
 
   dispose(): void {
     this.disposed = true;
+    this.unsubscribeConfig?.();
+    this.unsubscribeConfig = null;
     this.clearCancelWatchdog();
     this.closeHost();
     // 退订后还挂在队列里的 rAF 回调会带着已废弃标签的缓冲写进 store(一次性悬挂,
@@ -774,11 +794,12 @@ export class SessionStore {
   private publishContextPercent(): void {
     const tokens = this.measuredContextTokens ?? 0;
     const length = this.contextLength;
+    const valid = length != null && Number.isFinite(length) && length > 0;
     this.composerMetrics[1]((current) => ({
       ...current,
-      contextPercent: length == null || !Number.isFinite(length) || length <= 0
-        ? null
-        : Math.min(100, (tokens / length) * 100),
+      // 分母一起发布:菜单里要能看出「按多少算的」,否则「怎么才 1%」只能靠猜。
+      contextWindow: valid ? length! : null,
+      contextPercent: valid ? Math.min(100, (tokens / length!) * 100) : null,
     }));
   }
 

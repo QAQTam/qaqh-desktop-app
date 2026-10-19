@@ -1368,6 +1368,7 @@ const FIXTURE_SUMMARY = [
 const fixtureMetrics = {
   tokensPerSecond: 46.2,
   contextPercent: 34,
+  contextWindow: 200_000,
   cacheHitPercent: 88,
   extras: { completion_thinking_tokens: 32, credit: 4 },
 };

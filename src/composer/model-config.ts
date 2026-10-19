@@ -24,6 +24,7 @@ import {
   type ModelEntry,
 } from "../oauth/model-catalog";
 import { transport } from "../lib/transport";
+import { notifyConfigChanged } from "../lib/config-events";
 import { modelEfforts, modelSpec, type ReasoningTier, type SpecBucket } from "../models/specs";
 import { isAccountCredential, isDeepseekAccountMode, isPlanMode } from "../oauth/mode";
 import {
@@ -170,6 +171,9 @@ async function patchAndRemember(field: "model" | "effort", value: string): Promi
     );
     saveState(states);
     await refreshConfig();
+    // 模型/档位也是一份全局配置:设置页与输入区之外还有别的镜像(上下文百分比),
+    // 这里已经重读过自己的读模型了,顺手让其它镜像重读一次。
+    notifyConfigChanged();
     return true;
   } catch (cause) {
     setError(messageOf(cause));

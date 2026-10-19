@@ -52,6 +52,8 @@ test("常驻：配置加载后即便尚未生成，contextPercent 也发布为 0
 
   const metrics = store.composerMetrics[0]();
   expect(metrics.contextPercent).toBe(0);
+  // 分母必须一起发布：否则「怎么才 1%」没法自查（配置里可能就写着 1,000,000）。
+  expect(metrics.contextWindow).toBe(100_000);
   expect(metrics.tokensPerSecond).toBeNull();
   expect(metrics.isStreaming).toBe(false);
 });

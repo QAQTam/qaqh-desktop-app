@@ -64,6 +64,7 @@ import { STR } from "../lib/strings";
 import { isScreenshotShortcut, screenshotSupported, takeScreenshot } from "../lib/screenshot";
 import { isTauriRuntime, listenHostDiagnostics, openExternalUrl, transport, tauriHost } from "../lib/transport";
 import { applyTheme, storedTheme } from "../lib/theme";
+import { notifyConfigChanged } from "../lib/config-events";
 import { toast, ToastHost } from "../ui/toast";
 import { DiffReviewDrawer } from "../diff/DiffReviewDrawer";
 import "../styles/app.css";
@@ -181,6 +182,10 @@ const App: Component = () => {
       // 窗口重新聚焦时重读一次配置:别的端(TUI / 手改 config.toml / 设置页另一台)
       // 可能刚改过 model 与强度,chip 不该继续显示上次那一份。
       void refreshConfig();
+      // 同一份配置还有第二个镜像:上下文百分比的分母(`SessionStore.contextLength`)。
+      // 它没有自己的轮询,靠这条广播跟着刷新——否则手改 config.toml 里的
+      // context_length 要等下一轮结束才反映到百分比上。
+      notifyConfigChanged();
       const tab = activeTab();
       // reconnecting 也重试:状态可能因事件竞态/退避中卡在中间态,
       // 聚焦触发宿主重建流(activate_timeline 会发新 open 事件自愈)。

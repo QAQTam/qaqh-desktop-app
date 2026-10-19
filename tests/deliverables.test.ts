@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { extractTurnDeliverables, getTurnFileDiff, splitPath } from "../src/diff/deliverables";
+import { diffReviewStore } from "../src/diff/review-store";
 import { applyEntry, emptySession } from "../src/session/reducer";
 import type { ToolStep, Turn } from "../src/session/types";
 
@@ -273,5 +274,92 @@ describe("交付物提取接后端真实 wire 槽位", () => {
     const step = turn.steps[0]!;
     if (step.kind !== "tool") throw new Error("expect tool");
     expect(step.output?.diffText).toBe(wireDiff);
+  });
+});
+
+/**
+ * apply_patch 的线上形状（`qaqh-file-tools/src/apply_patch.rs` 的
+ * `ApplyPatchOutput::display`）：header 只报**第一个**文件的 path，
+ * `lines_added/removed` 是整张补丁的合计，逐文件原文只在 `display.diff`
+ * ——一次补丁可命中多个文件，裸 unified（无 `diff --git` 头）逐段拼接。
+ *
+ * 修复前该槽恒为 None，抽屉里只剩指纹：文件列表有 `+N −M`，diff 区空态。
+ */
+describe("apply_patch 多文件 display.diff", () => {
+  const wireApplyPatchDiff = `--- a/replica/src/App.tsx
++++ b/replica/src/App.tsx
+@@ -1,3 +1,4 @@
+ import { render } from "solid-js/web";
++import { Patch } from "./patch";
+ render(<App />, root);
+ export default App;
+--- a/replica/src/created.ts
++++ b/replica/src/created.ts
+@@ -0,0 +1,2 @@
++export const created = true;
++export const why = "apply_patch";
+`;
+
+  const display = {
+    summary: "replica/src/App.tsx +3 −0",
+    diff: wireApplyPatchDiff,
+    lines_added: 3,
+    lines_removed: 0,
+    header: { kind: "path", path: "replica/src/App.tsx", op: "patch" },
+    body: { kind: "text", text: "[OK] apply_patch — applied: 2 file(s), +3 -0", truncated: false },
+  };
+
+  function applyPatchTurn(): Turn {
+    const state = emptySession();
+    applyEntry(state, {
+      timeline_seq: 1,
+      turn_id: "t1",
+      round_num: 0,
+      event: {
+        type: "block_opened",
+        block: { block_id: "p1", kind: "tool", tool: { name: "apply_patch", state: "running" } },
+      },
+    });
+    applyEntry(state, {
+      timeline_seq: 2,
+      turn_id: "t1",
+      round_num: 0,
+      event: {
+        type: "tool_updated",
+        block_id: "p1",
+        tool: { name: "apply_patch", state: "succeeded", display },
+      },
+    });
+    return state.turns.t1!;
+  }
+
+  test("跨文件按 diff 段切成两个交付物,而不是只认 header 的 first_path", () => {
+    const deliverables = extractTurnDeliverables(applyPatchTurn());
+    expect(deliverables!.files.map((file) => file.path)).toEqual([
+      "replica/src/App.tsx",
+      "replica/src/created.ts",
+    ]);
+    expect(deliverables!.files[0]).toEqual(
+      expect.objectContaining({ status: "modified", additions: 1, deletions: 0 })
+    );
+    // 新建段靠 `@@ -0,0` 判 added（后端不写 /dev/null）
+    expect(deliverables!.files[1]).toEqual(
+      expect.objectContaining({ status: "added", additions: 2, deletions: 0 })
+    );
+    expect(deliverables!.totalAdditions).toBe(3);
+  });
+
+  test("抽屉按文件取到各自原文,不会把第二个文件渲染成第一个", () => {
+    const turn = applyPatchTurn();
+    expect(getTurnFileDiff(turn, "replica/src/created.ts")).toContain("+export const created");
+
+    diffReviewStore.open({ sessionId: "s1", turn, targetFilePath: "replica/src/created.ts" });
+    expect(diffReviewStore.state().activeFilePath).toBe("replica/src/created.ts");
+    const parsed = diffReviewStore.getActiveFileParsed();
+    expect(parsed?.path).toBe("replica/src/created.ts");
+    expect(parsed?.hunks.flatMap((hunk) => hunk.lines.map((line) => line.text))).toContain(
+      "export const why = \"apply_patch\";"
+    );
+    diffReviewStore.close();
   });
 });

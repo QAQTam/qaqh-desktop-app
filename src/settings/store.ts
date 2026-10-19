@@ -15,6 +15,7 @@
 import { createMemo, createSignal } from "solid-js";
 import { transport } from "../lib/transport";
 import { applyTheme, storedTheme } from "../lib/theme";
+import { notifyConfigChanged } from "../lib/config-events";
 import { toast } from "../ui/toast";
 import type { ConfigDto } from "../api/qaqh/ConfigDto";
 import {
@@ -155,6 +156,9 @@ export async function save(): Promise<void> {
   try {
     await transport.rpc("config.save", next as Record<string, unknown>);
     await fetchConfig();
+    // 本页自己的基线刷新了,但**输入区的镜像**(模型芯片、上下文百分比的分母)各有
+    // 一份:广播一次让它们重读,否则「已热载生效」只对了设置页这一半。
+    notifyConfigChanged();
     setNote(`已保存 ${Object.keys(next).length} 项改动`);
     toast(`配置已保存(${Object.keys(next).length} 项),已热载生效`, "ok", { dedupeKey: "config-saved" });
   } catch (cause) {
@@ -182,6 +186,8 @@ async function runService(
   try {
     await transport.rpc(method, params);
     await fetchConfig();
+    // profile 整段换 model/端点/window:`context_length` 跟着换,输入区必须重读分母。
+    notifyConfigChanged();
     setNote(done);
     toast(done, "ok", { dedupeKey: `profile:${method}` });
   } catch (cause) {

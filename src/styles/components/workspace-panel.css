@@ -46,22 +46,37 @@
   .composer-context-menu {
     position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 30;
     display: grid; gap: 8px;
-    width: min(300px, 80vw); padding: 12px;
+    /* 宽度与表面来自 `.composer-menu`(composer.css:260px/260px 上限),这里只管内部排版。 */
+    padding: 12px;
     text-align: left;
+    /* `.composer-identity > span` 是 `white-space: nowrap`(身份行里的 chip 不许折行),
+       弹层挂在其中一个 chip 里面就会**继承**它:说明文字与按钮于是按整行最小宽度
+       排版,撑出弹层、右侧被裁掉一半。弹层是块状文档流,必须把 nowrap 在这里止住。 */
+    white-space: normal;
   }
+  /* grid 子项默认 `min-width: auto`,长 token(路径/模型名)会把轨道撑破。 */
+  .composer-context-menu > * { min-width: 0; }
   .composer-context-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
   .composer-context-head strong { color: var(--text); font-size: var(--fs-sm); }
   .composer-context-bar { display: block; height: 4px; border-radius: 2px; background: var(--surface-2); overflow: hidden; }
   .composer-context-bar > span { display: block; height: 100%; background: var(--accent); }
-  .composer-context-note { margin: 0; color: var(--muted); line-height: 1.5; }
+  .composer-context-note { margin: 0; color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
+  .composer-context-window { margin: 0; color: var(--muted); font-variant-numeric: tabular-nums; opacity: .9; overflow-wrap: anywhere; }
   .composer-context-breakdown { display: grid; gap: 2px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: var(--r-sm); }
   .composer-context-breakdown strong { color: var(--muted); font-weight: 500; }
-  .composer-context-breakdown small { color: var(--muted); opacity: .8; line-height: 1.4; }
+  .composer-context-breakdown small { color: var(--muted); opacity: .8; line-height: 1.4; overflow-wrap: anywhere; }
   .composer-context-compact {
     display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-    min-height: 32px; padding: 0 12px;
+    width: 100%; min-height: 32px; padding: 0 12px;
     border: 1px solid var(--border-strong); border-radius: var(--r-md);
     background: var(--surface-2); color: var(--text); font-size: var(--fs-xs);
+  }
+  /* `.composer-menu > button`(composer.css) 是 `display: grid`:图标与文字会被拆成
+     上下两行。这个按钮要的是横排,用同特异度的选择器把它扳回来。 */
+  .composer-menu > button.composer-context-compact {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    width: 100%; min-height: 32px; padding: 0 12px;
+    border: 1px solid var(--border-strong); border-radius: var(--r-md);
   }
   .composer-context-compact:hover:not(:disabled) { background: var(--surface); }
   .composer-context-compact:disabled { opacity: .55; cursor: not-allowed; }

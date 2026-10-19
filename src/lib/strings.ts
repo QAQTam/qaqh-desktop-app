@@ -141,6 +141,8 @@ export const STR = {
   compactSummaryChars: (chars: number) => `摘要 ${chars} 字`,
   contextWindowTitle: "上下文窗口",
   contextOccupied: "展示当前任务的上下文占用情况；压缩会摘要早期内容，需等待片刻并消耗少量积分。",
+  contextWindowDenominator: (window: string) => `分母 ${window}（设置页「上下文窗口」）`,
+  contextWindowUnknown: "未读到窗口（config.load 未连通）",
   contextBreakdownPending: "分类明细待更新",
   contextBreakdownNote: "按角色拆分的占用明细需要后端按需现算接口，落地后在此展示。",
   contextCompactAction: "压缩上下文",

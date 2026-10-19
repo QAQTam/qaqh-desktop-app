@@ -51,6 +51,7 @@ import {
 } from "../lib/siwc";
 import { transport } from "../lib/transport";
 import { isTauriRuntime } from "../lib/transport/backend";
+import { notifyConfigChanged } from "../lib/config-events";
 import { modelSpec, type SpecBucket } from "../models/specs";
 import { siwcApiBase, siwcPlanBadgeVisible, type SiwcSessionStatus } from "../siwc/brand";
 import { SiwcConnectionCard } from "../siwc/components/ConnectionCard";
@@ -613,6 +614,10 @@ export const OAuthPage: Component<{ onOpenSettings?: () => void }> = (props) => 
       saveState(next);
       if (target.kind !== "byok") saveLastAccountProvider(target.id);
       await loadConfig();
+      // 切 provider 会**连分母一起换**（`switchFields` 写 `contextLength`：套餐 565K /
+      // DeepSeek 账号 1MiB）。不广播的话输入区的百分比还按上一家的窗口算，
+      // 一半就显示满、自动压缩提前触发。
+      notifyConfigChanged();
       toast(
         target.kind === "plan"
           ? "已切换到 ChatGPT 套餐"
@@ -722,6 +727,7 @@ export const OAuthPage: Component<{ onOpenSettings?: () => void }> = (props) => 
     try {
       await transport.rpc("config.save", { model: slug });
       await loadConfig();
+      notifyConfigChanged();
       toast(`已切换模型：${slug}`, "ok", { dedupeKey: "model-switch" });
     } catch (cause) {
       setError(messageOf(cause));

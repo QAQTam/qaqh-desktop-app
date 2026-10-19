@@ -268,8 +268,9 @@ export const DiffReviewDrawer: Component = () => {
                         <div class="diff-drawer-skeleton-line" style={{ width: "90%" }} />
                         <div class="diff-drawer-skeleton-line" style={{ width: "50%" }} />
                       </>}>
-                        {/* 动画已落地却仍解析不出内容 = 这一格确实没有 diff 原文
-                            (如 apply_patch 后端不下发 display.diff),不能让它永远骨架。 */}
+                        {/* 动画已落地却仍解析不出内容 = 这一格确实没有 diff 原文:
+                            binary 改动、delete(旧内容只进 trash)、或是本修复之前
+                            (apply_patch 不下发 display.diff)归档的旧回合。不能让它永远骨架。 */}
                         <div class="diff-drawer-empty">该文件没有可展示的对比内容。</div>
                       </Show>
                     </div>
