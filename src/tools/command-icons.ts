@@ -22,7 +22,9 @@ const ICONS: Record<string, CommandIcon> = {
   github: { label: "GitHub CLI", src: new URL("./icons/github.svg", import.meta.url).href },
   vite: { label: "Vite", src: new URL("./icons/vite.svg", import.meta.url).href },
   bash: { label: "Bash", src: new URL("./icons/bash.svg", import.meta.url).href },
-  powershell: { label: "PowerShell", src: new URL("./icons/powershell.svg", import.meta.url).href },
+  // PowerShell 用**去底版**的派生文件(见 icons/README.md):Devicon 那张是「浅蓝底版 +
+  // 白色箭头」两层叠出来的,取轮廓就是一块实心板,箭头没了。这里只留箭头 + 下划线。
+  powershell: { label: "PowerShell", src: new URL("./icons/powershell-glyph.svg", import.meta.url).href },
 };
 
 const COMMANDS: Record<string, keyof typeof ICONS> = {

@@ -3,6 +3,7 @@
  * ProfileManager / PairingSection 与主视图共用同一套字段骨架。
  */
 import { Show, type Component, type ParentComponent } from "solid-js";
+import { Switch as FluentSwitch } from "../ui/Switch";
 
 export const Field: ParentComponent<{
   label: string;
@@ -28,12 +29,20 @@ export const TextInput: Component<{
   onInput: (value: string) => void;
   placeholder?: string;
   type?: "text" | "password";
+  id?: string;
+  disabled?: boolean;
+  autocomplete?: string;
+  spellcheck?: boolean;
 }> = (props) => (
   <input
+    id={props.id}
     type={props.type ?? "text"}
     class="field-input"
     value={props.value}
     placeholder={props.placeholder ?? ""}
+    disabled={props.disabled}
+    autocomplete={props.autocomplete ?? "off"}
+    spellcheck={props.spellcheck ?? false}
     onInput={(event) => props.onInput(event.currentTarget.value)}
   />
 );
@@ -56,17 +65,4 @@ export const Section: ParentComponent<{ title: string; desc?: string; id?: strin
   </section>
 );
 
-export const Switch: Component<{
-  label: string;
-  hint?: string;
-  checked: boolean;
-  onToggle: (value: boolean) => void;
-}> = (props) => (
-  <label class="field switch">
-    <input type="checkbox" checked={props.checked} onInput={(event) => props.onToggle(event.currentTarget.checked)} />
-    <span>{props.label}</span>
-    <Show when={props.hint != null && props.hint !== ""}>
-      <span class="field-hint">{props.hint}</span>
-    </Show>
-  </label>
-);
+export const Switch = FluentSwitch;

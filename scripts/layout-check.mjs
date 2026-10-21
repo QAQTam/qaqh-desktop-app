@@ -211,7 +211,8 @@ try {
     for (const marker of markers) assert.ok(marker.padding + 0.1 >= marker.markerWidth, `Decimal marker must fit inside the turn: ${JSON.stringify(marker)}`);
     await capture(`messages-${width}`);
 
-    await evaluate("document.querySelectorAll('.global-nav-item')[1].click()");
+    // 按标签点,不按下标:导航项后来加了「接入」,写死的 [2] 已经指到别的页面去了。
+    await evaluate("[...document.querySelectorAll('.global-nav-item')].find((n) => n.textContent.includes('工具')).click()");
     await waitFor("Boolean(document.querySelector('.tools-page'))");
     g = await geometry();
     assert.ok(g.workspace.top >= g.top.bottom, "Tools must start below the titlebar");
@@ -251,7 +252,7 @@ try {
     assert.ok(g.scrollWidth <= width, "Shell must not overflow horizontally");
     await capture(`tools-${width}`);
 
-    await evaluate("document.querySelectorAll('.global-nav-item')[2].click()");
+    await evaluate("[...document.querySelectorAll('.global-nav-item')].find((n) => n.textContent.includes('设置')).click()");
     await waitFor("Boolean(document.querySelector('.settings-section'))");
     g = await geometry();
     assert.ok(g.workspace.top >= g.top.bottom, "Settings must start below the titlebar");

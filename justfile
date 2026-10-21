@@ -46,6 +46,11 @@ check:
     pnpm run test
     pnpm run build
 
+# 首页(空态)布局探针：先 `pnpm dev`，再跑它。量工作区下拉是否被视口裁掉、
+# 建议卡片按 4/2/1 列重排、页面横向溢出；截图落 out/startup-check/。
+startup-check:
+    node scripts/startup-check.mjs
+
 # 前置：src-tauri/binaries/ 里得有**当前三元组**的 sidecar（build.rs 断言），缺了先跑
 #   cargo build --manifest-path ../qaqh-backend/Cargo.toml -p qaqh-daemon && just place-sidecar debug
 # Intel mac 上三条命令都要带 x86_64-apple-darwin，写法见 README「Intel macOS(x86_64)」。

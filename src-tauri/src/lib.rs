@@ -24,10 +24,14 @@ use tauri::{
 };
 
 #[tauri::command]
-fn set_window_theme(window: tauri::WebviewWindow, dark: bool) -> Result<(), String> {
+fn set_window_theme(window: tauri::WebviewWindow, dark: bool) -> Result<bool, String> {
     #[cfg(target_os = "windows")]
     {
-        window_vibrancy::apply_mica(&window, Some(dark)).map_err(|error| error.to_string())
+        // 返回值 = 本窗口是否真的拿到了材质。Win10 / 旧 22H2 上 apply_mica 会失败，
+        // 渲染层据此退回实底，避免透明窗口露出桌面。
+        window_vibrancy::apply_mica(&window, Some(dark))
+            .map_err(|error| error.to_string())
+            .map(|_| true)
     }
     #[cfg(target_os = "macos")]
     {
@@ -39,11 +43,12 @@ fn set_window_theme(window: tauri::WebviewWindow, dark: bool) -> Result<(), Stri
             None,
         )
         .map_err(|error| error.to_string())
+        .map(|_| true)
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let _ = (window, dark);
-        Ok(())
+        Ok(false)
     }
 }
 

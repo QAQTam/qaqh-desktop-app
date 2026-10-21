@@ -26,6 +26,7 @@ import {
   activateTab,
   boot as bootTabs,
   bootError,
+  chooseNewSessionFolder,
   closeTab,
   createSession,
   creating,
@@ -34,15 +35,18 @@ import {
   focusToken,
   isStartup,
   moveSessionToWorkspace,
+  newSessionCwd,
   openSession,
   openStartup,
   pollSessions,
   setBootError,
   setDraftOf,
+  setNewSessionCwd,
   sessionCatalog,
   stageStartupAttachments,
   tabs,
   type Tab,
+  workspaceCatalog,
 } from "../tabs/store";
 import { SessionView } from "../session/SessionView";
 import { StartupView } from "../session/StartupView";
@@ -56,8 +60,13 @@ import { lazy } from "solid-js";
 const SettingsView = lazy(() => import("../settings/SettingsView").then((m) => ({ default: m.SettingsView })));
 import { closeDevConsole, devConsoleOpen } from "../lib/devmode";
 import {
+  cancelReload,
+  confirmDiscard as settingsDiscardPending,
   open as settingsOpen,
+  reloadPending as settingsReloadPending,
   requestClose as requestSettingsClose,
+  save as saveSettings,
+  setConfirmDiscard as setSettingsDiscardPending,
   toggleSettings,
 } from "../settings/store";
 import { STR } from "../lib/strings";
@@ -66,6 +75,7 @@ import { isTauriRuntime, listenHostDiagnostics, openExternalUrl, transport, taur
 import { applyTheme, storedTheme } from "../lib/theme";
 import { notifyConfigChanged } from "../lib/config-events";
 import { toast, ToastHost } from "../ui/toast";
+import { buildContextMenu, ContextMenuHost, openContextMenu } from "../ui/contextMenu";
 import { DiffReviewDrawer } from "../diff/DiffReviewDrawer";
 import "../styles/app.css";
 
@@ -274,9 +284,19 @@ const App: Component = () => {
       // 浮层开着时快捷键归浮层:Ctrl+T/W/Tab/1-9 不该在遮罩背后建会话、切标签。
       if (settingsOpen()) {
         const modKey = event.ctrlKey || event.metaKey;
-        if (event.key === "Escape" || (modKey && event.key === ",")) {
+        if (event.key === "Escape") {
           event.preventDefault();
-          requestSettingsClose();
+          // 先退一层：重新读取确认 → 放弃确认 → 整页关闭。
+          if (settingsReloadPending()) cancelReload();
+          else if (settingsDiscardPending()) setSettingsDiscardPending(false);
+          else requestSettingsClose();
+          return;
+        }
+        if (modKey && (event.key === "," || event.key === "s" || event.key === "S")) {
+          event.preventDefault();
+          if (event.key === ",") requestSettingsClose();
+          else void saveSettings();
+          return;
         }
         return;
       }
@@ -319,16 +339,15 @@ const App: Component = () => {
         }
       }
     };
-    // 全局右键菜单受控拦截（桌面端设计契约）：
-    // 彻底干掉浏览器原生的「重新加载 / 后退 / 前进 / 检查」网页右键菜单，防止用户误触刷新；
-    // 仅在文本输入区（input / textarea / contenteditable）放行原生剪切板编辑菜单。
+    // 全局右键：原生「重新加载 / 后退 / 检查元素」菜单必须干掉（Reload 会丢未发送
+    // 草稿与流式回合），但一刀切会把「复制」也一起删掉——选中文字后只剩 Ctrl+C
+    // 一条暗路。所以改成：能给出编辑动作就拦下来弹**应用内**菜单（见
+    // ui/contextMenu.tsx），给不出（空白处、可编辑区、已被更具体组件接走）就不拦。
     const onContextMenu = (event: MouseEvent): void => {
-      const target = event.target as HTMLElement | null;
-      const isEditable = target?.matches?.("input, textarea, [contenteditable='true']")
-        || target?.closest?.("input, textarea, [contenteditable='true']") != null;
-      if (!isEditable) {
-        event.preventDefault();
-      }
+      const menu = buildContextMenu(event);
+      if (menu == null) return;
+      event.preventDefault();
+      openContextMenu(menu);
     };
     window.addEventListener("contextmenu", onContextMenu);
 
@@ -562,6 +581,13 @@ const App: Component = () => {
                         onRemoveAttachment={(id) => tab.store.removeAttachment(id)}
                         profileView={() => tab.store.composerProfile[0]()}
                         onProfile={(name) => void switchProfile(tab, name)}
+                        /* 新建会话的目标工作区(§1.5):只改「下一条会话落在哪」,
+                           当前会话的 cwd 钉在 SessionMeta 上,不在这里动——
+                           身份行(下面那行只读文字)说的才是本会话的工作区。 */
+                        workspaces={() => workspaceCatalog()}
+                        workspacePath={() => newSessionCwd()}
+                        onWorkspace={(path) => setNewSessionCwd(path)}
+                        onBrowseWorkspace={() => void chooseNewSessionFolder()}
                         sessionWorkspace={() => sessionWorkspaceName(tab.seed)}
                         lanActive={lanActive}
                       />
@@ -646,6 +672,7 @@ const App: Component = () => {
         </div>
       </Show>
       <DiffReviewDrawer />
+      <ContextMenuHost />
       <ToastHost />
     </div>
   );

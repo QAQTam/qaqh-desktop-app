@@ -29,9 +29,13 @@ function syncNativeBackdrop(theme: ResolvedTheme): void {
   backdropSyncQueue = backdropSyncQueue
     .then(() => {
       if (revision !== backdropSyncRevision) return;
-      return invoke("set_window_theme", { dark: theme === "dark" });
+      return invoke<boolean>("set_window_theme", { dark: theme === "dark" }).then((applied) => {
+        // Win10 / 旧系统拿不到 Mica：撤掉透明层，让 CSS 退回实底。
+        document.documentElement.classList.toggle("has-mica", applied === true);
+      });
     })
     .catch((error: unknown) => {
+      document.documentElement.classList.remove("has-mica");
       console.warn("[qaqh-webui] failed to sync native Mica theme", error);
     });
 }

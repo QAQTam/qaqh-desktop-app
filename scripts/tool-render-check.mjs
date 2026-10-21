@@ -51,6 +51,8 @@ try {
     mkdirSync(out, { recursive: true }); writeFileSync(join(out, `${name}.png`), Buffer.from(data, "base64"));
   };
   await send("Runtime.enable"); await send("Page.enable");
+  /** 浅色一轮的图标颜色:深色一轮要能证明「颜色真的跟着主题换了」。 */
+  let lightIconColor = "";
   for (const [theme, width] of [["light", 1000], ["dark", 1000], ["light", 480], ["dark", 480]]) {
     await send("Emulation.setDeviceMetricsOverride", { width, height: 1000, deviceScaleFactor: 1, mobile: false });
     await send("Page.navigate", { url: base + '?theme=' + theme });
@@ -78,6 +80,33 @@ try {
     assert.equal(await evaluate("document.querySelectorAll('.tool-head')[7].textContent.trim()"), "已读取 skills");
     assert.equal(await evaluate("document.body.textContent.includes('mc-source-driven-mod') || document.body.textContent.includes('receipt')"), false);
     assert.equal(await evaluate("document.documentElement.scrollWidth > innerWidth"), false);
+    // 命令品牌图标走 CSS 遮罩(Simple Icons 的 path 不带 fill,`<img>` 直出就是纯黑,
+    // 深色主题下会糊成一块黑)。这里断言的是「不是 img + 有遮罩 + 颜色跟着主题走」,
+    // 最后一条才是用户真正看得见的那件事。
+    const iconStyle = await evaluate(`(() => {
+      const nodes = [...document.querySelectorAll('.tool-command-icon')];
+      if (nodes.length === 0) return null;
+      const style = getComputedStyle(nodes[0]);
+      return {
+        count: nodes.length,
+        mask: style.maskImage || style.webkitMaskImage,
+        fill: style.backgroundColor,
+        img: document.querySelectorAll('img.tool-command-icon').length,
+      };
+    })()`);
+    assert.ok(iconStyle != null, "shell 步骤应带品牌图标");
+    assert.equal(iconStyle.img, 0, "图标不能再用 <img>(纯黑 path 在深色主题下不可见)");
+    assert.match(iconStyle.mask, /url\(/, `图标必须用 mask 渲染:${iconStyle.mask}`);
+    const channels = iconStyle.fill.match(/rgba?\((\d+), (\d+), (\d+)/);
+    assert.ok(channels != null, `图标颜色应可解析:${iconStyle.fill}`);
+    const luma = 0.299 * Number(channels[1]) + 0.587 * Number(channels[2]) + 0.114 * Number(channels[3]);
+    if (theme === "dark") {
+      assert.ok(luma > 120, `深色主题下命令图标太暗(${iconStyle.fill}),会糊成黑块`);
+      assert.notEqual(iconStyle.fill, lightIconColor, "深色主题下图标颜色必须换一套");
+    } else {
+      assert.ok(luma < 160, `浅色主题下命令图标太亮(${iconStyle.fill})`);
+      lightIconColor = iconStyle.fill;
+    }
     await snapshot(theme + '-' + width + '-default');
 
     await click("document.querySelectorAll('.tool-head')[0]");

@@ -7,6 +7,7 @@ import IconPlus from "~icons/lucide/plus";
 import { STR } from "../lib/strings";
 import type { ApprovalView } from "../lib/transport";
 import { sessionCatalog, workspaceCatalog, type SidebarSession, type SidebarWorkspace } from "../tabs/store";
+import { WorkspaceMenuItem } from "../workspace/WorkspaceMenu";
 import { SessionPendingCard } from "./SessionPendingCard";
 import { pendingPresentation, workingOnly } from "./session-pending";
 
@@ -183,19 +184,18 @@ export const MessageSidebar: Component<{
                           </Show>
                         </div>
                         <Show when={menuOpen()}>
+                          {/* 行样式与首页/输入区的工作区菜单是同一份(`WorkspaceMenuItem`):
+                              单行「目录 + 末段名」比原来的「名字 + 完整路径」两行矮一半,
+                              侧栏里三层工作区一展开就不会把会话列表整个顶下去。 */}
                           <div class="message-session-menu" role="menu">
                             <strong>{STR.moveToWorkspace}</strong>
                             <For each={allWorkspaces()}>{(workspace) => (
-                              <button
-                                type="button"
-                                role="menuitemradio"
-                                aria-checked={session().workspace_id === workspace.id ? "true" : "false"}
-                                class={session().workspace_id === workspace.id ? "selected" : undefined}
-                                onClick={() => { setMenuSeed(null); props.onMove?.(session().session_id, workspace.id); }}
-                              >
-                                <span>{workspace.title || pathName(workspace.path)}</span>
-                                <small class="message-session-menu-path">{workspace.path}</small>
-                              </button>
+                              <WorkspaceMenuItem
+                                workspace={workspace}
+                                selected={session().workspace_id === workspace.id}
+                                compact
+                                onPick={() => { setMenuSeed(null); props.onMove?.(session().session_id, workspace.id); }}
+                              />
                             )}</For>
                             <Show when={grouped()}>
                               <button

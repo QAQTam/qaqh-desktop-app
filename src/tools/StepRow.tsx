@@ -153,7 +153,19 @@ export const StepRow: Component<{ step: ToolStep; turn: Turn; expandable?: boole
       </Switch>
       <span class="tool-name">{semantic() ?? toolLabel(step().name)}</span>
       <span class="tool-summary" title={summary()}>
-        <Show when={commandIcon()}>{(icon) => <img class="tool-command-icon" src={icon().src} alt="" aria-hidden="true" title={icon().label} draggable={false} />}</Show>
+        {/* 图标走 CSS 遮罩(见 tools.css 的 .tool-command-icon):Simple Icons 的 path
+            不带 fill,`<img>` 直出就是纯黑,深色主题下只剩一团黑;bash/powershell 又是
+            彩色的,没法用一条 filter 统一修。遮罩只取轮廓,颜色跟文字走。 */}
+        <Show when={commandIcon()}>
+          {(icon) => (
+            <span
+              class="tool-command-icon"
+              aria-hidden="true"
+              title={icon().label}
+              style={{ "--tool-command-icon": `url("${icon().src}")` }}
+            />
+          )}
+        </Show>
         <span class="tool-summary-text"><TextShimmer text={summary()} active={isShimmer()} /></span>
       </span>
       <Show when={stats()}><span class={{ "tool-diffstat": true, "is-estimate": stats()!.estimating }}><b class="diff-stat-add">+{stats()!.add}</b><b class="diff-stat-del">−{stats()!.del}</b><Show when={stats()!.estimating}><span class="diff-stat-flag">估算</span></Show></span></Show>

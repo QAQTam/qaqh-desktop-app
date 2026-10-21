@@ -18,7 +18,7 @@ import { createEffect, createMemo, createSignal, For, onSettled, Show, type Comp
 import IconRotate from "~icons/lucide/rotate-ccw";
 import { STR } from "../lib/strings";
 import { sessionMaterial, setSessionMaterial, type SessionMaterial } from "../lib/visual";
-import { applyThemePreset, themePreset, type ThemePreset } from "../lib/theme";
+import { applyTheme, applyThemePreset, storedTheme, themePreset, type ThemePreset } from "../lib/theme";
 import {
   FONT_PRESETS,
   FONT_SCALE_OPTIONS,
@@ -27,13 +27,16 @@ import {
   typography,
   updateTypography,
 } from "../lib/typography";
-import { MASK, PERMISSION_TIERS, THEME_OPTIONS, formatToolList, needsBypassConfirm, parseToolList, toInt, toNumber } from "./patch";
+import { MASK, PERMISSION_TIERS, THEME_OPTIONS, formatToolList, needsBypassConfirm, parseToolList } from "./patch";
 import {
   baseline,
   busy,
   bypassAck,
   changedCount,
+  cancelReload,
   confirmDiscard,
+  confirmReload,
+  reloadPending,
   currentTier,
   dirty,
   discard,
@@ -43,6 +46,7 @@ import {
   note,
   patch,
   reload,
+  requestReload,
   requireBypass,
   save,
   setBypassAck,
@@ -52,6 +56,8 @@ import {
   setSubagent,
 } from "./store";
 import { Field, Section, Switch, TextInput } from "./controls";
+import { Select } from "../ui/Select";
+import { NumberInput } from "../ui/NumberInput";
 import { ByokSection, ProfilesSection } from "./byok/Sections";
 import { PairingSection } from "./PairingSection";
 import { AboutSection } from "./AboutSection";
@@ -84,29 +90,25 @@ const FontPicker: Component<{
   onChange: (val: string) => void;
 }> = (props) => {
   const isCustom = () => props.value !== "" && !props.presets.some((p) => p.value === props.value);
+  const options = () => [
+    ...props.presets.map((opt) => ({ value: opt.value, label: opt.label })),
+    { value: "__custom", label: "自定义字体名称…" },
+  ];
   return (
     <Field label={props.label} hint={props.hint}>
       <div style={{ display: "grid", gap: "6px" }}>
-        <select
-          class="field-input"
+        <Select
           value={isCustom() ? "__custom" : props.value}
-          onChange={(event) => {
-            const val = event.currentTarget.value;
-            if (val === "__custom") {
-              props.onChange(" ");
-            } else {
-              props.onChange(val);
-            }
-          }}
-        >
-          <For each={props.presets}>{(opt) => <option value={opt.value}>{opt.label}</option>}</For>
-          <option value="__custom">自定义字体名称…</option>
-        </select>
+          options={options()}
+          onChange={(val) => props.onChange(val === "__custom" ? " " : val)}
+          ariaLabel={props.label}
+        />
         <Show when={isCustom()}>
           <TextInput
             value={props.value.trim()}
             onInput={(val) => props.onChange(val.trim() === "" ? " " : val)}
             placeholder="输入本地字体族名，如 'JetBrains Mono'"
+            spellcheck={false}
           />
         </Show>
       </div>
@@ -119,6 +121,7 @@ export const SettingsView: Component = () => {
   // (掩码不能回填,逗号串要解析成数组),回填会让用户和输入框互相打架。
   const [subKey, setSubKey] = createSignal("");
   const [toolsInput, setToolsInput] = createSignal("");
+  const [themeChoice, setThemeChoice] = createSignal(storedTheme() ?? "");
   const [activeSection, setActiveSection] = createSignal<string>(NAV[0].id);
   let page: HTMLElement | undefined;
 
@@ -154,12 +157,14 @@ export const SettingsView: Component = () => {
   return (
     <main class="settings-page" ref={(node) => { page = node; }} aria-labelledby="settings-title">
         <header class="settings-head">
-          <h1 id="settings-title" tabindex={-1}>{STR.settings}</h1>
-          <Show when={(draft()?.activeProfile ?? "") !== ""}>
-            <span class="settings-sub">profile · {draft()?.activeProfile}</span>
-          </Show>
-          <Show when={activeLabel() !== ""}>
-            <span class="settings-sub">· {activeLabel()}</span>
+          <div class="settings-title">
+            <h1 id="settings-title" tabindex={-1}>{activeLabel() || STR.settings}</h1>
+            <Show when={(draft()?.activeProfile ?? "") !== ""}>
+              <span class="settings-sub">profile · {draft()?.activeProfile}</span>
+            </Show>
+          </div>
+          <Show when={dirty()}>
+            <span class="settings-dirty-pill">{changedCount()} 项未保存</span>
           </Show>
         </header>
 
@@ -202,6 +207,16 @@ export const SettingsView: Component = () => {
                   </For>
                 </nav>
                 <div class="settings-content">
+                  <Show when={reloadPending()}>
+                    <div class="settings-confirm" role="alert">
+                      <span>重新读取会放弃 {changedCount()} 项未保存的改动。</span>
+                      <div class="settings-confirm-actions">
+                        <button type="button" class="ghost-mini" onClick={cancelReload}>取消</button>
+                        <button type="button" class="primary-mini button-primary" onClick={confirmReload}>放弃并读取</button>
+                      </div>
+                    </div>
+                  </Show>
+
                   <Show when={activeSection() === "section-byok"}>
                     <ByokSection />
                   </Show>
@@ -214,7 +229,7 @@ export const SettingsView: Component = () => {
                   <Section
                     id="section-permission"
                     title="权限档位"
-                    desc="三档制(1..=3);改动随「保存」一起落盘,并由后端广播 reload 给活跃 worker。"
+                    desc="权限越高,自动放行的工具越多。改动保存后立即生效。"
                   >
                     <div class="tier-list">
                       <For each={PERMISSION_TIERS}>
@@ -259,12 +274,13 @@ export const SettingsView: Component = () => {
                   <Show when={activeSection() === "section-context"}>
                   <Section id="section-context" title="上下文与压缩">
                     <Field label={STR.settingsAutoCompact} hint={STR.settingsAutoCompactHint}>
-                      <TextInput
-                        value={String(config().autoCompactThreshold)}
-                        onInput={(value) => {
-                          const parsed = toNumber(value);
-                          if (parsed != null) setField("autoCompactThreshold", parsed);
-                        }}
+                      <NumberInput
+                        value={config().autoCompactThreshold}
+                        integer={false}
+                        min={0}
+                        max={1}
+                        onCommit={(value) => setField("autoCompactThreshold", value)}
+                        ariaLabel={STR.settingsAutoCompact}
                       />
                     </Field>
                     <Field label={STR.settingsTokenizer} hint={STR.settingsTokenizerHint} wide>
@@ -293,12 +309,11 @@ export const SettingsView: Component = () => {
                       />
                     </Field>
                     <Field label={STR.settingsIdleUnload} hint={STR.settingsIdleUnloadHint} compact>
-                      <TextInput
-                        value={String(config().sessionIdleUnloadSecs)}
-                        onInput={(value) => {
-                          const parsed = toInt(value);
-                          if (parsed != null) setField("sessionIdleUnloadSecs", parsed);
-                        }}
+                      <NumberInput
+                        value={config().sessionIdleUnloadSecs}
+                        min={0}
+                        onCommit={(value) => setField("sessionIdleUnloadSecs", value)}
+                        ariaLabel={STR.settingsIdleUnload}
                       />
                     </Field>
                   </Section>
@@ -306,44 +321,47 @@ export const SettingsView: Component = () => {
 
                   <Show when={activeSection() === "section-appearance"}>
                   <Section id="section-appearance" title="外观" desc={STR.settingsThemeNote}>
-                    <Field label="界面风格预设" hint="支持经典工作台与 macOS 26 水感流体玻璃（Liquid Glass），纯前端独立生效。">
-                      <select
-                        class="field-input"
+                    <Field label="界面风格预设" hint="默认跟随系统（Windows 使用 Fluent，macOS 使用原生材质）；也可手动选择预设。">
+                      <Select
                         value={themePreset()}
-                        onChange={(event) => applyThemePreset(event.currentTarget.value as ThemePreset)}
-                      >
-                        <option value="default">经典工作台 (Default)</option>
-                        <option value="liquid-glass">macOS 26 水感流体玻璃 (Liquid Glass)</option>
-                      </select>
+                        onChange={(value) => applyThemePreset(value as ThemePreset)}
+                        options={[
+                          { value: "default", label: "跟随系统 / 经典工作台" },
+                          { value: "liquid-glass", label: "macOS 26 水感流体玻璃 (Liquid Glass)" },
+                        ]}
+                        ariaLabel="界面风格预设"
+                      />
                     </Field>
                     <Field label={STR.settingsTheme}>
-                      <select
-                        class="field-input"
-                        value={config().theme ?? ""}
-                        onChange={(event) => setField("theme", event.currentTarget.value)}
-                      >
-                        <For each={THEME_OPTIONS}>{(item) => <option value={item.value}>{item.label}</option>}</For>
-                      </select>
+                      <Select
+                        value={themeChoice()}
+                        onChange={(value) => {
+                          setThemeChoice(value);
+                          applyTheme(value);
+                        }}
+                        options={THEME_OPTIONS.map((item) => ({ value: item.value, label: item.label }))}
+                        ariaLabel={STR.settingsTheme}
+                      />
                     </Field>
                     <Field label="会话标签材质" hint="仅保存在此应用窗口，不写入 daemon 配置。">
-                      <select
-                        class="field-input"
+                      <Select
                         value={sessionMaterial()}
-                        onChange={(event) => setSessionMaterial(event.currentTarget.value as SessionMaterial)}
-                      >
-                        <option value="glass">Glass</option>
-                        <option value="solid">Solid</option>
-                      </select>
+                        onChange={(value) => setSessionMaterial(value as SessionMaterial)}
+                        options={[
+                          { value: "glass", label: "Glass（跟随窗口材质）" },
+                          { value: "solid", label: "Solid（实色）" },
+                        ]}
+                        ariaLabel="会话标签材质"
+                      />
                     </Field>
 
                     <Field label="全局字号缩放" hint="等比缩放界面中所有字阶（90% ~ 120%），纯前端即时生效。">
-                      <select
-                        class="field-input"
+                      <Select
                         value={typography().scale}
-                        onChange={(event) => updateTypography({ scale: event.currentTarget.value as FontScale })}
-                      >
-                        <For each={FONT_SCALE_OPTIONS}>{(opt) => <option value={opt.value}>{opt.label} — {opt.desc}</option>}</For>
-                      </select>
+                        onChange={(value) => updateTypography({ scale: value as FontScale })}
+                        options={FONT_SCALE_OPTIONS.map((opt) => ({ value: opt.value, label: `${opt.label} — ${opt.desc}` }))}
+                        ariaLabel="全局字号缩放"
+                      />
                     </Field>
 
                     <FontPicker
@@ -416,48 +434,44 @@ export const SettingsView: Component = () => {
                       />
                     </Field>
                     <Field label={STR.settingsSubagentMaxTokens} hint={STR.settingsSubagentNewOnlyHint} compact>
-                      <TextInput
-                        value={String(config().subagent.maxTokens)}
-                        onInput={(value) => {
-                          const parsed = toInt(value);
-                          if (parsed != null) setSubagent("maxTokens", parsed);
-                        }}
+                      <NumberInput
+                        value={config().subagent.maxTokens}
+                        min={1}
+                        onCommit={(value) => setSubagent("maxTokens", value)}
+                        ariaLabel={STR.settingsSubagentMaxTokens}
                       />
                     </Field>
                     <Field label={STR.settingsSubagentTimeout} hint={STR.settingsSubagentNewOnlyHint} compact>
-                      <TextInput
-                        value={String(config().subagent.timeoutSecs)}
-                        onInput={(value) => {
-                          const parsed = toInt(value);
-                          if (parsed != null) setSubagent("timeoutSecs", parsed);
-                        }}
+                      <NumberInput
+                        value={config().subagent.timeoutSecs}
+                        min={1}
+                        onCommit={(value) => setSubagent("timeoutSecs", value)}
+                        ariaLabel={STR.settingsSubagentTimeout}
                       />
                     </Field>
                     <Field label={STR.settingsSubagentMaxDepth} hint={STR.settingsSubagentMaxDepthHint} compact>
-                      <TextInput
-                        value={String(config().subagent.maxDepth)}
-                        onInput={(value) => {
-                          const parsed = toInt(value);
-                          if (parsed != null) setSubagent("maxDepth", parsed);
-                        }}
+                      <NumberInput
+                        value={config().subagent.maxDepth}
+                        min={1}
+                        max={16}
+                        onCommit={(value) => setSubagent("maxDepth", value)}
+                        ariaLabel={STR.settingsSubagentMaxDepth}
                       />
                     </Field>
                     <Field label={STR.settingsSubagentInFlight} hint={STR.settingsSubagentInFlightHint} compact>
-                      <TextInput
-                        value={String(config().subagent.messageInFlightPerPair)}
-                        onInput={(value) => {
-                          const parsed = toInt(value);
-                          if (parsed != null) setSubagent("messageInFlightPerPair", parsed);
-                        }}
+                      <NumberInput
+                        value={config().subagent.messageInFlightPerPair}
+                        min={1}
+                        onCommit={(value) => setSubagent("messageInFlightPerPair", value)}
+                        ariaLabel={STR.settingsSubagentInFlight}
                       />
                     </Field>
                     <Field label={STR.settingsSubagentOutbound} hint={STR.settingsSubagentOutboundHint} compact>
-                      <TextInput
-                        value={String(config().subagent.messageOutboundPerSender)}
-                        onInput={(value) => {
-                          const parsed = toInt(value);
-                          if (parsed != null) setSubagent("messageOutboundPerSender", parsed);
-                        }}
+                      <NumberInput
+                        value={config().subagent.messageOutboundPerSender}
+                        min={1}
+                        onCommit={(value) => setSubagent("messageOutboundPerSender", value)}
+                        ariaLabel={STR.settingsSubagentOutbound}
                       />
                     </Field>
                     <Field label={STR.settingsSubagentTools} hint={STR.settingsSubagentToolsHint} wide>
@@ -481,7 +495,7 @@ export const SettingsView: Component = () => {
                   <Section
                     id="section-mcp"
                     title="MCP / LSP(只读)"
-                    desc="后端只有读模型:写面随 workspace 隔离权限重构另立(ConfigDto:56-59)。"
+                    desc="当前仅支持查看;编辑能力会随 workspace 权限模型后续开放。"
                   >
                     <div class="readonly-grid">
                       <span>mcp.enabled</span>
@@ -574,7 +588,7 @@ export const SettingsView: Component = () => {
                       </button>
                     </span>
                   </Show>
-                  <button type="button" class="ghost-mini" disabled={busy()} onClick={() => void reload()}>
+                  <button type="button" class="ghost-mini" disabled={busy()} onClick={requestReload}>
                     <IconRotate />
                     {STR.settingsReload}
                   </button>

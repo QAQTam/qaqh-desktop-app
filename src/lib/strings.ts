@@ -183,7 +183,7 @@ export const STR = {
   settingsDiscardAsk: "有未保存改动:",
   settingsDiscardYes: "放弃并关闭",
   settingsStay: "继续编辑",
-  settingsNoDelete: "后端只回掩码,也没有删除密钥的接口:填新值即覆盖,留空保持不变。",
+  settingsNoDelete: "已配置的密钥不会回显;填入新值即可覆盖,留空保持不变。",
   // 设置页字段文案(spec §16):label 一律中文可读名,hint 写明生效时机。
   settingsTheme: "主题",
   settingsAutoCompact: "自动压缩阈值",
@@ -195,7 +195,7 @@ export const STR = {
   settingsTemplate: "从模板新建",
   settingsTemplateHint: "只预填接口地址与协议;密钥与模型 id 始终自己填。",
   settingsEndpoint: "接口地址",
-  settingsEndpointHint: "scheme + host + 可选前缀;协议规范路径自动补。",
+  settingsEndpointHint: "例如 https://api.deepseek.com/v1;协议路径会自动补全。",
   settingsWire: "协议",
   settingsModel: "模型",
   effortPending: "读取中",
@@ -207,15 +207,14 @@ export const STR = {
   settingsReasoningEffort: "思考强度",
   settingsMaxTokens: "最大输出令牌",
   settingsContextLength: "上下文窗口",
-  settingsContextLengthHint: "端点声明的窗口 = 本地压缩分母",
-  settingsByokDesc:
-    "填六个字段 → 保存,立即生效(热载,无需重启)。接口地址与模型清空不生效(后端语义:空串 = 保持现值)。",
-  settingsSubagentDesc: "留空 = 保持现值;数值字段受后端值域校验(输出令牌/超时 > 0,最大深度 1..=16)。",
+  settingsContextLengthHint: "模型支持的最大上下文,用于计算占用百分比。",
+  settingsByokDesc: "填写模型、接口地址与密钥;保存后立即生效,无需重启。留空的字段保持当前值。",
+  settingsSubagentDesc: "留空保持当前值;输出令牌与超时需大于 0,最大深度 1–16。",
   settingsSubagentModel: "子代理模型",
   settingsSubagentBaseUrl: "子代理接口地址",
   settingsSubagentApiKey: "子代理密钥",
   settingsSubagentApiKeyHint: (configured: boolean) =>
-    `当前:${configured ? "已配置" : "未配置"};只对之后新建的子代理生效,已开会话需重开。`,
+    `当前:${configured ? "已配置" : "未配置"};只对之后新建的子代理生效。`,
   settingsSubagentMaxTokens: "子代理最大输出令牌",
   settingsSubagentTimeout: "子代理超时(秒)",
   settingsSubagentMaxDepth: "子代理最大深度",
@@ -232,8 +231,7 @@ export const STR = {
   settingsSubagentOutboundHint: "0 = 不限;改动需重启 daemon。",
   settingsSubagentToolsHint: "逗号分隔;留空 = 全部工具可用;只对之后新建的子代理生效,已开会话需重开。",
   // theme 是「后端已生效、前端未接线」的档位:说清楚,免得用户以为界面会跟着变。
-  settingsThemeNote:
-    "写进 config.toml 即对 daemon 生效;webui 自身仍按系统 prefers-color-scheme 着色(DiffView.tsx:63、app.css:55),尚未接到界面配色。",
+  settingsThemeNote: "主题偏好保存在本机;选择「跟随系统」时随 Windows 深浅色自动切换。",
   settingsBypassWarn: "即将降到 skip-permissions:普通工具全部自动放行。",
 } as const;
 

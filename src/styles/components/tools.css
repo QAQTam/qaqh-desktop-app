@@ -224,7 +224,21 @@
     flex: 1; min-width: 0; overflow: hidden;
     color: var(--muted); font-size: var(--fs-xs);
   }
-  .tool-command-icon { flex: none; width: 14px; height: 14px; object-fit: contain; }
+  /* 命令的品牌图标:遮罩 + currentColor,不直接放 `<img>`。
+     Simple Icons 那批 path 不带 fill(默认纯黑),深色主题下就是一坨黑——bun / npm /
+     rust / git / python 全中;而 bash / powershell 来自 Devicon,自带彩色与渐变,没法
+     用一条 filter 统一修正。遮罩只取轮廓,颜色跟着文字走,两套主题都成立。
+     轮廓在 14px 上比品牌色更能认人,也不会再出现「深色下看不见」这种状态。 */
+  .tool-command-icon {
+    flex: none; width: 14px; height: 14px;
+    color: var(--muted);
+    background-color: currentColor;
+    -webkit-mask-image: var(--tool-command-icon);
+    mask-image: var(--tool-command-icon);
+    -webkit-mask-size: contain; mask-size: contain;
+    -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+    -webkit-mask-position: center; mask-position: center;
+  }
   .tool-summary-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* 流光文本已改为字符级 TextShimmer(src/ui/TextShimmer.tsx + text-shimmer.css)。 */

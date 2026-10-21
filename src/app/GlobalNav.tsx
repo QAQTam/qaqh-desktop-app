@@ -3,6 +3,7 @@ import IconKeyRound from "~icons/lucide/key-round";
 import IconMessageSquare from "~icons/lucide/message-square";
 import IconSettings from "~icons/lucide/settings";
 import IconWrench from "~icons/lucide/wrench";
+import { TooltipButton } from "../ui/Tooltip";
 
 export type GlobalSection = "messages" | "tools" | "oauth" | "settings";
 
@@ -21,15 +22,18 @@ export const GlobalNav: Component<{
   <nav class="global-nav" aria-label="主导航">
     <For each={ITEMS}>
       {(item) => (
-        <button
+        <TooltipButton
           type="button"
           class={`global-nav-item${props.active === item.id ? " active" : ""}`}
           aria-current={props.active === item.id ? "page" : undefined}
+          aria-label={item.label}
+          label={item.label}
+          placement="right"
           onClick={() => props.onNavigate(item.id)}
         >
           <item.Icon />
           <span>{item.label}</span>
-        </button>
+        </TooltipButton>
       )}
     </For>
   </nav>

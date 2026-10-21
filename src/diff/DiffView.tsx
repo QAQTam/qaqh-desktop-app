@@ -317,12 +317,15 @@ export const DiffFileView: Component<{ file: ParsedFile; hidePath?: boolean }> =
 
   return (
     <div class="diff-file">
+      {/* data-copy-path 给右键菜单取「复制路径」的值(见 ui/contextMenu.tsx);
+          隐藏路径时不挂,免得复制到界面上看不见的东西。 */}
       <button
         type="button"
         class="diff-file-head"
         aria-expanded={expanded() ? "true" : "false"}
         onClick={() => setExpanded(!expanded())}
         title={props.hidePath ? undefined : file().path}
+        data-copy-path={props.hidePath ? undefined : file().path}
       >
         <span class="diff-path">
           <Show when={!props.hidePath} fallback="差异">

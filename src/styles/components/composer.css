@@ -105,10 +105,13 @@
     padding: 8px; border: 1px solid var(--border-strong); border-radius: var(--r-lg);
     color: var(--text); background: var(--surface); box-shadow: var(--shadow-panel);
   }
+  /* 首页配置栏在页面中段:那里向上弹会顶出视口顶边、把首个条目裁掉,所以
+     StartupView 的菜单改用向下展开。输入区贴着窗口底部,那边继续向上。 */
+  .composer-menu-below { top: calc(100% + 8px); bottom: auto; }
   .composer-menu-right { left: auto; right: 0; }
   .composer-menu > strong { padding: 3px 7px 6px; font-size: var(--fs-xs); font-weight: 600; }
   .composer-menu > button {
-    display: grid; gap: 2px; width: 100%; padding: 7px;
+    position: relative; display: grid; gap: 2px; width: 100%; padding: 7px;
     border-radius: var(--r-md); text-align: left; color: var(--text); font-size: var(--fs-sm);
   }
   .composer-menu > button:hover, .composer-menu > button.selected { background: var(--surface-2); }
@@ -119,10 +122,42 @@
      长路径折行会撑破菜单,故路径行省略号截断。 */
   .composer-workspace-button { max-width: min(220px, 28vw); color: var(--text); }
   .composer-workspace-button span { overflow: hidden; text-overflow: ellipsis; }
-  .composer-workspace-menu { max-height: 46vh; overflow-y: auto; }
-  .composer-workspace-path {
+  /* 上限按视口高走:条目再多也在菜单内部滚,不把整页顶出滚动条。
+     单行工作区行约 40px、两行 56px,52vh 在 900px 高的窗口里正好装下 5 条。 */
+  .composer-workspace-menu { max-height: min(52vh, 460px); overflow-y: auto; }
+  /* 「盘符 + 两级目录 + 末段名」在 260px 里放不下,空间够就放宽到 320px;
+     窄容器保持 260px——菜单是从 chip 左边缘向右长的,太宽会顶出视口右边。 */
+  @container workspace (min-width: 560px) {
+    .composer-workspace-menu { width: min(320px, 84vw); max-width: none; }
+  }
+  /* ── 工作区行(三处共用:首页 / 输入区 / 侧栏移动菜单)─────────────
+     单行「目录前缀 + 末段名」:前缀先被裁,末段永远可见。裁的必须是**左端**——
+     右端紧挨末段名,丢掉的就是「程序装在哪一级目录」这条最该留的信息。
+     flex-end + overflow:hidden 让溢出发生在起始侧;text-align 在这里不管用
+     (溢出容器里行盒宽度跟着内容走,对齐无从谈起),text-overflow 又会把右端
+     换成省略号。 */
+  .workspace-row { display: flex; align-items: baseline; min-width: 0; }
+  .workspace-row-dir {
+    display: flex; justify-content: flex-end;
+    flex: 0 1 auto; min-width: 0; overflow: hidden;
+    font-family: var(--font-mono); font-size: 10px; line-height: 1.5; color: var(--muted);
+  }
+  .workspace-row-dir > span { flex: none; white-space: nowrap; }
+  /* 单行时是 flex 项(不收缩,由前缀让位);两行/紧凑时是 grid 项,自己省略号截断。 */
+  .workspace-row-name {
+    flex: none; min-width: 0; font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .workspace-row-path {
     font-family: var(--font-mono);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* 选中项的对勾:行尾绝对定位,单行/两行两种排法共用一份,不额外占一行高。
+     宿主按钮只需 `position: relative` + 右侧留白,不各自再画一个勾。 */
+  .composer-workspace-menu > button:not(.composer-menu-action) { padding-right: 26px; }
+  .workspace-row-check {
+    position: absolute; right: 7px; top: 50%; translate: 0 -50%;
+    width: 14px; height: 14px; color: var(--accent);
   }
   .composer-menu > button.composer-menu-action {
     margin-top: 3px; padding-top: 9px;

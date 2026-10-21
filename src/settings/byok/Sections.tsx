@@ -18,9 +18,11 @@ import IconEye from "~icons/lucide/eye";
 import IconEyeOff from "~icons/lucide/eye-off";
 import { STR } from "../../lib/strings";
 import { toast } from "../../ui/toast";
-import { MASK, REASONING_EFFORTS, WIRE_PROTOCOLS, toInt } from "../patch";
-import { applyProfile, busy, deleteProfile, draft, saveProfileAs, setField } from "../store";
+import { MASK, REASONING_EFFORTS, WIRE_PROTOCOLS } from "../patch";
+import { applyProfile, busy, deleteProfile, dirty, draft, saveProfileAs, setField } from "../store";
 import { Field, Section, TextInput } from "../controls";
+import { Select } from "../../ui/Select";
+import { NumberInput } from "../../ui/NumberInput";
 import { isAccountCredential } from "../../oauth/mode";
 
 /** 预设模板:预填 endpoint + wire(与后端 FIRST_RUN_CONFIG 的 DeepSeek 示例一致);
@@ -99,33 +101,25 @@ export const ByokSection: Component = () => {
         }
       >
         <Field label={STR.settingsTemplate} wide hint={STR.settingsTemplateHint}>
-          <select
-            class="field-input"
+          <Select
             value=""
-            onChange={(event) => {
-              applyTemplate(event.currentTarget.value);
-              event.currentTarget.value = "";
-            }}
-          >
-            <option value="" disabled>
-              选择预设模板…
-            </option>
-            <For each={PRESET_TEMPLATES}>{(template) => <option value={template.id}>{template.label}</option>}</For>
-          </select>
+            keepPlaceholder
+            options={PRESET_TEMPLATES.map((template) => ({ value: template.id, label: template.label }))}
+            onChange={applyTemplate}
+            placeholder="选择预设模板…"
+            ariaLabel={STR.settingsTemplate}
+          />
         </Field>
         <Field label={STR.settingsEndpoint} wide hint={STR.settingsEndpointHint}>
           <TextInput value={config().baseUrl} onInput={(value) => setField("baseUrl", value)} placeholder="https://…" />
         </Field>
         <Field label={STR.settingsWire}>
-          <select
-            class="field-input"
+          <Select
             value={config().wire}
-            onChange={(event) => setField("wire", event.currentTarget.value)}
-          >
-            <For each={[...WIRE_PROTOCOLS]}>
-              {(wire) => <option value={wire}>{WIRE_LABELS[wire] ?? wire}</option>}
-            </For>
-          </select>
+            options={WIRE_PROTOCOLS.map((wire) => ({ value: wire, label: WIRE_LABELS[wire] ?? wire }))}
+            onChange={(value) => setField("wire", value)}
+            ariaLabel={STR.settingsWire}
+          />
         </Field>
         <Field label={STR.settingsModel}>
           <TextInput value={config().model} onInput={(value) => setField("model", value)} placeholder="模型 id" />
@@ -136,6 +130,8 @@ export const ByokSection: Component = () => {
               type={showKey() ? "text" : "password"}
               value={newKey()}
               placeholder={secretPlaceholder(config().apiKey)}
+              autocomplete="new-password"
+              spellcheck={false}
               onInput={(value) => {
                 setNewKey(value);
                 // 留空 → 草稿退回掩码,patch 里就没有 apiKey 这一项。
@@ -155,25 +151,23 @@ export const ByokSection: Component = () => {
           </div>
         </Field>
         <Field label={STR.settingsReasoningEffort}>
-          <select
-            class="field-input"
+          <Select
             value={config().reasoningEffort}
-            onChange={(event) => setField("reasoningEffort", event.currentTarget.value)}
-          >
-            <For each={effortOptions()}>{(effort) => <option value={effort}>{effort}</option>}</For>
-          </select>
+            options={effortOptions().map((effort) => ({ value: effort, label: effort }))}
+            onChange={(value) => setField("reasoningEffort", value)}
+            ariaLabel={STR.settingsReasoningEffort}
+          />
         </Field>
         <Field
           label={STR.settingsMaxTokens}
           compact
           error={config().maxTokens <= 0 ? "必须是大于 0 的整数" : undefined}
         >
-          <TextInput
-            value={String(config().maxTokens)}
-            onInput={(value) => {
-              const parsed = toInt(value);
-              if (parsed != null) setField("maxTokens", parsed);
-            }}
+          <NumberInput
+            value={config().maxTokens}
+            min={1}
+            onCommit={(value) => setField("maxTokens", value)}
+            ariaLabel={STR.settingsMaxTokens}
           />
         </Field>
         <Field
@@ -182,12 +176,11 @@ export const ByokSection: Component = () => {
           compact
           error={config().contextLength <= 0 ? "必须是大于 0 的整数" : undefined}
         >
-          <TextInput
-            value={String(config().contextLength)}
-            onInput={(value) => {
-              const parsed = toInt(value);
-              if (parsed != null) setField("contextLength", parsed);
-            }}
+          <NumberInput
+            value={config().contextLength}
+            min={1}
+            onCommit={(value) => setField("contextLength", value)}
+            ariaLabel={STR.settingsContextLength}
           />
         </Field>
       </Section>
@@ -208,6 +201,9 @@ export const ProfilesSection: Component = () => {
          把刚打开的模式静默切回 BYOK，所以在那种状态下把三个动作都禁掉。 */
       aside={accountRoute() ? "账号额度模式下请先到「接入」页切换服务商" : undefined}
     >
+      <Show when={dirty() && !accountRoute()}>
+        <p class="profile-dirty-note">有未保存的改动：先保存或放弃，档案切换/删除/另存才会按当前配置生效。</p>
+      </Show>
       <div class="profile-list">
         <For each={config().profiles}>
           {(name) => (
@@ -219,7 +215,7 @@ export const ProfilesSection: Component = () => {
               <button
                 type="button"
                 class="ghost-mini"
-                disabled={busy() || accountRoute()}
+                disabled={busy() || accountRoute() || dirty()}
                 onClick={() => void applyProfile(name)}
               >
                 切换
@@ -227,7 +223,7 @@ export const ProfilesSection: Component = () => {
               <button
                 type="button"
                 class="ghost-mini is-danger button-danger"
-                disabled={busy() || accountRoute() || name === config().activeProfile}
+                disabled={busy() || accountRoute() || dirty() || name === config().activeProfile}
                 onClick={() => void deleteProfile(name)}
               >
                 删除
@@ -242,7 +238,7 @@ export const ProfilesSection: Component = () => {
           <button
             type="button"
             class="ghost-mini"
-            disabled={busy() || accountRoute() || profileName().trim() === ""}
+            disabled={busy() || accountRoute() || dirty() || profileName().trim() === ""}
             onClick={() => {
               const name = profileName().trim();
               if (name === "") return;

@@ -17,13 +17,14 @@ import IconCamera from "~icons/lucide/camera";
 import IconChevronDown from "~icons/lucide/chevron-down";
 import IconArchive from "~icons/lucide/archive";
 import IconFolder from "~icons/lucide/folder";
-import IconFolderPlus from "~icons/lucide/folder-plus";
 import IconX from "~icons/lucide/x";
 import { STR } from "../lib/strings";
 import type { SidebarWorkspace } from "../tabs/store";
 import type { ComposerMetrics, PendingAttachment, SessionProfileView } from "../session/store";
 import { tailName } from "./identity";
+import { WorkspaceMenu } from "../workspace/WorkspaceMenu";
 import { EffortCard } from "./EffortCard";
+import { useDismissable } from "../ui/dismissable";
 
 export type SendBlockReason = "running" | "pending" | "offline" | "no-session" | null;
 
@@ -94,9 +95,18 @@ export const Composer: Component<{
   onScreenshot?: () => void;
 }> = (props) => {
   let textarea: HTMLTextAreaElement | undefined;
+  let root: HTMLDivElement | undefined;
   const [openMenu, setOpenMenu] = createSignal<"profile" | "workspace" | "context" | "effort" | null>(null);
   const [submitting, setSubmitting] = createSignal(false);
   const [stopping, setStopping] = createSignal(false);
+
+  // 四个下拉共用一条关闭规则：点别处 / Esc 都关；点任一触发器交给它自己切换。
+  useDismissable({
+    active: () => openMenu() != null,
+    onDismiss: () => setOpenMenu(null),
+    inside: () => [root?.querySelector(".composer-menu") ?? null],
+    triggerSelector: ".composer-tool-button, .composer-context-trigger",
+  });
   createEffect(
     () => props.running(),
     (running) => {
@@ -182,7 +192,7 @@ export const Composer: Component<{
   };
 
   return (
-    <div id="composer">
+    <div id="composer" ref={(el) => { root = el; }}>
       <div class="composer-surface">
         <Show when={attachments().length > 0}>
           <div
@@ -305,38 +315,12 @@ export const Composer: Component<{
                   <IconFolder /><span>{workspaceLabel()}</span><IconChevronDown />
                 </button>
                 <Show when={openMenu() === "workspace"}>
-                  <div class="composer-menu composer-workspace-menu" role="menu">
-                    <strong>{STR.workspacePickMenu}</strong>
-                    <button
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={props.workspacePath?.() == null ? "true" : "false"}
-                      class={props.workspacePath?.() == null ? "selected" : undefined}
-                      onClick={() => { props.onWorkspace?.(null); setOpenMenu(null); }}
-                    >
-                      <span>{STR.workspaceUngrouped}</span><small>{STR.workspaceDefaultHint}</small>
-                    </button>
-                    <For each={props.workspaces?.() ?? []}>{(workspace) => (
-                      <button
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={props.workspacePath?.() === workspace.path ? "true" : "false"}
-                        class={props.workspacePath?.() === workspace.path ? "selected" : undefined}
-                        onClick={() => { props.onWorkspace?.(workspace.path); setOpenMenu(null); }}
-                      >
-                        <span>{workspace.title || tailName(workspace.path)}</span>
-                        <small class="composer-workspace-path">{workspace.path}</small>
-                      </button>
-                    )}</For>
-                    <button
-                      type="button"
-                      class="composer-menu-action"
-                      onClick={() => { setOpenMenu(null); props.onBrowseWorkspace?.(); }}
-                    >
-                      <span class="composer-workspace-browse"><IconFolderPlus />{STR.workspaceChooseFolder}</span>
-                      <small>{STR.workspaceChooseFolderHint}</small>
-                    </button>
-                  </div>
+                  <WorkspaceMenu
+                    selectedPath={props.workspacePath?.() ?? null}
+                    workspaces={props.workspaces?.() ?? []}
+                    onPick={(path) => { props.onWorkspace?.(path); setOpenMenu(null); }}
+                    onBrowse={() => { setOpenMenu(null); props.onBrowseWorkspace?.(); }}
+                  />
                 </Show>
               </div>
             </Show>

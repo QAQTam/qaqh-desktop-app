@@ -7,14 +7,7 @@
  * 3. 双击标题进入无边框原位内联重命名；支持 Enter 保存、Esc 取消。
  * 4. 「…」菜单提供重命名、复制会话 ID、复制工作区路径。
  */
-import {
-  createEffect,
-  createMemo,
-  createSignal,
-  onCleanup,
-  Show,
-  type Component,
-} from "solid-js";
+import { createMemo, createSignal, Show, type Component } from "solid-js";
 import IconFolder from "~icons/lucide/folder";
 import IconMoreHorizontal from "~icons/lucide/more-horizontal";
 import IconCopy from "~icons/lucide/copy";
@@ -23,6 +16,7 @@ import { localTitleOf, renameLocalSession, sessionCatalog, type Tab } from "../t
 import { transport } from "../lib/transport";
 import { toast } from "../ui/toast";
 import { STR } from "../lib/strings";
+import { useDismissable } from "../ui/dismissable";
 
 export interface SessionHeaderProps {
   tab: Tab;
@@ -113,22 +107,12 @@ export const SessionHeader: Component<SessionHeaderProps> = (props) => {
     }
   };
 
-  // 点击空白区域自动关闭「…」菜单
-  const handleClickOutside = (e: MouseEvent) => {
-    if (menuOpen() && menuContainerRef && !menuContainerRef.contains(e.target as Node)) {
-      setMenuOpen(false);
-    }
-  };
-
-  createEffect(
-    () => menuOpen(),
-    (open) => {
-      if (open) {
-        window.addEventListener("pointerdown", handleClickOutside);
-        onCleanup(() => window.removeEventListener("pointerdown", handleClickOutside));
-      }
-    }
-  );
+  // 点击空白区域或 Esc 关闭「…」菜单。
+  useDismissable({
+    active: () => menuOpen(),
+    onDismiss: () => setMenuOpen(false),
+    inside: () => [menuContainerRef],
+  });
 
   return (
     <header class="session-header" role="banner">

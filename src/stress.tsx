@@ -6,6 +6,7 @@
  * `transport.timelinePage` 被挂了一个内存假页,不写任何后端、不发任何命令。
  */
 import { render } from "@solidjs/web";
+import { markPlatform } from "./lib/platform";
 import { invoke } from "@tauri-apps/api/core";
 import { createSignal, Show, untrack } from "solid-js";
 import { SessionStore } from "./session/store";
@@ -35,6 +36,8 @@ import type { ApprovalView } from "./lib/transport";
 import type { Tab } from "./tabs/store";
 import type { SidebarSession, SidebarWorkspace } from "./tabs/store";
 import "./styles/app.css";
+
+markPlatform();
 
 /** 会话总回合数(权威 total_turns)。 */
 const previewParams = new URLSearchParams(window.location.search);

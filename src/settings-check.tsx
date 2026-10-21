@@ -106,6 +106,19 @@ const probe = {
  * 覆盖」的降级态真的渲染出来了。
  */
 const projectWorkspace = { id: "w1", title: "演示仓库", path: "E:/fixtures/demo-repo", order: 0 };
+
+/**
+ * `?workspaces=multi`:再挂三条与真实用户机器同形的 Windows 工作区——长盘符路径、
+ * 其中一条 title 与路径末段同名(正是「名字 + 路径」双行重复的那种)。
+ * 默认不挂:布局闸对侧栏条目数的既有断言不受影响。
+ */
+const multiWorkspaces = new URLSearchParams(window.location.search).get("workspaces") === "multi"
+  ? [
+      { id: "w2", title: "qaqh-desktop-app", path: "D:/eew/QAQHarness/qaqh-desktop-app", order: 1 },
+      { id: "w3", title: "qaqh-backend", path: "D:/eew/QAQHarness/qaqh-backend", order: 2 },
+      { id: "w4", title: "claude-desktop", path: "C:/Users/tsy3m/AppData/Local/Programs/claude-desktop", order: 3 },
+    ]
+  : [];
 const projectFs: Record<string, unknown> = {
   [projectWorkspace.path]: [
     { name: "skills", path: `${projectWorkspace.path}/skills`, is_dir: true, is_file: false },
@@ -208,7 +221,7 @@ function serviceRpc(method: string, params: Record<string, unknown>): unknown {
     case "workspace.list":
       // 裸数组(service.rs:417 `Ok(Value::Array(items))`),与 `todo.list` 的
       // `{ items }` 不同形;侧栏按数组直接 `.map`,给成对象会当场halt掉反应式系统。
-      return [projectWorkspace];
+      return [projectWorkspace, ...multiWorkspaces];
     // 项目级 skills 走 daemon 的 fs.*(宿主白名单放行,commands.rs:SERVICE_METHODS)。
     case "fs.list": {
       const entries = projectFs[String(params.path)];

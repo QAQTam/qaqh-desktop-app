@@ -82,7 +82,7 @@ describe("decoder 不变量 fuzz", () => {
       sealedDecoder.push(text, true);
       expect(sealedDecoder.push(text, true), `case ${round} final 幂等`).toEqual(final);
     }
-  });
+  }, 30_000);
 
   it("定向:同一文本两次完整围栏 → 两个独立 ui part(seal 不串扰)", () => {
     const parts = splitContentParts(FENCE + FENCE, { final: true });

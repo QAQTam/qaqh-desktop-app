@@ -38,6 +38,8 @@ const [requireBypass, setRequireBypass] = createSignal(false);
 const [bypassAck, setBypassAck] = createSignal("");
 /** 关闭时仍有未保存改动:等待「放弃/留下」二选一。 */
 const [confirmDiscard, setConfirmDiscard] = createSignal(false);
+/** 「重新读取」会覆盖草稿：有未保存改动时先确认。 */
+const [reloadPending, setReloadPending] = createSignal(false);
 
 /** 已保存事实(后端权威投影)。 */
 const [baseline, setBaseline] = createSignal<ConfigDto | null>(null);
@@ -63,6 +65,7 @@ async function fetchConfig(): Promise<void> {
     setRequireBypass(false);
     setBypassAck("");
     setConfirmDiscard(false);
+    setReloadPending(false);
   } catch (cause) {
     // ConfigDto 读模型拒绝残缺载荷(缺字段即失败),所以这里的错误文本就是
     // 「daemon 与壳版本不匹配」的真相,原样显示比兜底成空表单有用。
@@ -100,6 +103,7 @@ export async function openSettings(): Promise<void> {
 export const closeSettings = (): void => {
   setOpen(false);
   setConfirmDiscard(false);
+  setReloadPending(false);
   setRequireBypass(false);
   setBypassAck("");
 };
@@ -118,12 +122,30 @@ export function toggleSettings(): void {
   else void openSettings();
 }
 
+export function requestReload(): void {
+  if (dirty()) {
+    setReloadPending(true);
+    return;
+  }
+  void fetchConfig();
+}
+
+export function confirmReload(): void {
+  setReloadPending(false);
+  void fetchConfig();
+}
+
+export function cancelReload(): void {
+  setReloadPending(false);
+}
+
 export function discard(): void {
   const base = baseline();
   if (base != null) setDraft(structuredClone(base));
-  // 放弃编辑 = 主题回到基线值(编辑中是即时预览)。
+  // 外观偏好是即时生效的本机设置，不参与 daemon 草稿；这里只把主题同步回本机值。
   applyTheme(storedTheme());
   setConfirmDiscard(false);
+  setReloadPending(false);
   setRequireBypass(false);
   setBypassAck("");
   setError(null);
@@ -232,5 +254,5 @@ export function setExec<K extends keyof ConfigDto["exec"]>(
   setNote(null);
 }
 
-export { open, loading, busy, error, note, requireBypass, bypassAck, confirmDiscard, baseline, draft };
+export { open, loading, busy, error, note, requireBypass, bypassAck, confirmDiscard, reloadPending, baseline, draft };
 export { setConfirmDiscard, fetchConfig as reload, setBypassAck };
