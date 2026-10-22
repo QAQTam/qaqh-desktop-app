@@ -6,7 +6,7 @@
  * 这里用 Kobalte 的 Select 作为行为层（键盘、typeahead、焦点、外部点击、
  * 滚动锁定），外观完全由本仓的 Fluent token 驱动。
  */
-import { type Component } from "solid-js";
+import { createMemo, type Component } from "solid-js";
 import { Select as KSelect } from "@kobalte/core/select";
 import IconCheck from "~icons/lucide/check";
 import IconChevronDown from "~icons/lucide/chevron-down";
@@ -17,7 +17,11 @@ export type SelectOption = {
   disabled?: boolean;
 };
 
-const OptionRow: Component<{ item: { rawValue: SelectOption } }> = (props) => (
+type InternalOption = SelectOption & {
+  _key: string;
+};
+
+const OptionRow: Component<{ item: { rawValue: InternalOption } }> = (props) => (
   <KSelect.Item item={props.item as never} class="select-item">
     <span class="select-item-label">{props.item.rawValue.label}</span>
     <KSelect.ItemIndicator class="select-item-indicator">
@@ -25,6 +29,15 @@ const OptionRow: Component<{ item: { rawValue: SelectOption } }> = (props) => (
     </KSelect.ItemIndicator>
   </KSelect.Item>
 );
+
+/**
+ * 产生纯 ASCII 字母、数字、下划线及中划线的安全 DOM 选择器键名。
+ * 杜绝原值中因含双引号（如字体栈 '"PingFang SC", system-ui'）、逗号或空格而导致
+ * Kobalte 内部调用 `scrollEl.querySelector('[data-key="${manager.focusedKey()}"]')`
+ * 抛出 `DOMException: ... is not a valid selector` 致命异常导致 UI 卡死。
+ */
+export const toSafeKey = (val: string, idx: number): string =>
+  `opt-${idx}-${val.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 32)}`;
 
 export const Select: Component<{
   value: string;
@@ -40,21 +53,26 @@ export const Select: Component<{
 }> = (props) => {
   // 旧 profile / 手改 config 里可能留着不在选项表里的值：补一条同名项，
   // 避免触发器显示空白（Kobalte 找不到匹配项时不会自动回显）。
-  const options = (): SelectOption[] => {
+  // 用 createMemo 保证引用同一性，避免每次访问生成新数组触发 Kobalte 内部的响应式死循环。
+  const options = createMemo<InternalOption[]>(() => {
     const list = [...props.options];
     if (props.value !== "" && !list.some((item) => item.value === props.value)) {
       list.unshift({ value: props.value, label: props.value });
     }
-    return list;
-  };
+    return list.map((item, idx) => ({
+      ...item,
+      _key: toSafeKey(item.value, idx),
+    }));
+  });
 
-  const selected = (): SelectOption | null =>
-    props.keepPlaceholder ? null : (options().find((item) => item.value === props.value) ?? null);
+  const selected = createMemo<InternalOption | null>(() =>
+    props.keepPlaceholder ? null : (options().find((item) => item.value === props.value) ?? null)
+  );
 
   return (
-    <KSelect
+    <KSelect<InternalOption>
       options={options()}
-      optionValue="value"
+      optionValue="_key"
       optionTextValue="label"
       optionDisabled="disabled"
       value={selected()}
@@ -73,9 +91,9 @@ export const Select: Component<{
         class={`field-input select-trigger${props.class ? ` ${props.class}` : ""}`}
         aria-label={props.ariaLabel}
       >
-        <KSelect.Value>
+        <KSelect.Value<InternalOption>>
           {(state) => {
-            const option = state.selectedOption() as SelectOption | undefined;
+            const option = state.selectedOption();
             return (
               <span class="select-trigger-label" data-placeholder={option == null ? "true" : undefined}>
                 {option?.label ?? props.placeholder ?? ""}

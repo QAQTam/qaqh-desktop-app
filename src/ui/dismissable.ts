@@ -5,7 +5,7 @@
  * "点了别处/按了 Esc 就应该关" 这一条所有下拉都必须遵守的规则。之前 Composer
  * 的四个菜单完全没有这层，点外面不会关、Esc 也不会关，只能再点一次触发器。
  */
-import { createEffect, onCleanup } from "solid-js";
+import { createEffect } from "solid-js";
 
 export function useDismissable(options: {
   active: () => boolean;
@@ -43,10 +43,10 @@ export function useDismissable(options: {
       // pointerdown 吃掉（例如拖拽强度轨道）后外部点击失效。
       document.addEventListener("pointerdown", onPointerDown, true);
       document.addEventListener("keydown", onKeyDown, true);
-      onCleanup(() => {
+      return () => {
         document.removeEventListener("pointerdown", onPointerDown, true);
         document.removeEventListener("keydown", onKeyDown, true);
-      });
+      };
     },
   );
 }

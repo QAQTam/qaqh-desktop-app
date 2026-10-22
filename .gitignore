@@ -1,5 +1,6 @@
 node_modules/
 out/
+.tmp/
 target/
 
 # agent 工具目录（plan 产物），不入库

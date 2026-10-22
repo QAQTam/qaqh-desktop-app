@@ -102,14 +102,29 @@ if (systemDark != null) {
 
 export const resolvedTheme = resolved;
 
-export type ThemePreset = "default" | "liquid-glass";
+export type ThemePreset = "default" | "liquid-glass" | "zen-console";
+
+export interface ThemePresetOption {
+  value: ThemePreset;
+  label: string;
+  desc?: string;
+}
+
+export const THEME_PRESET_OPTIONS: readonly ThemePresetOption[] = [
+  { value: "default", label: "跟随系统 / 经典工作台", desc: "原生平台材质与标准缓动动效" },
+  { value: "liquid-glass", label: "macOS 26 水感流体玻璃 (Liquid Glass)", desc: "大圆角、水感折射浮岛与通透光泽" },
+  { value: "zen-console", label: "Zen Console 极简工业终端 (零动效 · 显式指示流)", desc: "无动效瞬切、硬朗线框、闪动圆点状态指示灯" },
+] as const;
 
 const PRESET_STORAGE_KEY = "qaqh.theme-preset";
 
 export function storedThemePreset(): ThemePreset {
   try {
-    const val = localStorage.getItem(PRESET_STORAGE_KEY);
-    return val === "liquid-glass" ? "liquid-glass" : "default";
+    const val = localStorage.getItem(PRESET_STORAGE_KEY) as ThemePreset | null;
+    if (val && THEME_PRESET_OPTIONS.some((opt) => opt.value === val)) {
+      return val;
+    }
+    return "default";
   } catch {
     return "default";
   }
@@ -117,18 +132,30 @@ export function storedThemePreset(): ThemePreset {
 
 const [currentPreset, setCurrentPreset] = createSignal<ThemePreset>(storedThemePreset());
 
+/**
+ * 应用并切换主题预设。
+ * 纯解耦机制：切换时自动清空所有既有 `theme-*` class，并同步设置 `data-theme-preset`，
+ * 保证切换到任何主题（包括切回 default）时 100% 干净、无任何历史类名或属性残留。
+ */
 export function applyThemePreset(preset: ThemePreset): void {
   try {
     localStorage.setItem(PRESET_STORAGE_KEY, preset);
   } catch {}
   setCurrentPreset(preset);
+  if (typeof document === "undefined") return;
   const root = document.documentElement;
-  if (preset === "liquid-glass") {
-    root.dataset.themePreset = "liquid-glass";
-    root.classList.add("theme-liquid-glass");
+
+  // 1. 彻底清除所有历史主题预设类名，杜绝残留与层叠污染
+  for (const cls of Array.from(root.classList)) {
+    if (cls.startsWith("theme-")) root.classList.remove(cls);
+  }
+
+  // 2. 挂载新预设标识
+  if (preset !== "default") {
+    root.dataset.themePreset = preset;
+    root.classList.add(`theme-${preset}`);
   } else {
     delete root.dataset.themePreset;
-    root.classList.remove("theme-liquid-glass");
   }
 }
 
@@ -136,8 +163,8 @@ export const themePreset = currentPreset;
 
 if (typeof document !== "undefined") {
   const initialPreset = storedThemePreset();
-  if (initialPreset === "liquid-glass") {
-    document.documentElement.dataset.themePreset = "liquid-glass";
-    document.documentElement.classList.add("theme-liquid-glass");
+  if (initialPreset !== "default") {
+    document.documentElement.dataset.themePreset = initialPreset;
+    document.documentElement.classList.add(`theme-${initialPreset}`);
   }
 }

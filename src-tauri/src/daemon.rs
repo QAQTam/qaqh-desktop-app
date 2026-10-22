@@ -106,19 +106,15 @@ pub fn compat_problem() -> Option<Value> {
             "app_protocol_version": CONTROL_PROTOCOL_VERSION,
         }));
     }
-    // 旧 discovery 未写 channel(空)时放行,避免误杀升级前的实例。
+    // 发布通道(lane)不匹配（如 daemon dev vs 宿主 stable）：
+    // 降级为 WARNING 提示并兼容放行连接，不再作为阻断性致命错误，
+    // 确保稳定版前端与开发版 daemon 能够正常互通调试。
     if !discovery.channel.is_empty() && discovery.channel != app_channel() {
-        return Some(json!({
-            "detail": format!(
-                "发布通道(lane)不匹配(daemon {}, 宿主 {})",
-                discovery.channel, app_channel()
-            ),
-            "endpoint": discovery.endpoint,
-            "daemon_channel": discovery.channel,
-            "daemon_protocol_version": discovery.protocol_version,
-            "app_channel": app_channel(),
-            "app_protocol_version": CONTROL_PROTOCOL_VERSION,
-        }));
+        eprintln!(
+            "[qaqh-tauri] WARNING: 发布通道(lane)不匹配 (daemon: {}, 宿主: {}), 兼容放行连接",
+            discovery.channel,
+            app_channel()
+        );
     }
     None
 }

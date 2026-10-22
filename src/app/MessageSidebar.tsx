@@ -16,6 +16,19 @@ const pathName = (path: string | null | undefined): string => {
   return value.split(/[\\/]/).filter(Boolean).at(-1) ?? "未命名工作区";
 };
 
+const normalizePath = (p: string | null | undefined): string =>
+  (p ?? "").replace(/[\\/]+/g, "/").replace(/\/$/, "").toLowerCase();
+
+const sessionBelongsToWorkspace = (session: SidebarSession, workspace: SidebarWorkspace): boolean => {
+  if (session.workspace_id === workspace.id) return true;
+  if (!session.workspace_id && session.cwd && workspace.path) {
+    const sc = normalizePath(session.cwd);
+    const wp = normalizePath(workspace.path);
+    return sc === wp || sc.startsWith(`${wp}/`);
+  }
+  return false;
+};
+
 const WORKSPACE_COLLAPSED_KEY = "qaqh.sidebar.collapsed";
 
 function readStoredCollapsed(): Set<string> {
@@ -78,9 +91,9 @@ export const MessageSidebar: Component<{
       id: workspace.id,
       title: workspace.title || pathName(workspace.path),
       path: workspace.path,
-      sessions: sortSessions(sessions.filter((session) => session.workspace_id === workspace.id)),
+      sessions: sortSessions(sessions.filter((session) => sessionBelongsToWorkspace(session, workspace))),
     }));
-    const ungrouped = sessions.filter((session) => !session.workspace_id || !workspaces.some((workspace) => workspace.id === session.workspace_id));
+    const ungrouped = sessions.filter((session) => !workspaces.some((workspace) => sessionBelongsToWorkspace(session, workspace)));
     if (ungrouped.length > 0) {
       grouped.push({
         id: "__ungrouped",
@@ -135,7 +148,7 @@ export const MessageSidebar: Component<{
                     // 归属看「名录里真有这个工作区」,而不是 workspace_id 非空:
                     // 工作区被删后 id 仍留在卡片上,那种会话显示在未分组里,
                     // 再给它「移出」就成了无意义动作。
-                    const grouped = () => allWorkspaces().some((workspace) => workspace.id === session().workspace_id);
+                    const grouped = () => allWorkspaces().some((workspace) => sessionBelongsToWorkspace(session(), workspace));
                     // 活动会话的待审批快轨 (Fast path):若是当前会话且内存已有待审批挑战，优先取第一项
                     const fastApproval = () => (active() ? props.activePending?.()[0] ?? null : null);
                     // 待人响应:整行让位给弹出卡(卡体 pointer-events:none,点击仍落到会话按钮)。

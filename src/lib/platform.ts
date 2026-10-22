@@ -9,9 +9,12 @@ export function markPlatform(): void {
   if (/mac/i.test(platformStr)) {
     root.classList.add("platform-macos");
     root.dataset.platform = "macos";
-  } else {
+  } else if (/win/i.test(platformStr)) {
     root.classList.add("platform-windows");
     root.dataset.platform = "windows";
+  } else {
+    root.classList.add("platform-linux");
+    root.dataset.platform = "linux";
   }
   if ((window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ != null) {
     root.classList.add("tauri");

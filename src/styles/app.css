@@ -43,6 +43,8 @@
 
 /* 6. 主题预设 */
 @import "./themes/macos-liquid-glass.css";
+@import "./themes/zen-console.css";
 
 /* 7. 响应式适配、无障碍与工具类 */
 @import "./utilities.css";
+@import "./performance.css";

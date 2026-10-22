@@ -117,7 +117,8 @@ build-verify:
     node scripts/build-guard.mjs post
 
 # 桌面开发：契约断言 → 后端仓建 daemon(debug) → 放置 sidecar → pnpm tauri dev。
-[windows]
+
+[linux]
 desktop-dev:
     just verify-backend
     cargo build --manifest-path ../qaqh-backend/Cargo.toml -p qaqh-daemon
@@ -126,7 +127,7 @@ desktop-dev:
     pnpm tauri dev
 
 # 自包含安装包：渲染层闸 + 契约断言 + 清旧包 + daemon(release) + sidecar + tauri build + 核验。
-[windows]
+[linux]
 desktop-build: renderer-build
     just verify-backend
     cargo build --manifest-path ../qaqh-backend/Cargo.toml --release -p qaqh-daemon

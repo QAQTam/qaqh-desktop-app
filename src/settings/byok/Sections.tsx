@@ -19,7 +19,8 @@ import IconEyeOff from "~icons/lucide/eye-off";
 import { STR } from "../../lib/strings";
 import { toast } from "../../ui/toast";
 import { MASK, REASONING_EFFORTS, WIRE_PROTOCOLS } from "../patch";
-import { applyProfile, busy, deleteProfile, dirty, draft, saveProfileAs, setField } from "../store";
+import { applyProfile, baseline, busy, deleteProfile, dirty, draft, saveProfileAs, setField } from "../store";
+import type { ConfigDto } from "../../api/qaqh/ConfigDto";
 import { Field, Section, TextInput } from "../controls";
 import { Select } from "../../ui/Select";
 import { NumberInput } from "../../ui/NumberInput";
@@ -64,7 +65,17 @@ export const ByokSection: Component = () => {
   const [showKey, setShowKey] = createSignal(false);
   const [newKey, setNewKey] = createSignal("");
 
-  const config = () => draft()!;
+  const config = () => draft() ?? baseline() ?? ({
+    baseUrl: "",
+    wire: "chat",
+    model: "",
+    apiKey: "",
+    reasoningEffort: "",
+    maxTokens: 4096,
+    contextLength: 128000,
+    profiles: [],
+    activeProfile: "",
+  } as unknown as ConfigDto);
 
   /** 当前值可能不在后端允许词表里(旧配置留下的),补进选项免得下拉替用户改了值。 */
   const effortOptions = createMemo(() => {
@@ -190,7 +201,17 @@ export const ByokSection: Component = () => {
 
 export const ProfilesSection: Component = () => {
   const [profileName, setProfileName] = createSignal("");
-  const config = () => draft()!;
+  const config = () => draft() ?? baseline() ?? ({
+    baseUrl: "",
+    wire: "chat",
+    model: "",
+    apiKey: "",
+    reasoningEffort: "",
+    maxTokens: 4096,
+    contextLength: 128000,
+    profiles: [],
+    activeProfile: "",
+  } as unknown as ConfigDto);
 
   return (
     <Section

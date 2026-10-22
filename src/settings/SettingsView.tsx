@@ -17,8 +17,15 @@
 import { createEffect, createMemo, createSignal, For, onSettled, Show, type Component } from "solid-js";
 import IconRotate from "~icons/lucide/rotate-ccw";
 import { STR } from "../lib/strings";
-import { sessionMaterial, setSessionMaterial, type SessionMaterial } from "../lib/visual";
-import { applyTheme, applyThemePreset, storedTheme, themePreset, type ThemePreset } from "../lib/theme";
+import {
+  performanceMode,
+  setPerformanceMode,
+  sessionMaterial,
+  setSessionMaterial,
+  type PerformanceMode,
+  type SessionMaterial,
+} from "../lib/visual";
+import { applyTheme, applyThemePreset, storedTheme, themePreset, THEME_PRESET_OPTIONS, type ThemePreset } from "../lib/theme";
 import {
   FONT_PRESETS,
   FONT_SCALE_OPTIONS,
@@ -89,11 +96,13 @@ const FontPicker: Component<{
   presets: Array<{ label: string; value: string }>;
   onChange: (val: string) => void;
 }> = (props) => {
-  const isCustom = () => props.value !== "" && !props.presets.some((p) => p.value === props.value);
-  const options = () => [
+  const isCustom = createMemo(
+    () => props.value !== "" && !props.presets.some((p) => p.value === props.value),
+  );
+  const options = createMemo(() => [
     ...props.presets.map((opt) => ({ value: opt.value, label: opt.label })),
     { value: "__custom", label: "自定义字体名称…" },
-  ];
+  ]);
   return (
     <Field label={props.label} hint={props.hint}>
       <div style={{ display: "grid", gap: "6px" }}>
@@ -325,10 +334,7 @@ export const SettingsView: Component = () => {
                       <Select
                         value={themePreset()}
                         onChange={(value) => applyThemePreset(value as ThemePreset)}
-                        options={[
-                          { value: "default", label: "跟随系统 / 经典工作台" },
-                          { value: "liquid-glass", label: "macOS 26 水感流体玻璃 (Liquid Glass)" },
-                        ]}
+                        options={THEME_PRESET_OPTIONS}
                         ariaLabel="界面风格预设"
                       />
                     </Field>
@@ -352,6 +358,18 @@ export const SettingsView: Component = () => {
                           { value: "solid", label: "Solid（实色）" },
                         ]}
                         ariaLabel="会话标签材质"
+                      />
+                    </Field>
+                    <Field label="渲染性能模式" hint="针对受限硬件（双核CPU、弱核显）优化，自动/强制停用毛玻璃模糊与耗性能动画，避免光栅化打满CPU。">
+                      <Select
+                        value={performanceMode()}
+                        onChange={(value) => setPerformanceMode(value as PerformanceMode)}
+                        options={[
+                          { value: "auto", label: "Auto（自动：低配双核硬件默认开启）" },
+                          { value: "low", label: "Performance（低资源/极速模式：纯色实底）" },
+                          { value: "quality", label: "Quality（画质模式：保持毛玻璃滤镜）" },
+                        ]}
+                        ariaLabel="渲染性能模式"
                       />
                     </Field>
 

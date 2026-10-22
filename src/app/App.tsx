@@ -55,9 +55,7 @@ import { Composer, type SendBlockReason } from "../composer/Composer";
 import { bootModelConfig, refreshConfig } from "../composer/model-config";
 import { lanActive, refreshLanStatus, sessionWorkspaceName } from "../composer/identity";
 import { ApprovalStack } from "../approval/ApprovalCards";
-import { lazy } from "solid-js";
-// 设置页(dev 面板/图表/关于页等一大家子)只在打开设置时出现,懒加载收主包。
-const SettingsView = lazy(() => import("../settings/SettingsView").then((m) => ({ default: m.SettingsView })));
+import { SettingsView } from "../settings/SettingsView";
 import { closeDevConsole, devConsoleOpen } from "../lib/devmode";
 import {
   cancelReload,
