@@ -102,7 +102,7 @@ if (systemDark != null) {
 
 export const resolvedTheme = resolved;
 
-export type ThemePreset = "default" | "liquid-glass" | "zen-console";
+export type ThemePreset = "default" | "lite" | "liquid-glass" | "zen-console";
 
 export interface ThemePresetOption {
   value: ThemePreset;
@@ -112,6 +112,7 @@ export interface ThemePresetOption {
 
 export const THEME_PRESET_OPTIONS: readonly ThemePresetOption[] = [
   { value: "default", label: "跟随系统 / 经典工作台", desc: "原生平台材质与标准缓动动效" },
+  { value: "lite", label: "Lite 极简纯净 (纯低配 · 零动效 · 实底)", desc: "专为低配受限硬件打造：彻底停用毛玻璃与循环动效，纯净实色，CPU 零自旋" },
   { value: "liquid-glass", label: "macOS 26 水感流体玻璃 (Liquid Glass)", desc: "大圆角、水感折射浮岛与通透光泽" },
   { value: "zen-console", label: "Zen Console 极简工业终端 (零动效 · 显式指示流)", desc: "无动效瞬切、硬朗线框、闪动圆点状态指示灯" },
 ] as const;
@@ -156,6 +157,10 @@ export function applyThemePreset(preset: ThemePreset): void {
     root.classList.add(`theme-${preset}`);
   } else {
     delete root.dataset.themePreset;
+  }
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("qaqh:theme-preset", { detail: preset }));
   }
 }
 

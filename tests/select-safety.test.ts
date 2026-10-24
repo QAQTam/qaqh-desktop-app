@@ -74,4 +74,42 @@ describe("Select 组件抗异常与安全隔离测试", () => {
       el.remove();
     });
   });
+
+  it("跨平台通用交互层定义了 Select/Switch/Tooltip 的基础视觉与不透明度", async () => {
+    const fs = await import("fs/promises");
+    const path = await import("path");
+
+    const controlsCss = await fs.readFile(
+      path.resolve(__dirname, "../src/styles/components/controls.css"),
+      "utf-8"
+    );
+    const tokensBaseCss = await fs.readFile(
+      path.resolve(__dirname, "../src/styles/tokens/base.css"),
+      "utf-8"
+    );
+    const appCss = await fs.readFile(
+      path.resolve(__dirname, "../src/styles/app.css"),
+      "utf-8"
+    );
+
+    // 1. app.css 引入了通用 controls.css
+    expect(appCss).toContain('@import "./components/controls.css";');
+
+    // 2. base tokens 声明了跨平台浮层背景色与边框色（非 Windows 专有）
+    expect(tokensBaseCss).toContain("--flyout-bg: var(--surface);");
+    expect(tokensBaseCss).toContain("--stroke-control: var(--border-strong);");
+
+    // 3. 通用 controls.css 包含未加平台选择器限制的 .select-content 实体背景与容器样式，杜绝背景穿透与重叠
+    expect(controlsCss).toMatch(/\.select-content\s*\{[^}]*background:\s*var\(--flyout-bg/);
+    expect(controlsCss).toMatch(/\.select-content\s*\{[^}]*border:\s*1px solid/);
+    expect(controlsCss).toMatch(/\.select-content\s*\{[^}]*box-shadow:/);
+    expect(controlsCss).toMatch(/\.select-content\s*\{[^}]*z-index:\s*1000/);
+
+    // 4. .select-trigger 包含左右两端对齐与弹性布局
+    expect(controlsCss).toMatch(/\.select-trigger\s*\{[^}]*display:\s*flex/);
+    expect(controlsCss).toMatch(/\.select-trigger\s*\{[^}]*justify-content:\s*space-between/);
+
+    // 5. .select-item 重置焦点边框，杜绝浏览器默认 focus ring 破坏视觉
+    expect(controlsCss).toMatch(/\.select-item:focus-visible\s*\{[^}]*outline:\s*none/);
+  });
 });

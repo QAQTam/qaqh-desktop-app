@@ -15,12 +15,9 @@
     --dur-slow: 0.1s !important;
   }
 
-  html[data-perf-mode="low"] *,
-  html[data-perf-mode="low"] *::before,
-  html[data-perf-mode="low"] *::after,
-  html.perf-mode-low *,
-  html.perf-mode-low *::before,
-  html.perf-mode-low *::after {
+  /* 精准停用关键组件的毛玻璃滤镜，避免通配符选择器（*）引发的全 DOM 样式重算与布局抖动 */
+  html[data-perf-mode="low"] :is(.session-capsule, .global-nav, .message-sidebar, .session-pending-body, .diff-drawer, .card, .dev-console, .quit-dialog, .turn-deliverables-card, .approval-stack, #top),
+  html.perf-mode-low :is(.session-capsule, .global-nav, .message-sidebar, .session-pending-body, .diff-drawer, .card, .dev-console, .quit-dialog, .turn-deliverables-card, .approval-stack, #top) {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
   }
@@ -50,9 +47,36 @@
     background: var(--bg) !important;
   }
 
-  /* 停用持续发光动画，减少定时器与绘制开销 */
-  html[data-perf-mode="low"] .text-shimmer-glow,
-  html.perf-mode-low .text-shimmer-glow {
+  /* 停用持续发光与各类无限循环动画，允许 WebKitGTK/合成器挂起休眠 */
+  html[data-perf-mode="low"] :is(
+    .text-shimmer-glow,
+    .composer-live-dot,
+    .tab-dot.run,
+    .session-pending-body::before,
+    .session-pending-track,
+    .dev-live,
+    .compact-card.running .compact-card-mark,
+    .skeletonPulse,
+    .genui-pulse
+  ),
+  html.perf-mode-low :is(
+    .text-shimmer-glow,
+    .composer-live-dot,
+    .tab-dot.run,
+    .session-pending-body::before,
+    .session-pending-track,
+    .dev-live,
+    .compact-card.running .compact-card-mark,
+    .skeletonPulse,
+    .genui-pulse
+  ) {
     animation: none !important;
+    transform: none !important;
+  }
+
+  html[data-perf-mode="low"] .composer-live-dot,
+  html.perf-mode-low .composer-live-dot {
+    opacity: 1 !important;
+    box-shadow: none !important;
   }
 }

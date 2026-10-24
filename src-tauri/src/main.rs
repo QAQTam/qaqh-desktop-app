@@ -4,12 +4,11 @@
 fn main() {
     #[cfg(target_os = "linux")]
     {
-        // WebKitGTK 2.42+ 的 DMA-BUF 硬件加速渲染器在 Linux 老旧 Intel 核显(Ivy Bridge HD 2500)
-        // 配合 Mesa 驱动时存在上游缺陷：窗口缩放时显存缓冲区无法正确同步（产生黑屏边框），
-        // 且导致 WebKit 陷入 llvmpipe 软光栅死循环打满 100% CPU。
-        // 在 GTK / WebKitGTK 初始化前禁用 DMA-BUF 渲染器是 Tauri 在 Linux 老集显下的官方标准修复。
-        // Rust 2024 / rustc 1.80+ 起将修改进程环境变量标定为 unsafe fn；此处在主线程单线程启动初期设置，无并发数据竞争。
-        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        // WebKitGTK 2.42+ 的 DMA-BUF 硬件加速渲染器在现代 Linux (WebKitGTK 2.54+)
+        // 下必须默认保留，以保证基本的 GPU 合成与 View Transition 正常执行。
+        // 强制设为 1 会将硬件加速策略降级为 NEVER (2)，导致软光栅 llvmpipe 占用极高 CPU 并触发断言崩溃。
+        // 仅在用户显式设置了 QAQH_DISABLE_DMABUF 时才强设环境变量，绝不无条件默认禁用。
+        if std::env::var_os("QAQH_DISABLE_DMABUF").is_some() {
             unsafe {
                 std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
             }

@@ -64,7 +64,8 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "打开 QAQH", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "退出 QAQH…", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &separator, &quit])?;
+    let force_quit = MenuItem::with_id(app, "force_quit", "强制退出", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &separator, &quit, &force_quit])?;
     let icon = app
         .default_window_icon()
         .cloned()
@@ -79,6 +80,9 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
             "quit" => {
                 show_main_window(app);
                 let _ = app.emit("app://quit-requested", ());
+            }
+            "force_quit" => {
+                app.exit(0);
             }
             _ => {}
         })

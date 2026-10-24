@@ -512,7 +512,12 @@
     border-radius: 4px;
     color: var(--text);
     font-size: 14px;
+    cursor: default;
+    user-select: none;
+    outline: none;
   }
+  html[data-platform="windows"] .select-item:focus,
+  html[data-platform="windows"] .select-item:focus-visible { outline: none; }
   html[data-platform="windows"] .select-item[data-highlighted] { background: var(--surface-2); }
   html[data-platform="windows"] .select-item[data-disabled] { color: var(--muted); opacity: .5; }
   html[data-platform="windows"] .select-item-label {

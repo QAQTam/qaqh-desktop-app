@@ -30,6 +30,14 @@
     --diff-del-bg: #fceceb;
     --diff-del-word: #f3c6c3;
 
+    /* 交互控件与浮层语义 Token（跨平台通用默认基准） */
+    --flyout-bg: var(--surface);
+    --stroke-control: var(--border-strong);
+    --stroke-control-strong: var(--border-strong);
+    --stroke-control-disabled: color-mix(in srgb, var(--border) 60%, transparent);
+    --focus-outer: var(--focus-ring);
+    --focus-inner: var(--surface);
+
     --radius-control: 8px;
     --radius-panel: 12px;
     --radius-dialog: 16px;

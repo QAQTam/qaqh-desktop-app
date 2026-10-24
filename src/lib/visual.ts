@@ -1,5 +1,6 @@
 /** Local visual preferences. These values are intentionally separate from daemon config. */
 import { createSignal } from "solid-js";
+import { themePreset } from "./theme";
 
 export type SessionMaterial = "glass" | "solid";
 const STORAGE_KEY = "qaqh.visual.sessionMaterial";
@@ -43,6 +44,7 @@ const [sessionMaterial, setSessionMaterialSignal] = createSignal<SessionMaterial
 const [performanceMode, setPerformanceModeSignal] = createSignal<PerformanceMode>(readPerfMode());
 
 export function isLowSpecActive(): boolean {
+  if (themePreset() === "lite") return true;
   const mode = performanceMode();
   if (mode === "low") return true;
   if (mode === "quality") return false;
@@ -53,7 +55,7 @@ function applyMaterial(value: SessionMaterial): void {
   if (typeof document !== "undefined") document.documentElement.dataset.material = value;
 }
 
-function applyPerfMode(): void {
+export function applyPerfMode(): void {
   if (typeof document === "undefined") return;
   const low = isLowSpecActive();
   document.documentElement.dataset.perfMode = low ? "low" : "normal";
@@ -62,6 +64,10 @@ function applyPerfMode(): void {
 
 applyMaterial(sessionMaterial());
 applyPerfMode();
+
+if (typeof window !== "undefined") {
+  window.addEventListener("qaqh:theme-preset", () => applyPerfMode());
+}
 
 export function setSessionMaterial(value: SessionMaterial): void {
   setSessionMaterialSignal(value);

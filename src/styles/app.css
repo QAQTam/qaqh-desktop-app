@@ -30,6 +30,7 @@
 @import "./components/approval.css";
 @import "./components/genui.css";
 @import "./components/settings.css";
+@import "./components/controls.css";
 @import "./components/dev-console.css";
 @import "./components/feedback.css";
 @import "./components/deliverables.css";
@@ -42,6 +43,7 @@
 @import "./components/fluent.css";
 
 /* 6. 主题预设 */
+@import "./themes/lite.css";
 @import "./themes/macos-liquid-glass.css";
 @import "./themes/zen-console.css";
 

@@ -77,7 +77,7 @@ export const Select: Component<{
       optionDisabled="disabled"
       value={selected()}
       onChange={(next) => {
-        if (next != null) props.onChange(next.value);
+        if (next != null && next.value !== props.value) props.onChange(next.value);
       }}
       placeholder={props.placeholder ?? ""}
       disabled={props.disabled}

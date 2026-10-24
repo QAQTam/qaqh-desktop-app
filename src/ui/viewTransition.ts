@@ -5,7 +5,10 @@
  * openStartup)。之前是硬切;现在旧状态快照与新状态做一次交叉淡出。
  *
  * 引擎面:WebView2(Chromium 111+)与 macOS WKWebView(Safari 18+)都支持;
- * 其余(浏览器预览的旧内核)自动退回直接更新,调用方无感。
+ * Linux 保守退回直接更新:WebKitGTK 2.54.1 在禁用 DMA-BUF/硬件加速时,
+ * 即使暴露此 API,调用也会在 FrameRenderer::graphicsLayerFactory 中触发
+ * 原生断言并杀掉渲染进程,不是 JS try/catch 能兜住的异常。
+ * 低配模式、减少动态效果与不支持 API 的引擎也直接更新。
  *
  * 关键点:`startViewTransition` 的回调是**异步**执行的(浏览器把它排到下一帧的
  * 渲染更新里),所以回调里的信号写入**不会**在本次同步代码里可见。里面用 flush()
@@ -19,8 +22,18 @@ import { flush } from "solid-js";
 type VtDocument = Document & { startViewTransition?: (update: () => void | Promise<void>) => unknown };
 
 export function withViewTransition(update: () => void): void {
+  if (typeof document === "undefined") {
+    update();
+    return;
+  }
   const doc = document as VtDocument;
-  if (typeof doc.startViewTransition !== "function") {
+  const { platform, perfMode, themePreset } = doc.documentElement.dataset;
+  // markPlatform() 在 render(<App />) 前设置平台;不要以 API 存在性推断图形后端安全。
+  if (platform === "linux"
+    || perfMode === "low"
+    || themePreset === "lite"
+    || (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches)
+    || typeof doc.startViewTransition !== "function") {
     update();
     return;
   }
